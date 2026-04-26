@@ -25,17 +25,7 @@ export function DriverLoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    // 先尝试登录,失败则注册测试账号(仅首版)
-    let { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error && error.message.toLowerCase().includes("invalid")) {
-      const { error: signUpErr } = await supabase.auth.signUp({
-        email, password,
-        options: { emailRedirectTo: `${window.location.origin}/driver` },
-      });
-      if (signUpErr) { setLoading(false); toast.error(signUpErr.message); return; }
-      const retry = await supabase.auth.signInWithPassword({ email, password });
-      error = retry.error;
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (error) { toast.error(error.message); return; }
     nav({ to: "/driver" });
