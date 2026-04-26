@@ -100,7 +100,7 @@ export function DriverStepPage() {
       if (weighTicketUrl) update.weigh_ticket_url = weighTicketUrl;
       if (weight) update.weight_kg = parseFloat(weight);
       if (dumpSite) update.dump_site = dumpSite.trim();
-      const { error } = await supabase.from("job_steps").update(update).eq("id", stepId);
+      const { error } = await supabase.from("job_steps").update(update as any).eq("id", stepId);
       if (error) throw error;
     },
     onSuccess: () => {
