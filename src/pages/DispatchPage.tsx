@@ -781,6 +781,7 @@ function AssignDialog({
   const needsBin = order.type === "delivery" || order.type === "swap";
   const matchingBins = bins.filter((b) => !order.bin_size || b.size === order.bin_size);
 
+  const audit = useAudit();
   const save = useMutation({
     mutationFn: async () => {
       const seq = existingCountByDriver(driverId) + 1;
@@ -793,8 +794,25 @@ function AssignDialog({
         sequence: seq,
       });
       if (error) throw error;
+      return seq;
     },
-    onSuccess: () => { toast.success("已分配,步骤自动生成"); onDone(); },
+    onSuccess: (seq) => {
+      toast.success("已分配,步骤自动生成");
+      const bin = bins.find((b) => b.id === binId);
+      audit({
+        action: "order_assign",
+        entity_type: "order",
+        entity_id: order.id,
+        entity_label: order.order_number,
+        details: {
+          driver: driver?.name,
+          vehicle: vehicle?.name,
+          bin: bin?.bin_number,
+          sequence: seq,
+        },
+      });
+      onDone();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
