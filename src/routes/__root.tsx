@@ -1,4 +1,4 @@
-import { Outlet, Link, createRootRouteWithContext, HeadContent, Scripts } from "@tanstack/react-router";
+import { Outlet, Link, createRootRouteWithContext, HeadContent, Scripts, useRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import appCss from "../styles.css?url";
@@ -43,13 +43,18 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 function RootShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const queryClient = router.options.context.queryClient;
   return (
     <html lang="zh-CN">
       <head>
         <HeadContent />
       </head>
       <body>
-        {children}
+        <QueryClientProvider client={queryClient}>
+          {children}
+          <Toaster richColors position="top-center" />
+        </QueryClientProvider>
         <Scripts />
       </body>
     </html>
@@ -57,11 +62,5 @@ function RootShell({ children }: { children: React.ReactNode }) {
 }
 
 function RootComponent() {
-  const { queryClient } = Route.useRouteContext();
-  return (
-    <QueryClientProvider client={queryClient}>
-      <Outlet />
-      <Toaster richColors position="top-center" />
-    </QueryClientProvider>
-  );
+  return <Outlet />;
 }
