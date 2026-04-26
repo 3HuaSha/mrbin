@@ -243,5 +243,3 @@ export function CreateOrderPage() {
   );
 }
 
-// 轻量预热,避免 unused 警告(如果没用到 useQuery 可删)
-export const _ = useQuery;
