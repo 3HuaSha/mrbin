@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as StaffRouteImport } from './routes/_staff'
 import { Route as DriverIndexRouteImport } from './routes/driver.index'
 import { Route as StaffIndexRouteImport } from './routes/_staff.index'
+import { Route as StaffLoginRouteImport } from './routes/staff.login'
 import { Route as DriverLoginRouteImport } from './routes/driver.login'
 import { Route as StaffOrdersRouteImport } from './routes/_staff.orders'
 import { Route as StaffFleetRouteImport } from './routes/_staff.fleet'
@@ -32,6 +33,11 @@ const StaffIndexRoute = StaffIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => StaffRoute,
+} as any)
+const StaffLoginRoute = StaffLoginRouteImport.update({
+  id: '/staff/login',
+  path: '/staff/login',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const DriverLoginRoute = DriverLoginRouteImport.update({
   id: '/driver/login',
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/fleet': typeof StaffFleetRoute
   '/orders': typeof StaffOrdersRoute
   '/driver/login': typeof DriverLoginRoute
+  '/staff/login': typeof StaffLoginRoute
   '/driver/': typeof DriverIndexRoute
   '/driver/step/$stepId': typeof DriverStepStepIdRoute
 }
@@ -80,6 +87,7 @@ export interface FileRoutesByTo {
   '/fleet': typeof StaffFleetRoute
   '/orders': typeof StaffOrdersRoute
   '/driver/login': typeof DriverLoginRoute
+  '/staff/login': typeof StaffLoginRoute
   '/': typeof StaffIndexRoute
   '/driver': typeof DriverIndexRoute
   '/driver/step/$stepId': typeof DriverStepStepIdRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/_staff/fleet': typeof StaffFleetRoute
   '/_staff/orders': typeof StaffOrdersRoute
   '/driver/login': typeof DriverLoginRoute
+  '/staff/login': typeof StaffLoginRoute
   '/_staff/': typeof StaffIndexRoute
   '/driver/': typeof DriverIndexRoute
   '/driver/step/$stepId': typeof DriverStepStepIdRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/orders'
     | '/driver/login'
+    | '/staff/login'
     | '/driver/'
     | '/driver/step/$stepId'
   fileRoutesByTo: FileRoutesByTo
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/orders'
     | '/driver/login'
+    | '/staff/login'
     | '/'
     | '/driver'
     | '/driver/step/$stepId'
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
     | '/_staff/fleet'
     | '/_staff/orders'
     | '/driver/login'
+    | '/staff/login'
     | '/_staff/'
     | '/driver/'
     | '/driver/step/$stepId'
@@ -133,6 +145,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   StaffRoute: typeof StaffRouteWithChildren
   DriverLoginRoute: typeof DriverLoginRoute
+  StaffLoginRoute: typeof StaffLoginRoute
   DriverIndexRoute: typeof DriverIndexRoute
   DriverStepStepIdRoute: typeof DriverStepStepIdRoute
 }
@@ -159,6 +172,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof StaffIndexRouteImport
       parentRoute: typeof StaffRoute
+    }
+    '/staff/login': {
+      id: '/staff/login'
+      path: '/staff/login'
+      fullPath: '/staff/login'
+      preLoaderRoute: typeof StaffLoginRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/driver/login': {
       id: '/driver/login'
@@ -226,6 +246,7 @@ const StaffRouteWithChildren = StaffRoute._addFileChildren(StaffRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   StaffRoute: StaffRouteWithChildren,
   DriverLoginRoute: DriverLoginRoute,
+  StaffLoginRoute: StaffLoginRoute,
   DriverIndexRoute: DriverIndexRoute,
   DriverStepStepIdRoute: DriverStepStepIdRoute,
 }
