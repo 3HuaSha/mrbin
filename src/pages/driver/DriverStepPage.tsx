@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { ArrowLeft, Camera, Navigation, Phone, Loader2 } from "lucide-react";
 import { STEP_TYPE_EMOJI, STEP_TYPE_LABEL } from "@/lib/business";
 import { toast } from "sonner";
+import { useAudit } from "@/hooks/use-audit";
 
 type Step = {
   id: string;
@@ -36,7 +37,7 @@ export function DriverStepPage() {
   const { stepId } = useParams({ from: "/driver/step/$stepId" });
   const nav = useNavigate();
   const qc = useQueryClient();
-
+  const audit = useAudit();
   const [photoUrl, setPhotoUrl] = useState("");
   const [binNumber, setBinNumber] = useState("");
   const [oldBinNumber, setOldBinNumber] = useState("");
@@ -105,6 +106,19 @@ export function DriverStepPage() {
     },
     onSuccess: () => {
       toast.success("步骤已完成 ✅");
+      audit({
+        action: "step_complete",
+        entity_type: "job_step",
+        entity_id: stepId,
+        entity_label: `${step?.dispatch_assignments?.orders?.order_number ?? ""} 步骤${step?.step_number ?? ""}`,
+        details: {
+          step_type: step?.step_type,
+          bin: binNumber || undefined,
+          old_bin: oldBinNumber || undefined,
+          weight_kg: weight ? parseFloat(weight) : undefined,
+          dump_site: dumpSite || undefined,
+        },
+      });
       qc.invalidateQueries({ queryKey: ["driver-steps"] });
       nav({ to: "/driver" });
     },

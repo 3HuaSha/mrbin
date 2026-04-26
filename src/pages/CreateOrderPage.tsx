@@ -9,6 +9,7 @@ import { ORDER_TYPES, BIN_SIZES, TIME_WINDOWS, todayISO, tomorrowISO, formatPhon
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
+import { useAudit } from "@/hooks/use-audit";
 
 type OrderType = (typeof ORDER_TYPES)[number]["value"];
 type BinSize = (typeof BIN_SIZES)[number];
@@ -32,6 +33,7 @@ export function CreateOrderPage() {
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [lastCreated, setLastCreated] = useState<string | null>(null);
   const qc = useQueryClient();
+  const audit = useAudit();
 
   const submit = useMutation({
     mutationFn: async (payload: typeof form) => {
@@ -48,13 +50,20 @@ export function CreateOrderPage() {
         customer_notes: payload.customer_notes.trim() || null,
         netsuite_order_id: payload.netsuite_order_id.trim() || null,
       };
-      const { data, error } = await supabase.from("orders").insert(insertPayload).select("order_number").single();
+      const { data, error } = await supabase.from("orders").insert(insertPayload).select("id,order_number,type,address,customer_name").single();
       if (error) throw error;
-      return data.order_number as string;
+      return data;
     },
-    onSuccess: (orderNumber) => {
-      setLastCreated(orderNumber);
-      toast.success(`订单 ${orderNumber} 已创建`);
+    onSuccess: (created) => {
+      setLastCreated(created.order_number);
+      toast.success(`订单 ${created.order_number} 已创建`);
+      audit({
+        action: "order_create",
+        entity_type: "order",
+        entity_id: created.id,
+        entity_label: created.order_number,
+        details: { type: created.type, address: created.address, customer: created.customer_name },
+      });
       const lastType = form.type;
       setForm(empty(lastType));
       setErrors({});

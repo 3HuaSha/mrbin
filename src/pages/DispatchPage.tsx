@@ -33,6 +33,7 @@ import {
   SortableContext, useSortable, verticalListSortingStrategy, arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useAudit } from "@/hooks/use-audit";
 
 type Order = {
   id: string;
@@ -106,6 +107,7 @@ const cardId = {
 
 export function DispatchPage() {
   const qc = useQueryClient();
+  const audit = useAudit();
   const [date, setDate] = useState(todayISO());
   const [assignDialog, setAssignDialog] = useState<{ order: Order; driverId: string } | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -179,11 +181,22 @@ export function DispatchPage() {
   // ============ Mutations ============
   const removeAssignment = useMutation({
     mutationFn: async (id: string) => {
+      const asg = assignments.find((a) => a.id === id);
       const { error } = await supabase.from("dispatch_assignments").delete().eq("id", id);
       if (error) throw error;
+      return asg;
     },
-    onSuccess: () => {
+    onSuccess: (asg) => {
       toast.success("已取消分配");
+      if (asg) {
+        audit({
+          action: "order_unassign",
+          entity_type: "order",
+          entity_id: asg.order_id,
+          entity_label: asg.orders.order_number,
+          details: { driver_id: asg.driver_id, vehicle_id: asg.vehicle_id },
+        });
+      }
       qc.invalidateQueries({ queryKey: ["dispatch-assignments", date] });
       qc.invalidateQueries({ queryKey: ["dispatch-orders", date] });
       qc.invalidateQueries({ queryKey: ["bins-depot"] });
@@ -768,6 +781,7 @@ function AssignDialog({
   const needsBin = order.type === "delivery" || order.type === "swap";
   const matchingBins = bins.filter((b) => !order.bin_size || b.size === order.bin_size);
 
+  const audit = useAudit();
   const save = useMutation({
     mutationFn: async () => {
       const seq = existingCountByDriver(driverId) + 1;
@@ -780,8 +794,25 @@ function AssignDialog({
         sequence: seq,
       });
       if (error) throw error;
+      return seq;
     },
-    onSuccess: () => { toast.success("已分配,步骤自动生成"); onDone(); },
+    onSuccess: (seq) => {
+      toast.success("已分配,步骤自动生成");
+      const bin = bins.find((b) => b.id === binId);
+      audit({
+        action: "order_assign",
+        entity_type: "order",
+        entity_id: order.id,
+        entity_label: order.order_number,
+        details: {
+          driver: driver?.name,
+          vehicle: vehicle?.name,
+          bin: bin?.bin_number,
+          sequence: seq,
+        },
+      });
+      onDone();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 

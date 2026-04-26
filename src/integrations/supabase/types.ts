@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_logs: {
+        Row: {
+          action: string
+          actor_id: string | null
+          actor_name: string | null
+          actor_role: string | null
+          details: Json | null
+          entity_id: string | null
+          entity_label: string | null
+          entity_type: string
+          id: string
+          recorded_at: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          actor_name?: string | null
+          actor_role?: string | null
+          details?: Json | null
+          entity_id?: string | null
+          entity_label?: string | null
+          entity_type: string
+          id?: string
+          recorded_at?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          actor_name?: string | null
+          actor_role?: string | null
+          details?: Json | null
+          entity_id?: string | null
+          entity_label?: string | null
+          entity_type?: string
+          id?: string
+          recorded_at?: string | null
+        }
+        Relationships: []
+      }
       bin_history: {
         Row: {
           bin_id: string
@@ -163,6 +202,54 @@ export type Database = {
           },
         ]
       }
+      driver_locations: {
+        Row: {
+          driver_id: string
+          heading: number | null
+          id: string
+          lat: number
+          lng: number
+          recorded_at: string | null
+          speed_kmh: number | null
+          vehicle_id: string | null
+        }
+        Insert: {
+          driver_id: string
+          heading?: number | null
+          id?: string
+          lat: number
+          lng: number
+          recorded_at?: string | null
+          speed_kmh?: number | null
+          vehicle_id?: string | null
+        }
+        Update: {
+          driver_id?: string
+          heading?: number | null
+          id?: string
+          lat?: number
+          lng?: number
+          recorded_at?: string | null
+          speed_kmh?: number | null
+          vehicle_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "driver_locations_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "driver_locations_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_steps: {
         Row: {
           assignment_id: string
@@ -293,6 +380,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          auth_user_id: string | null
           created_at: string | null
           email: string | null
           id: string
@@ -303,6 +391,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          auth_user_id?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
@@ -313,6 +402,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          auth_user_id?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
@@ -321,6 +411,27 @@ export type Database = {
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
         }
         Relationships: []
       }
@@ -363,8 +474,16 @@ export type Database = {
     }
     Functions: {
       generate_order_number: { Args: { svc_date: string }; Returns: string }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
+      app_role: "admin" | "dispatcher" | "driver"
       bin_event: "delivered" | "picked_up" | "swapped_out" | "swapped_in"
       bin_size: "14" | "20" | "40"
       bin_status: "depot" | "in_transit" | "on_site" | "full"
@@ -511,6 +630,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      app_role: ["admin", "dispatcher", "driver"],
       bin_event: ["delivered", "picked_up", "swapped_out", "swapped_in"],
       bin_size: ["14", "20", "40"],
       bin_status: ["depot", "in_transit", "on_site", "full"],

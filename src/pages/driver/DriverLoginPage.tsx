@@ -7,13 +7,10 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Truck } from "lucide-react";
 
-const TEST_EMAIL = "driver@kennedy.test";
-const TEST_PASSWORD = "driver123";
-
 export function DriverLoginPage() {
   const nav = useNavigate();
-  const [email, setEmail] = useState(TEST_EMAIL);
-  const [password, setPassword] = useState(TEST_PASSWORD);
+  const [email, setEmail] = useState("driver1@kennedy.test");
+  const [password, setPassword] = useState("driver123");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -53,9 +50,10 @@ export function DriverLoginPage() {
           <Button type="submit" disabled={loading} className="w-full h-12 text-base">
             {loading ? "登录中..." : "登录"}
           </Button>
-          <p className="text-xs text-muted-foreground text-center pt-2">
-            首版共享测试账号已预填<br/>{TEST_EMAIL}
-          </p>
+          <div className="text-xs text-muted-foreground text-center pt-2 space-y-0.5">
+            <div>测试账号(密码 driver123):</div>
+            <div className="font-mono">driver1@kennedy.test ~ driver5@kennedy.test</div>
+          </div>
         </form>
       </div>
     </div>

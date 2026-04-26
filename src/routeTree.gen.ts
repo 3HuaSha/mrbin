@@ -12,11 +12,16 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as StaffRouteImport } from './routes/_staff'
 import { Route as DriverIndexRouteImport } from './routes/driver.index'
 import { Route as StaffIndexRouteImport } from './routes/_staff.index'
+import { Route as StaffLoginRouteImport } from './routes/staff.login'
 import { Route as DriverLoginRouteImport } from './routes/driver.login'
+import { Route as StaffUsersRouteImport } from './routes/_staff.users'
+import { Route as StaffReportsRouteImport } from './routes/_staff.reports'
 import { Route as StaffOrdersRouteImport } from './routes/_staff.orders'
+import { Route as StaffMapRouteImport } from './routes/_staff.map'
 import { Route as StaffFleetRouteImport } from './routes/_staff.fleet'
 import { Route as StaffDispatchRouteImport } from './routes/_staff.dispatch'
 import { Route as StaffBinsRouteImport } from './routes/_staff.bins'
+import { Route as StaffAuditRouteImport } from './routes/_staff.audit'
 import { Route as DriverStepStepIdRouteImport } from './routes/driver.step.$stepId'
 
 const StaffRoute = StaffRouteImport.update({
@@ -33,14 +38,34 @@ const StaffIndexRoute = StaffIndexRouteImport.update({
   path: '/',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffLoginRoute = StaffLoginRouteImport.update({
+  id: '/staff/login',
+  path: '/staff/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DriverLoginRoute = DriverLoginRouteImport.update({
   id: '/driver/login',
   path: '/driver/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StaffUsersRoute = StaffUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => StaffRoute,
+} as any)
+const StaffReportsRoute = StaffReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => StaffRoute,
+} as any)
 const StaffOrdersRoute = StaffOrdersRouteImport.update({
   id: '/orders',
   path: '/orders',
+  getParentRoute: () => StaffRoute,
+} as any)
+const StaffMapRoute = StaffMapRouteImport.update({
+  id: '/map',
+  path: '/map',
   getParentRoute: () => StaffRoute,
 } as any)
 const StaffFleetRoute = StaffFleetRouteImport.update({
@@ -58,6 +83,11 @@ const StaffBinsRoute = StaffBinsRouteImport.update({
   path: '/bins',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffAuditRoute = StaffAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => StaffRoute,
+} as any)
 const DriverStepStepIdRoute = DriverStepStepIdRouteImport.update({
   id: '/driver/step/$stepId',
   path: '/driver/step/$stepId',
@@ -66,20 +96,30 @@ const DriverStepStepIdRoute = DriverStepStepIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof StaffIndexRoute
+  '/audit': typeof StaffAuditRoute
   '/bins': typeof StaffBinsRoute
   '/dispatch': typeof StaffDispatchRoute
   '/fleet': typeof StaffFleetRoute
+  '/map': typeof StaffMapRoute
   '/orders': typeof StaffOrdersRoute
+  '/reports': typeof StaffReportsRoute
+  '/users': typeof StaffUsersRoute
   '/driver/login': typeof DriverLoginRoute
+  '/staff/login': typeof StaffLoginRoute
   '/driver/': typeof DriverIndexRoute
   '/driver/step/$stepId': typeof DriverStepStepIdRoute
 }
 export interface FileRoutesByTo {
+  '/audit': typeof StaffAuditRoute
   '/bins': typeof StaffBinsRoute
   '/dispatch': typeof StaffDispatchRoute
   '/fleet': typeof StaffFleetRoute
+  '/map': typeof StaffMapRoute
   '/orders': typeof StaffOrdersRoute
+  '/reports': typeof StaffReportsRoute
+  '/users': typeof StaffUsersRoute
   '/driver/login': typeof DriverLoginRoute
+  '/staff/login': typeof StaffLoginRoute
   '/': typeof StaffIndexRoute
   '/driver': typeof DriverIndexRoute
   '/driver/step/$stepId': typeof DriverStepStepIdRoute
@@ -87,11 +127,16 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_staff': typeof StaffRouteWithChildren
+  '/_staff/audit': typeof StaffAuditRoute
   '/_staff/bins': typeof StaffBinsRoute
   '/_staff/dispatch': typeof StaffDispatchRoute
   '/_staff/fleet': typeof StaffFleetRoute
+  '/_staff/map': typeof StaffMapRoute
   '/_staff/orders': typeof StaffOrdersRoute
+  '/_staff/reports': typeof StaffReportsRoute
+  '/_staff/users': typeof StaffUsersRoute
   '/driver/login': typeof DriverLoginRoute
+  '/staff/login': typeof StaffLoginRoute
   '/_staff/': typeof StaffIndexRoute
   '/driver/': typeof DriverIndexRoute
   '/driver/step/$stepId': typeof DriverStepStepIdRoute
@@ -100,31 +145,46 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/audit'
     | '/bins'
     | '/dispatch'
     | '/fleet'
+    | '/map'
     | '/orders'
+    | '/reports'
+    | '/users'
     | '/driver/login'
+    | '/staff/login'
     | '/driver/'
     | '/driver/step/$stepId'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/audit'
     | '/bins'
     | '/dispatch'
     | '/fleet'
+    | '/map'
     | '/orders'
+    | '/reports'
+    | '/users'
     | '/driver/login'
+    | '/staff/login'
     | '/'
     | '/driver'
     | '/driver/step/$stepId'
   id:
     | '__root__'
     | '/_staff'
+    | '/_staff/audit'
     | '/_staff/bins'
     | '/_staff/dispatch'
     | '/_staff/fleet'
+    | '/_staff/map'
     | '/_staff/orders'
+    | '/_staff/reports'
+    | '/_staff/users'
     | '/driver/login'
+    | '/staff/login'
     | '/_staff/'
     | '/driver/'
     | '/driver/step/$stepId'
@@ -133,6 +193,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   StaffRoute: typeof StaffRouteWithChildren
   DriverLoginRoute: typeof DriverLoginRoute
+  StaffLoginRoute: typeof StaffLoginRoute
   DriverIndexRoute: typeof DriverIndexRoute
   DriverStepStepIdRoute: typeof DriverStepStepIdRoute
 }
@@ -160,6 +221,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffIndexRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/staff/login': {
+      id: '/staff/login'
+      path: '/staff/login'
+      fullPath: '/staff/login'
+      preLoaderRoute: typeof StaffLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/driver/login': {
       id: '/driver/login'
       path: '/driver/login'
@@ -167,11 +235,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DriverLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_staff/users': {
+      id: '/_staff/users'
+      path: '/users'
+      fullPath: '/users'
+      preLoaderRoute: typeof StaffUsersRouteImport
+      parentRoute: typeof StaffRoute
+    }
+    '/_staff/reports': {
+      id: '/_staff/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof StaffReportsRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/_staff/orders': {
       id: '/_staff/orders'
       path: '/orders'
       fullPath: '/orders'
       preLoaderRoute: typeof StaffOrdersRouteImport
+      parentRoute: typeof StaffRoute
+    }
+    '/_staff/map': {
+      id: '/_staff/map'
+      path: '/map'
+      fullPath: '/map'
+      preLoaderRoute: typeof StaffMapRouteImport
       parentRoute: typeof StaffRoute
     }
     '/_staff/fleet': {
@@ -195,6 +284,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffBinsRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/_staff/audit': {
+      id: '/_staff/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof StaffAuditRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/driver/step/$stepId': {
       id: '/driver/step/$stepId'
       path: '/driver/step/$stepId'
@@ -206,18 +302,26 @@ declare module '@tanstack/react-router' {
 }
 
 interface StaffRouteChildren {
+  StaffAuditRoute: typeof StaffAuditRoute
   StaffBinsRoute: typeof StaffBinsRoute
   StaffDispatchRoute: typeof StaffDispatchRoute
   StaffFleetRoute: typeof StaffFleetRoute
+  StaffMapRoute: typeof StaffMapRoute
   StaffOrdersRoute: typeof StaffOrdersRoute
+  StaffReportsRoute: typeof StaffReportsRoute
+  StaffUsersRoute: typeof StaffUsersRoute
   StaffIndexRoute: typeof StaffIndexRoute
 }
 
 const StaffRouteChildren: StaffRouteChildren = {
+  StaffAuditRoute: StaffAuditRoute,
   StaffBinsRoute: StaffBinsRoute,
   StaffDispatchRoute: StaffDispatchRoute,
   StaffFleetRoute: StaffFleetRoute,
+  StaffMapRoute: StaffMapRoute,
   StaffOrdersRoute: StaffOrdersRoute,
+  StaffReportsRoute: StaffReportsRoute,
+  StaffUsersRoute: StaffUsersRoute,
   StaffIndexRoute: StaffIndexRoute,
 }
 
@@ -226,6 +330,7 @@ const StaffRouteWithChildren = StaffRoute._addFileChildren(StaffRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   StaffRoute: StaffRouteWithChildren,
   DriverLoginRoute: DriverLoginRoute,
+  StaffLoginRoute: StaffLoginRoute,
   DriverIndexRoute: DriverIndexRoute,
   DriverStepStepIdRoute: DriverStepStepIdRoute,
 }
