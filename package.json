@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "NITRO_PRESET=cloudflare-pages vite build && node move-worker.cjs",
+    "build": "NITRO_PRESET=cloudflare-pages vite build && find dist/server -name 'worker-entry-*.js' -exec cp {} dist/client/_worker.js \\;",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
