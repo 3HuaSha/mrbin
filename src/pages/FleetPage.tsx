@@ -142,31 +142,54 @@ export function FleetPage() {
   );
 }
 
+import { createStaffOrDriverUser } from "@/server/users";
+
 function AddDriverDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
   const add = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("profiles").insert({ name: name.trim(), phone: phone || null, email: email || null, role: "driver" });
-      if (error) throw error;
+      if (!email || !password) throw new Error("邮箱和密码必填，用于开通登录账号");
+      return await createStaffOrDriverUser({
+        data: {
+          name: name.trim(),
+          email: email.trim(),
+          password: password,
+          phone: phone || undefined,
+          role: "driver"
+        }
+      });
     },
-    onSuccess: () => { toast.success("已添加司机"); qc.invalidateQueries({ queryKey: ["drivers-all"] }); onClose(); },
+    onSuccess: () => { 
+      toast.success("已添加司机并开通登录账号"); 
+      qc.invalidateQueries({ queryKey: ["drivers-all"] }); 
+      onClose(); 
+    },
     onError: (e: Error) => toast.error(e.message),
   });
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>添加司机</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>添加司机并开通账号</DialogTitle></DialogHeader>
         <div className="space-y-3">
-          <div><Label>姓名</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div><Label>电话</Label><Input value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} /></div>
-          <div><Label>邮箱(用于登录关联,可选)</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="driver@kennedy.test" /></div>
+          <div><Label>姓名</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：张三" /></div>
+          <div><Label>电话</Label><Input value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} placeholder="例如：(123) 456-7890" /></div>
+          <div><Label>登录邮箱</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="driver@kennedy.test" /></div>
+          <div><Label>初始密码 (至少6位)</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="设置司机的登录密码" /></div>
+          <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
+            提示：在这里添加司机会同步在系统后台创建登录账号，司机可使用此邮箱和密码登录 PWA 端。
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={() => add.mutate()} disabled={!name.trim() || add.isPending}>添加</Button>
+          <Button onClick={() => add.mutate()} disabled={!name.trim() || !email || password.length < 6 || add.isPending}>
+            {add.isPending ? "创建中..." : "确认添加并开通"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
