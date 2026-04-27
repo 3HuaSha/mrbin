@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Search, Plus, ChevronDown, ChevronRight } from "lucide-react";
+import { Search, Plus, ChevronDown, ChevronRight, Pencil, Trash2 } from "lucide-react";
 import { BIN_SIZES } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -43,6 +43,7 @@ export function BinsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Bin | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const { data: bins = [] } = useQuery({
@@ -78,6 +79,15 @@ export function BinsPage() {
       if (error) throw error;
     },
     onSuccess: () => { toast.success("状态已更新"); qc.invalidateQueries({ queryKey: ["bins-list"] }); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteBin = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("bins").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success("已删除"); qc.invalidateQueries({ queryKey: ["bins-list"] }); },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -142,7 +152,7 @@ export function BinsPage() {
               <th className="px-3 py-2">当前地址</th>
               <th className="px-3 py-2">在外天数</th>
               <th className="px-3 py-2">最后移动</th>
-              <th className="px-3 py-2">操作</th>
+              <th className="px-3 py-2 text-right">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -154,6 +164,10 @@ export function BinsPage() {
                   bin={b} days={days} isOpen={isOpen}
                   onToggle={() => setExpanded(isOpen ? null : b.id)}
                   onChangeStatus={(s) => updateStatus.mutate({ id: b.id, status: s })}
+                  onEdit={() => setEditing(b)}
+                  onDelete={() => {
+                    if (confirm(`确定删除桶 ${b.bin_number} 吗？`)) deleteBin.mutate(b.id);
+                  }}
                 />
               );
             })}
@@ -165,13 +179,18 @@ export function BinsPage() {
       </div>
 
       {adding && <AddBinDialog onClose={() => setAdding(false)} />}
+      {editing && <EditBinDialog bin={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
 function BinRow({
-  bin, days, isOpen, onToggle, onChangeStatus,
-}: { bin: Bin; days: number; isOpen: boolean; onToggle: () => void; onChangeStatus: (s: string) => void }) {
+  bin, days, isOpen, onToggle, onChangeStatus, onEdit, onDelete,
+}: { 
+  bin: Bin; days: number; isOpen: boolean; 
+  onToggle: () => void; onChangeStatus: (s: string) => void;
+  onEdit: () => void; onDelete: () => void;
+}) {
   const dayClass = days > 30 ? "text-destructive font-bold" : days > 15 ? "text-status-progress font-semibold" : "";
   return (
     <>
@@ -183,13 +202,17 @@ function BinRow({
         <td className="px-3 py-2 max-w-[260px] truncate">{bin.current_address || "—"}</td>
         <td className={cn("px-3 py-2", dayClass)}>{days > 0 ? `${days} 天` : "—"}</td>
         <td className="px-3 py-2 text-xs text-muted-foreground">{new Date(bin.last_moved_at).toLocaleString("zh-CN")}</td>
-        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-          <Select value={bin.status} onValueChange={onChangeStatus}>
-            <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {Object.entries(STATUS_LABEL).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-end gap-1">
+            <Select value={bin.status} onValueChange={onChangeStatus}>
+              <SelectTrigger className="h-8 w-24 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(STATUS_LABEL).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={onEdit}><Pencil className="h-3.5 w-3.5" /></Button>
+            <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={onDelete}><Trash2 className="h-3.5 w-3.5" /></Button>
+          </div>
         </td>
       </tr>
       {isOpen && (
@@ -259,4 +282,40 @@ function AddBinDialog({ onClose }: { onClose: () => void }) {
       </DialogContent>
     </Dialog>
   );
+}
+
+function EditBinDialog({ bin, onClose }: { bin: Bin; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [binNumber, setBinNumber] = useState(bin.bin_number);
+  const [size, setSize] = useState<string>(bin.size);
+  const save = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("bins").update({ bin_number: binNumber.trim(), size: size as any } as any).eq("id", bin.id);
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success("已保存"); qc.invalidateQueries({ queryKey: ["bins-list"] }); onClose(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>编辑桶信息</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label>桶号</Label><Input value={binNumber} onChange={(e) => setBinNumber(e.target.value)} /></div>
+          <div>
+            <Label>尺寸</Label>
+            <Select value={size} onValueChange={setSize}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {BIN_SIZES.map((s) => <SelectItem key={s} value={s}>{s}yd</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button onClick={() => save.mutate()} disabled={!binNumber.trim() || save.isPending}>保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 }
