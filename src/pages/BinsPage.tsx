@@ -318,4 +318,6 @@ function EditBinDialog({ bin, onClose }: { bin: Bin; onClose: () => void }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
 }
+
