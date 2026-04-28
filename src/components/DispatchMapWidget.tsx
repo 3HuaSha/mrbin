@@ -201,35 +201,28 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       // 创建标签文本：车辆类型 + 驾驶员
       const labelText = driverName ? `${vehicleType} ${driverName}` : vehicleType;
       
-      // 创建自定义车辆图标
-      const iconUrl = createVehicleIcon(vehicleType);
+      // 创建自定义车辆图标（带标签）
+      const iconUrl = createVehicleIconWithLabel(vehicleType, driverName);
 
       const marker = markersRef.current[id] || new (window as any).google.maps.Marker({
         map: mapInstance.current,
         icon: {
             url: iconUrl,
-            scaledSize: new (window as any).google.maps.Size(32, 32)
-        },
-        label: {
-          text: labelText,
-          color: '#000',
-          fontSize: '11px',
-          fontWeight: 'bold',
-          className: 'vehicle-label'
+            scaledSize: new (window as any).google.maps.Size(120, 80),
+            anchor: new (window as any).google.maps.Point(60, 70) // 锚点在底部中心
         },
         zIndex: 1000
       });
 
       marker.setPosition({ lat, lng });
       
-      // 更新标签（如果司机分配改变）
-      if (marker.getLabel()?.text !== labelText) {
-        marker.setLabel({
-          text: labelText,
-          color: '#000',
-          fontSize: '11px',
-          fontWeight: 'bold',
-          className: 'vehicle-label'
+      // 更新图标（如果司机分配改变）
+      const newIconUrl = createVehicleIconWithLabel(vehicleType, driverName);
+      if (marker.getIcon()?.url !== newIconUrl) {
+        marker.setIcon({
+          url: newIconUrl,
+          scaledSize: new (window as any).google.maps.Size(120, 80),
+          anchor: new (window as any).google.maps.Point(60, 70)
         });
       }
       
@@ -406,10 +399,10 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
   );
 }
 
-// 辅助函数: 创建车辆图标
-function createVehicleIcon(vehicleType: string): string {
+// 辅助函数: 创建带标签的车辆图标
+function createVehicleIconWithLabel(vehicleType: string, driverName: string): string {
   const colors: Record<string, string> = {
-    'BIN': '#4CAF50',    // 绿色
+    'BIN': '#FFC107',    // 黄色 - 更显眼
     'FLAT': '#2196F3',   // 蓝色
     'DUMP': '#9C27B0',   // 紫色
     'PROALL': '#FF9800', // 橙色
@@ -419,10 +412,49 @@ function createVehicleIcon(vehicleType: string): string {
   };
   
   const color = colors[vehicleType] || '#795548';
-  const fill = encodeURIComponent(color);
   
-  // 创建卡车图标SVG
-  return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect x='4' y='12' width='24' height='12' rx='2' fill='%23${fill.slice(1)}' stroke='%23000' stroke-width='1'/%3E%3Ccircle cx='10' cy='24' r='3' fill='%23222'/%3E%3Ccircle cx='22' cy='24' r='3' fill='%23222'/%3E%3Crect x='6' y='6' width='20' height='6' rx='1' fill='%23${fill.slice(1)}' stroke='%23000' stroke-width='1'/%3E%3Ctext x='16' y='10' text-anchor='middle' font-size='6' font-weight='bold' fill='white'%3E${vehicleType}%3C/text%3E%3C/svg%3E`;
+  // 创建标签文本
+  const labelText = driverName ? `${vehicleType} ${driverName}` : vehicleType;
+  
+  // 估算文本宽度（每个字符约8像素，中文字符约12像素）
+  const textWidth = labelText.split('').reduce((width, char) => {
+    return width + (/[\u4e00-\u9fa5]/.test(char) ? 12 : 8);
+  }, 0);
+  const cardWidth = Math.max(textWidth + 16, 60);
+  const svgWidth = Math.max(cardWidth + 10, 120);
+  
+  // SVG 总高度：标签卡片(24) + 间距(4) + 卡车图标(32) = 60
+  const svgHeight = 80;
+  const cardX = (svgWidth - cardWidth) / 2;
+  const truckX = (svgWidth - 32) / 2;
+  
+  // 创建SVG，包含顶部标签卡片和底部卡车图标
+  const svg = `
+    <svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
+      <!-- 顶部标签卡片 -->
+      <rect x='${cardX}' y='0' width='${cardWidth}' height='24' rx='4' fill='white' stroke='${color}' stroke-width='2' opacity='0.95'/>
+      <text x='${svgWidth/2}' y='16' text-anchor='middle' font-size='12' font-weight='bold' fill='${color}' font-family='Arial, sans-serif'>${labelText}</text>
+      
+      <!-- 连接线 -->
+      <line x1='${svgWidth/2}' y1='24' x2='${svgWidth/2}' y2='28' stroke='${color}' stroke-width='2'/>
+      
+      <!-- 底部卡车图标 -->
+      <g transform='translate(${truckX}, 28)'>
+        <!-- 车身 -->
+        <rect x='4' y='12' width='24' height='12' rx='2' fill='${color}' stroke='#000' stroke-width='1.5'/>
+        <!-- 车轮 -->
+        <circle cx='10' cy='24' r='3' fill='#222' stroke='#000' stroke-width='1'/>
+        <circle cx='22' cy='24' r='3' fill='#222' stroke='#000' stroke-width='1'/>
+        <!-- 驾驶室 -->
+        <rect x='6' y='6' width='20' height='6' rx='1' fill='${color}' stroke='#000' stroke-width='1.5'/>
+        <!-- 车窗 -->
+        <rect x='8' y='7.5' width='6' height='3' rx='0.5' fill='#87CEEB' opacity='0.7'/>
+        <rect x='18' y='7.5' width='6' height='3' rx='0.5' fill='#87CEEB' opacity='0.7'/>
+      </g>
+    </svg>
+  `.trim();
+  
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 // 辅助函数: 更新订单的图标颜色
