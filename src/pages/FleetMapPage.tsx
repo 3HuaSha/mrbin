@@ -138,9 +138,19 @@ export function FleetMapPage() {
                               </span>
                               <span className="text-muted-foreground text-[10px]">{a.orders.order_number}</span>
                             </div>
-                            <div className="text-muted-foreground truncate" title={a.orders.address}>
-                              <MapPin className="h-3 w-3 inline mr-1 text-primary/50"/>
-                              {a.orders.address}
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1">
+                                <span className="text-[10px] font-semibold text-primary">尺寸:</span>
+                                <span className="text-[10px]">{a.orders.bin_size || "—"}</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-[10px] font-semibold text-primary">时段:</span>
+                                <span className="text-[10px]">{a.orders.time_window || "—"}</span>
+                              </div>
+                              <div className="text-muted-foreground truncate" title={a.orders.address}>
+                                <MapPin className="h-3 w-3 inline mr-1 text-primary/50"/>
+                                <span className="text-[10px]">{a.orders.address}</span>
+                              </div>
                             </div>
                           </div>
                         ))

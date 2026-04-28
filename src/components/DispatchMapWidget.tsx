@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
+import { supabase } from "@/integrations/supabase/client";
 
 const KENNEDY_DEPOT = { lat: 43.7568, lng: -79.2865, label: "Kennedy Depot" };
 
@@ -12,6 +13,18 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
   
   const [mapLoaded, setMapLoaded] = useState(false);
   const [samsaraLocs, setSamsaraLocs] = useState<any[]>([]);
+  
+  // 获取车辆分配信息
+  const { data: vehicleAssignments = [] } = useQuery({
+    queryKey: ["vehicle-assignments-map"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("driver_vehicle_assignments")
+        .select("driver_id, vehicle_id, profiles(name), vehicles(name)");
+      if (error) throw error;
+      return data || [];
+    },
+  });
 
   // 1. 加载 Google Maps JS 脚本 (原生方式最稳)
   useEffect(() => {
@@ -94,18 +107,61 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       const lng = truck.location?.longitude;
       if (!lat || !lng) return;
 
+      // 提取车辆类型（从名称中提取，如 BIN#1 -> BIN, FLAT#1 -> FLAT）
+      const extractVehicleType = (name: string): string => {
+        const match = name.match(/^([A-Z]+)#/);
+        return match ? match[1] : "TRUCK";
+      };
+      
+      const vehicleType = extractVehicleType(name);
+      
+      // 创建自定义车辆图标
+      const iconUrl = createVehicleIcon(vehicleType);
+
       const marker = markersRef.current[id] || new (window as any).google.maps.Marker({
         map: mapInstance.current,
         icon: {
-            url: "http://maps.google.com/mapfiles/kml/shapes/truck.png", 
-            scaledSize: new (window as any).google.maps.Size(26, 26)
+            url: iconUrl,
+            scaledSize: new (window as any).google.maps.Size(32, 32)
         },
-        label: { text: name, className: "truck-label" },
         zIndex: 1000
       });
 
       marker.setPosition({ lat, lng });
       newMarkers[id] = marker;
+      
+      // 添加点击事件显示车辆信息
+      marker.addListener('click', () => {
+        if (!infoWindowRef.current) return;
+        
+        // 查找分配给该车辆的司机
+        const assignment = vehicleAssignments.find((a: any) => {
+          // 这里需要根据车辆名称匹配
+          // 由于Samsara返回的车辆ID可能不同，我们暂时使用名称匹配
+          const vehicleName = a.vehicles?.name || "";
+          return vehicleName.includes(name) || name.includes(vehicleName);
+        });
+        
+        const driverName = assignment ? 
+          (assignment.profiles?.name || "已分配") : 
+          "未分配";
+          
+        infoWindowRef.current.setContent(`
+          <div style="padding:8px;font-size:12px;color:black;min-width:150px;">
+            <div style="font-weight:bold;font-size:14px;margin-bottom:4px;">${name}</div>
+            <div style="color:#666;margin-bottom:4px;">
+              <strong>类型:</strong> ${vehicleType}
+            </div>
+            <div style="color:#666;margin-bottom:4px;">
+              <strong>驾驶员:</strong> ${driverName}
+            </div>
+            <div style="color:#666;">
+              <strong>位置:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}
+            </div>
+          </div>
+        `);
+        infoWindowRef.current.open(mapInstance.current, marker);
+      });
     });
 
     // 绘制订单
@@ -152,12 +208,28 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
                 : "未分配";
                 
               infoWindowRef.current.setContent(`
-                <div style="padding:4px;font-size:12px;color:black;">
-                  <strong style="font-size:14px;">${order.order_number || order.id}</strong><br/>
-                  <div style="color:#666;margin:4px 0;">${order.address}</div>
-                  <div><strong>动作:</strong> ${order.typeText || order.type} ${order.bin_size || order.binSize || ''}</div>
-                  <div><strong>指派给:</strong> ${driverName}</div>
-                  ${order.customer_notes ? `<div style="color:orange;margin-top:4px;">📝 ${order.customer_notes}</div>` : ''}
+                <div style="padding:8px;font-size:12px;color:black;min-width:180px;">
+                  <div style="font-weight:bold;font-size:14px;margin-bottom:6px;color:#333;">${order.order_number || order.id}</div>
+                  <div style="margin-bottom:4px;">
+                    <span style="font-weight:bold;color:#666;">类型:</span> 
+                    <span style="color:#2196F3;margin-left:4px;">${order.typeText || order.type}</span>
+                  </div>
+                  <div style="margin-bottom:4px;">
+                    <span style="font-weight:bold;color:#666;">尺寸:</span> 
+                    <span style="color:#4CAF50;margin-left:4px;">${order.bin_size || order.binSize || '—'}</span>
+                  </div>
+                  <div style="margin-bottom:4px;">
+                    <span style="font-weight:bold;color:#666;">时段:</span> 
+                    <span style="color:#9C27B0;margin-left:4px;">${order.time_window || '—'}</span>
+                  </div>
+                  <div style="margin-bottom:6px;">
+                    <span style="font-weight:bold;color:#666;">地址:</span> 
+                    <div style="color:#333;margin-top:2px;font-size:11px;">${order.address}</div>
+                  </div>
+                  <div style="margin-bottom:4px;">
+                    <span style="font-weight:bold;color:#666;">驾驶员:</span> 
+                    <span style="color:#FF9800;margin-left:4px;">${driverName}</span>
+                  </div>
                 </div>
               `);
               infoWindowRef.current.open(mapInstance.current, marker);
@@ -183,7 +255,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       }
     });
 
-  }, [orders, assignments, samsaraLocs, drivers, mapLoaded]);
+  }, [orders, assignments, samsaraLocs, drivers, mapLoaded, vehicleAssignments]);
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   if (!apiKey) {
@@ -200,6 +272,25 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       <div id="map" ref={mapRef} className="w-full h-full bg-muted/10 min-h-[300px]"></div>
     </div>
   );
+}
+
+// 辅助函数: 创建车辆图标
+function createVehicleIcon(vehicleType: string): string {
+  const colors: Record<string, string> = {
+    'BIN': '#4CAF50',    // 绿色
+    'FLAT': '#2196F3',   // 蓝色
+    'DUMP': '#9C27B0',   // 紫色
+    'PROALL': '#FF9800', // 橙色
+    'HINO': '#F44336',   // 红色
+    'MACK': '#607D8B',   // 灰色
+    'TRUCK': '#795548'   // 棕色
+  };
+  
+  const color = colors[vehicleType] || '#795548';
+  const fill = encodeURIComponent(color);
+  
+  // 创建卡车图标SVG
+  return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect x='4' y='12' width='24' height='12' rx='2' fill='%23${fill.slice(1)}' stroke='%23000' stroke-width='1'/%3E%3Ccircle cx='10' cy='24' r='3' fill='%23222'/%3E%3Ccircle cx='22' cy='24' r='3' fill='%23222'/%3E%3Crect x='6' y='6' width='20' height='6' rx='1' fill='%23${fill.slice(1)}' stroke='%23000' stroke-width='1'/%3E%3Ctext x='16' y='10' text-anchor='middle' font-size='6' font-weight='bold' fill='white'%3E${vehicleType}%3C/text%3E%3C/svg%3E`;
 }
 
 // 辅助函数: 更新订单的图标颜色
