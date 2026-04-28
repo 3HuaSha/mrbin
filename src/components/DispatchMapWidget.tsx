@@ -13,6 +13,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
   
   const [mapLoaded, setMapLoaded] = useState(false);
   const [samsaraLocs, setSamsaraLocs] = useState<any[]>([]);
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState<Set<string>>(new Set());
   
   // 获取车辆分配信息
   const { data: vehicleAssignments = [] } = useQuery({
@@ -20,11 +21,36 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
     queryFn: async () => {
       const { data, error } = await supabase
         .from("driver_vehicle_assignments")
-        .select("driver_id, vehicle_id, profiles(name), vehicles(name)");
+        .select("driver_id, vehicle_id, profiles(name), vehicles(name, samsara_id)");
       if (error) throw error;
       return data || [];
     },
   });
+  
+  // 提取车辆类型
+  const extractVehicleType = (name: string): string => {
+    const match = name.match(/^([A-Z]+)#/);
+    return match ? match[1] : "OTHER";
+  };
+  
+  // 获取所有唯一的车辆类型
+  const vehicleTypes = Array.from(new Set(samsaraLocs.map(truck => extractVehicleType(truck.name || "")))).sort();
+  
+  // 切换车辆类型筛选
+  const toggleVehicleType = (type: string) => {
+    const newFilter = new Set(vehicleTypeFilter);
+    if (newFilter.has(type)) {
+      newFilter.delete(type);
+    } else {
+      newFilter.add(type);
+    }
+    setVehicleTypeFilter(newFilter);
+  };
+  
+  // 过滤车辆
+  const filteredVehicles = vehicleTypeFilter.size === 0 
+    ? samsaraLocs 
+    : samsaraLocs.filter(truck => vehicleTypeFilter.has(extractVehicleType(truck.name || "")));
 
   // 1. 加载 Google Maps JS 脚本 (原生方式最稳)
   useEffect(() => {
@@ -98,7 +124,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
     const newMarkers: Record<string, any> = {};
 
     // 绘制真实车辆 (直接来自 Samsara)
-    samsaraLocs.forEach(truck => {
+    filteredVehicles.forEach(truck => {
       const name = truck.name || "";
       if (!name) return;
       
@@ -107,13 +133,18 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       const lng = truck.location?.longitude;
       if (!lat || !lng) return;
 
-      // 提取车辆类型（从名称中提取，如 BIN#1 -> BIN, FLAT#1 -> FLAT）
-      const extractVehicleType = (name: string): string => {
-        const match = name.match(/^([A-Z]+)#/);
-        return match ? match[1] : "TRUCK";
-      };
-      
       const vehicleType = extractVehicleType(name);
+      
+      // 查找分配给该车辆的司机
+      const assignment = vehicleAssignments.find((a: any) => {
+        const vehicleSamsaraId = a.vehicles?.samsara_id;
+        return vehicleSamsaraId && vehicleSamsaraId === truck.id;
+      });
+      
+      const driverName = assignment ? (assignment.profiles?.name || "已分配") : "";
+      
+      // 创建标签文本：车辆类型 + 驾驶员
+      const labelText = driverName ? `${vehicleType} ${driverName}` : vehicleType;
       
       // 创建自定义车辆图标
       const iconUrl = createVehicleIcon(vehicleType);
@@ -124,44 +155,56 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
             url: iconUrl,
             scaledSize: new (window as any).google.maps.Size(32, 32)
         },
+        label: {
+          text: labelText,
+          color: '#000',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          className: 'vehicle-label'
+        },
         zIndex: 1000
       });
 
       marker.setPosition({ lat, lng });
+      
+      // 更新标签（如果司机分配改变）
+      if (marker.getLabel()?.text !== labelText) {
+        marker.setLabel({
+          text: labelText,
+          color: '#000',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          className: 'vehicle-label'
+        });
+      }
+      
       newMarkers[id] = marker;
       
       // 添加点击事件显示车辆信息
-      marker.addListener('click', () => {
-        if (!infoWindowRef.current) return;
-        
-        // 查找分配给该车辆的司机
-        const assignment = vehicleAssignments.find((a: any) => {
-          // 这里需要根据车辆名称匹配
-          // 由于Samsara返回的车辆ID可能不同，我们暂时使用名称匹配
-          const vehicleName = a.vehicles?.name || "";
-          return vehicleName.includes(name) || name.includes(vehicleName);
-        });
-        
-        const driverName = assignment ? 
-          (assignment.profiles?.name || "已分配") : 
-          "未分配";
+      if (!marker.clickListenerAdded) {
+        marker.addListener('click', () => {
+          if (!infoWindowRef.current) return;
           
-        infoWindowRef.current.setContent(`
-          <div style="padding:8px;font-size:12px;color:black;min-width:150px;">
-            <div style="font-weight:bold;font-size:14px;margin-bottom:4px;">${name}</div>
-            <div style="color:#666;margin-bottom:4px;">
-              <strong>类型:</strong> ${vehicleType}
+          const driverInfo = driverName || "未分配";
+            
+          infoWindowRef.current.setContent(`
+            <div style="padding:8px;font-size:12px;color:black;min-width:150px;">
+              <div style="font-weight:bold;font-size:14px;margin-bottom:4px;">${name}</div>
+              <div style="color:#666;margin-bottom:4px;">
+                <strong>类型:</strong> ${vehicleType}
+              </div>
+              <div style="color:#666;margin-bottom:4px;">
+                <strong>驾驶员:</strong> ${driverInfo}
+              </div>
+              <div style="color:#666;">
+                <strong>位置:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}
+              </div>
             </div>
-            <div style="color:#666;margin-bottom:4px;">
-              <strong>驾驶员:</strong> ${driverName}
-            </div>
-            <div style="color:#666;">
-              <strong>位置:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}
-            </div>
-          </div>
-        `);
-        infoWindowRef.current.open(mapInstance.current, marker);
-      });
+          `);
+          infoWindowRef.current.open(mapInstance.current, marker);
+        });
+        marker.clickListenerAdded = true;
+      }
     });
 
     // 绘制订单
@@ -184,19 +227,20 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       // 如果没有 marker，需要解析地址并创建
       if (order.address && !newMarkers[id]) {
         newMarkers[id] = "pending"; // 占位
-        geocoder.geocode({ address: order.address + ", ON, Canada" }, (results: any, status: any) => {
+        
+        console.log(`🔍 正在解析订单地址: ${order.order_number} - ${order.address}`);
+        
+        geocoder.geocode({ address: order.address + ", Toronto, ON, Canada" }, (results: any, status: any) => {
+          console.log(`📍 地址解析结果: ${order.order_number} - Status: ${status}`, results);
+          
           if (status === "OK" && results?.[0]) {
             const pos = results[0].geometry.location;
             
-            const shortAddr = (order.address || "").split(',').slice(0, 2).join(',').trim();
-            const labelText = order.type !== 'dump' ? `${order.labelTime || 'ASAP'} ${order.bin_size || order.binSize || ''} ${shortAddr}` : '';
-
             const marker = new (window as any).google.maps.Marker({
               map: mapInstance.current,
               position: pos,
-              title: order.id,
+              title: order.order_number || order.id,
               zIndex: 500,
-              label: labelText ? { text: labelText, className: "map-label" } : null,
             });
             
             updateOrderIcon(marker, order, assignments, drivers);
@@ -212,11 +256,11 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
                   <div style="font-weight:bold;font-size:14px;margin-bottom:6px;color:#333;">${order.order_number || order.id}</div>
                   <div style="margin-bottom:4px;">
                     <span style="font-weight:bold;color:#666;">类型:</span> 
-                    <span style="color:#2196F3;margin-left:4px;">${order.typeText || order.type}</span>
+                    <span style="color:#2196F3;margin-left:4px;">${order.type}</span>
                   </div>
                   <div style="margin-bottom:4px;">
                     <span style="font-weight:bold;color:#666;">尺寸:</span> 
-                    <span style="color:#4CAF50;margin-left:4px;">${order.bin_size || order.binSize || '—'}</span>
+                    <span style="color:#4CAF50;margin-left:4px;">${order.bin_size || '—'}</span>
                   </div>
                   <div style="margin-bottom:4px;">
                     <span style="font-weight:bold;color:#666;">时段:</span> 
@@ -236,6 +280,9 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
             });
             
             markersRef.current[id] = marker;
+            console.log(`✅ 订单标记已创建: ${order.order_number}`);
+          } else {
+            console.warn(`❌ 地址解析失败: ${order.order_number} - ${order.address} - Status: ${status}`);
           }
         });
       }
@@ -255,7 +302,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       }
     });
 
-  }, [orders, assignments, samsaraLocs, drivers, mapLoaded, vehicleAssignments]);
+  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments]);
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   if (!apiKey) {
@@ -269,6 +316,33 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
 
   return (
     <div className="w-full h-full relative rounded-lg border overflow-hidden">
+      {/* 车辆类型筛选器 */}
+      {vehicleTypes.length > 0 && (
+        <div className="absolute top-2 left-2 z-10 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg p-2 flex flex-wrap gap-1 max-w-md">
+          <div className="text-xs font-semibold text-gray-700 w-full mb-1">车辆筛选:</div>
+          {vehicleTypes.map(type => (
+            <button
+              key={type}
+              onClick={() => toggleVehicleType(type)}
+              className={`px-2 py-1 text-xs rounded transition-colors ${
+                vehicleTypeFilter.has(type) || vehicleTypeFilter.size === 0
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-200 text-gray-600'
+              }`}
+            >
+              {type} ({samsaraLocs.filter(v => extractVehicleType(v.name || "") === type).length})
+            </button>
+          ))}
+          {vehicleTypeFilter.size > 0 && (
+            <button
+              onClick={() => setVehicleTypeFilter(new Set())}
+              className="px-2 py-1 text-xs rounded bg-red-500 text-white"
+            >
+              清除筛选
+            </button>
+          )}
+        </div>
+      )}
       <div id="map" ref={mapRef} className="w-full h-full bg-muted/10 min-h-[300px]"></div>
     </div>
   );
