@@ -2,13 +2,22 @@
 
 ## 新增功能：司机车辆分配
 
-### 需要执行的迁移
+### ⚠️ 遇到权限问题？
 
-已创建迁移文件：`supabase/migrations/20260428000000_add_driver_vehicle_assignments.sql`
+如果遇到 `permission denied for table driver_vehicle_assignments` 错误，请使用下面的**快速修复方法**。
 
-### 如何应用到云端 Supabase
+### 🔧 快速修复方法（推荐）
 
-#### 方法 1：使用 Supabase CLI（推荐）
+1. 登录 [Supabase Dashboard](https://app.supabase.com)
+2. 选择你的项目
+3. 进入 **SQL Editor**
+4. 复制 `FIX_PERMISSIONS.sql` 文件的**完整内容**
+5. 粘贴到 SQL Editor 并点击 **Run**
+6. 查看结果，应该能看到 `open_all` 策略已创建
+
+### 标准迁移方法
+
+#### 方法 1：使用 Supabase CLI
 
 ```bash
 # 1. 确保已安装 Supabase CLI
