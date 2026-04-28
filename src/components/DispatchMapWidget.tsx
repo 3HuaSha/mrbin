@@ -496,50 +496,60 @@ function createOrderIconWithLabel(order: any): string {
   };
   const typeName = typeNames[order.type] || order.type;
   
+  // 处理地址：去掉邮编部分（例如 "L0H 1J0"）
+  const cleanAddress = (addr: string): string => {
+    if (!addr) return '';
+    // 移除加拿大邮编格式 (例如 "L0H 1J0", "M1P 2B3")
+    const withoutPostal = addr.replace(/,?\s*[A-Z]\d[A-Z]\s*\d[A-Z]\d\s*$/i, '').trim();
+    // 如果还是太长，截取前35个字符
+    return withoutPostal.length > 35 ? withoutPostal.substring(0, 35) + '...' : withoutPostal;
+  };
+  
   // 构建标签文本行
   const lines = [
     `${typeName} ${order.bin_size || ''}`,
     order.time_window || '',
-    order.address ? order.address.substring(0, 20) + (order.address.length > 20 ? '...' : '') : ''
+    cleanAddress(order.address)
   ].filter(line => line.trim());
   
-  // 计算卡片尺寸
+  // 计算卡片尺寸 - 增大字体后需要更多空间
   const maxLineWidth = Math.max(...lines.map(line => {
     return line.split('').reduce((width, char) => {
-      return width + (/[\u4e00-\u9fa5]/.test(char) ? 11 : 7);
+      return width + (/[\u4e00-\u9fa5]/.test(char) ? 13 : 8); // 增大字符宽度
     }, 0);
   }));
   
-  const cardWidth = Math.max(maxLineWidth + 12, 80);
-  const cardHeight = 14 + lines.length * 12; // 顶部padding + 每行12px
-  const svgWidth = Math.max(cardWidth + 8, 100);
-  const svgHeight = cardHeight + 30; // 卡片高度 + 图钉高度
+  const cardWidth = Math.max(maxLineWidth + 16, 100);
+  const cardHeight = 18 + lines.length * 15; // 增大行高
+  const svgWidth = Math.max(cardWidth + 10, 120);
+  const svgHeight = cardHeight + 35; // 卡片高度 + 图钉高度
   
   const cardX = (svgWidth - cardWidth) / 2;
   const pinX = svgWidth / 2;
   
-  // 生成文本行
+  // 生成文本行 - 增大字体
   let textElements = '';
   lines.forEach((line, index) => {
-    const y = 10 + index * 12;
-    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='10' font-weight='${index === 0 ? 'bold' : 'normal'}' fill='${scheme.text}' font-family='Arial, sans-serif'>${line}</text>`;
+    const y = 14 + index * 15; // 增大行间距
+    const fontSize = index === 0 ? '12' : '11'; // 第一行更大
+    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='${fontSize}' font-weight='${index === 0 ? 'bold' : 'normal'}' fill='${scheme.text}' font-family='Arial, sans-serif'>${line}</text>`;
   });
   
   // 创建SVG，包含顶部信息卡片和底部图钉
   const svg = `
     <svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
       <!-- 顶部信息卡片 -->
-      <rect x='${cardX}' y='0' width='${cardWidth}' height='${cardHeight}' rx='3' fill='${scheme.bg}' stroke='#333' stroke-width='1' opacity='0.95'/>
+      <rect x='${cardX}' y='0' width='${cardWidth}' height='${cardHeight}' rx='4' fill='${scheme.bg}' stroke='#333' stroke-width='1.5' opacity='0.95'/>
       ${textElements}
       
       <!-- 连接线 -->
-      <line x1='${pinX}' y1='${cardHeight}' x2='${pinX}' y2='${cardHeight + 5}' stroke='${scheme.pin}' stroke-width='2'/>
+      <line x1='${pinX}' y1='${cardHeight}' x2='${pinX}' y2='${cardHeight + 6}' stroke='${scheme.pin}' stroke-width='2.5'/>
       
       <!-- 底部图钉 -->
-      <g transform='translate(${pinX - 10}, ${cardHeight + 5})'>
-        <circle cx='10' cy='8' r='8' fill='${scheme.pin}' stroke='#333' stroke-width='1.5'/>
-        <circle cx='10' cy='8' r='3' fill='white' opacity='0.8'/>
-        <line x1='10' y1='16' x2='10' y2='25' stroke='${scheme.pin}' stroke-width='2.5'/>
+      <g transform='translate(${pinX - 12}, ${cardHeight + 6})'>
+        <circle cx='12' cy='10' r='10' fill='${scheme.pin}' stroke='#333' stroke-width='2'/>
+        <circle cx='12' cy='10' r='4' fill='white' opacity='0.9'/>
+        <line x1='12' y1='20' x2='12' y2='29' stroke='${scheme.pin}' stroke-width='3'/>
       </g>
     </svg>
   `.trim();
@@ -551,15 +561,21 @@ function createOrderIconWithLabel(order: any): string {
 function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: any[]) {
   const iconUrl = createOrderIconWithLabel(order);
   
+  // 处理地址
+  const cleanAddress = (addr: string): string => {
+    if (!addr) return '';
+    return addr.replace(/,?\s*[A-Z]\d[A-Z]\s*\d[A-Z]\d\s*$/i, '').trim();
+  };
+  
   // 计算图标尺寸（根据内容动态调整）
   const lines = [
     `${order.type} ${order.bin_size || ''}`,
     order.time_window || '',
-    order.address ? order.address.substring(0, 20) : ''
+    cleanAddress(order.address)
   ].filter(line => line.trim());
   
-  const height = 14 + lines.length * 12 + 30;
-  const width = 100;
+  const height = 18 + lines.length * 15 + 35;
+  const width = 120;
   
   marker.setIcon({
     url: iconUrl,
