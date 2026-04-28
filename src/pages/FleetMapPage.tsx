@@ -81,31 +81,25 @@ export function FleetMapPage() {
   }, [assignments]);
 
   return (
-    <div className="p-4 h-screen flex flex-col space-y-4">
-      <header className="flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold">实时车队地图</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            显示司机最新位置和今日任务路线
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="h-9 px-3 rounded-md border bg-background text-sm"
-          />
-        </div>
-      </header>
-
-      <div className="flex-1 flex gap-4 min-h-0">
-        {/* 左侧司机任务列表 */}
-        <Card className="w-80 flex flex-col overflow-hidden shrink-0 shadow-sm">
+    <div className="p-0 h-screen flex flex-col">
+      <div className="flex-1 flex min-h-0">
+        {/* 左侧司机任务列表 - 缩小宽度 */}
+        <Card className="w-64 flex flex-col overflow-hidden shrink-0 shadow-sm rounded-none border-r border-t-0 border-l-0 border-b-0">
           <div className="p-3 border-b bg-muted/20 font-semibold text-sm flex items-center gap-2 shrink-0">
             <Truck className="h-4 w-4" />
             司机任务 ({drivers.length})
           </div>
+          
+          {/* 日期选择器 - 移到左侧栏 */}
+          <div className="p-3 border-b bg-background shrink-0">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full h-9 px-3 rounded-md border bg-background text-sm"
+            />
+          </div>
+          
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {drivers.map(d => {
               const ass = driverAssignments[d.id] ?? [];
@@ -114,43 +108,37 @@ export function FleetMapPage() {
               return (
                 <div key={d.id} className="border rounded-md overflow-hidden bg-card">
                   <div 
-                    className="flex items-center justify-between p-2.5 hover:bg-muted/50 cursor-pointer transition-colors"
+                    className="flex items-center justify-between p-2 hover:bg-muted/50 cursor-pointer transition-colors"
                     onClick={() => toggleDriver(d.id)}
                   >
                     <div className="font-semibold text-sm flex items-center gap-2">
                       {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground"/> : <ChevronRight className="h-4 w-4 text-muted-foreground"/>}
                       {d.name}
                     </div>
-                    <Badge variant="secondary" className="text-xs">{ass.length} 单</Badge>
+                    <Badge variant="secondary" className="text-xs">{ass.length}</Badge>
                   </div>
                   
                   {isExpanded && (
-                    <div className="p-2 space-y-2 border-t bg-muted/10">
+                    <div className="p-2 space-y-1.5 border-t bg-muted/10">
                       {ass.length === 0 ? (
-                        <div className="text-xs text-muted-foreground text-center py-4">暂无任务</div>
+                        <div className="text-xs text-muted-foreground text-center py-3">暂无任务</div>
                       ) : (
                         ass.map((a, i) => (
-                          <div key={a.id} className="text-xs p-2.5 rounded bg-background border shadow-sm flex flex-col gap-1.5 hover:border-primary/30 transition-colors">
-                            <div className="flex items-center justify-between font-medium">
-                              <span className="flex items-center gap-1">
-                                <span className="bg-primary/10 text-primary w-4 h-4 rounded-full flex items-center justify-center text-[10px]">{i+1}</span>
-                                <span className="uppercase text-[10px] bg-muted px-1.5 py-0.5 rounded">{a.orders.type}</span>
-                              </span>
-                              <span className="text-muted-foreground text-[10px]">{a.orders.order_number}</span>
+                          <div key={a.id} className="text-xs p-2 rounded bg-background border shadow-sm flex flex-col gap-1 hover:border-primary/30 transition-colors">
+                            <div className="flex items-center gap-1.5">
+                              <span className="bg-primary/10 text-primary w-4 h-4 rounded-full flex items-center justify-center text-[10px] shrink-0">{i+1}</span>
+                              <span className="uppercase text-[10px] bg-muted px-1.5 py-0.5 rounded">{a.orders.type}</span>
                             </div>
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1">
-                                <span className="text-[10px] font-semibold text-primary">尺寸:</span>
-                                <span className="text-[10px]">{a.orders.bin_size || "—"}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-[10px] font-semibold text-primary">时段:</span>
-                                <span className="text-[10px]">{a.orders.time_window || "—"}</span>
-                              </div>
-                              <div className="text-muted-foreground truncate" title={a.orders.address}>
-                                <MapPin className="h-3 w-3 inline mr-1 text-primary/50"/>
-                                <span className="text-[10px]">{a.orders.address}</span>
-                              </div>
+                            {/* 尺寸和时段放在同一行 */}
+                            <div className="flex items-center gap-2 text-[10px]">
+                              <span className="text-muted-foreground">{a.orders.bin_size || "—"}</span>
+                              <span className="text-muted-foreground">·</span>
+                              <span className="text-muted-foreground">{a.orders.time_window || "—"}</span>
+                            </div>
+                            {/* 地址截断显示 */}
+                            <div className="text-muted-foreground truncate text-[10px]" title={a.orders.address}>
+                              <MapPin className="h-3 w-3 inline mr-1 text-primary/50"/>
+                              {a.orders.address}
                             </div>
                           </div>
                         ))
@@ -166,10 +154,10 @@ export function FleetMapPage() {
           </div>
         </Card>
 
-        {/* 右侧地图 */}
-        <Card className="flex-1 overflow-hidden shadow-sm relative">
+        {/* 右侧地图 - 移除上方白边 */}
+        <div className="flex-1 overflow-hidden relative">
            <DispatchMapWidget drivers={drivers} orders={orders} assignments={assignments} />
-        </Card>
+        </div>
       </div>
     </div>
   );

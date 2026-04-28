@@ -575,13 +575,13 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
     return streetNumber && city ? `${streetNumber}, ${city}` : addr.substring(0, 20);
   };
   
-  // 计算图标尺寸 - 增大缩放因子
+  // 计算图标尺寸 - 和车辆图标相同的缩放
   const line1 = `${order.type} ${order.bin_size || ''} ${order.time_window || ''}`.trim();
   const line2 = extractAddressShort(order.address);
   const lines = [line1, line2].filter(line => line);
   
   const baseHeight = 8 + lines.length * 14 + 35;
-  const scaleFactor = 2.5; // 放大2.5倍，让字体更清晰
+  const scaleFactor = 1.0; // 使用1.0倍，和车辆图标一样的大小
   const width = 100 * scaleFactor;
   const height = baseHeight * scaleFactor;
   
