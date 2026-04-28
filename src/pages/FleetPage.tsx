@@ -84,15 +84,25 @@ export function FleetPage() {
       
       console.log("✅ 已完成深度清理");
 
-      // 2. 准备新数据
-      const inserts = samsaraVehicles.map((v: any) => ({
-        name: v.name,
-        type: "MACK" as const,
-        plate: v.name.toUpperCase(),
-        samsara_id: v.id,
-        max_bin_size: "40",
-        is_active: true
-      }));
+      // 2. 准备新数据，并进行内部分组去重（防止 Samsara 返回重复的车牌名）
+      const uniqueInsertsMap = new Map();
+      
+      samsaraVehicles.forEach((v: any) => {
+        if (!v.name) return;
+        const plate = v.name.toUpperCase();
+        if (!uniqueInsertsMap.has(plate)) {
+          uniqueInsertsMap.set(plate, {
+            name: v.name,
+            type: "MACK" as const,
+            plate: plate,
+            samsara_id: v.id,
+            max_bin_size: "40",
+            is_active: true
+          });
+        }
+      });
+      
+      const inserts = Array.from(uniqueInsertsMap.values());
       
       // 3. 插入所有同步到的车辆
       if (inserts.length > 0) {
