@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,7 +13,25 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
   
   const [mapLoaded, setMapLoaded] = useState(false);
   const [samsaraLocs, setSamsaraLocs] = useState<any[]>([]);
-  const [vehicleTypeFilter, setVehicleTypeFilter] = useState<Set<string>>(new Set());
+  
+  // 从 localStorage 加载筛选状态
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('vehicleTypeFilter');
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  
+  // 保存筛选状态到 localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('vehicleTypeFilter', JSON.stringify(Array.from(vehicleTypeFilter)));
+    } catch (e) {
+      console.error('Failed to save filter state:', e);
+    }
+  }, [vehicleTypeFilter]);
   
   // 获取车辆分配信息（包含车辆的 type 字段）
   const { data: vehicleAssignments = [] } = useQuery({
@@ -56,21 +74,26 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
   // 获取所有唯一的车辆类型
   const vehicleTypes = Array.from(new Set(samsaraLocs.map(truck => extractVehicleType(truck.name || "")))).sort();
   
-  // 切换车辆类型筛选
+  // 切换车辆类型筛选 - 优化性能
   const toggleVehicleType = (type: string) => {
-    const newFilter = new Set(vehicleTypeFilter);
-    if (newFilter.has(type)) {
-      newFilter.delete(type);
-    } else {
-      newFilter.add(type);
-    }
-    setVehicleTypeFilter(newFilter);
+    setVehicleTypeFilter(prev => {
+      const newFilter = new Set(prev);
+      if (newFilter.has(type)) {
+        newFilter.delete(type);
+      } else {
+        newFilter.add(type);
+      }
+      return newFilter;
+    });
   };
   
-  // 过滤车辆
-  const filteredVehicles = vehicleTypeFilter.size === 0 
-    ? samsaraLocs 
-    : samsaraLocs.filter(truck => vehicleTypeFilter.has(extractVehicleType(truck.name || "")));
+  // 过滤车辆 - 使用 useMemo 优化性能
+  const filteredVehicles = useMemo(() => {
+    if (vehicleTypeFilter.size === 0) {
+      return samsaraLocs;
+    }
+    return samsaraLocs.filter(truck => vehicleTypeFilter.has(extractVehicleType(truck.name || "")));
+  }, [samsaraLocs, vehicleTypeFilter]);
 
   // 1. 加载 Google Maps JS 脚本 (原生方式最稳)
   useEffect(() => {
@@ -525,18 +548,18 @@ function createOrderIconWithLabel(order: any): string {
   }));
   
   const cardWidth = Math.max(maxLineWidth + 16, 80);
-  const cardHeight = 8 + lines.length * 14; // 顶部padding + 每行14px
+  const cardHeight = 8 + lines.length * 15; // 增大行高到15px
   const svgWidth = Math.max(cardWidth + 10, 100);
   const svgHeight = cardHeight + 35;
   
   const cardX = (svgWidth - cardWidth) / 2;
   const pinX = svgWidth / 2;
   
-  // 生成文本行 - 使用更大的字体
+  // 生成文本行 - 增大字体到12px
   let textElements = '';
   lines.forEach((line, index) => {
-    const y = 12 + index * 14;
-    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='11' font-weight='${index === 0 ? 'bold' : 'normal'}' fill='${scheme.text}' font-family='Arial, sans-serif'>${line}</text>`;
+    const y = 13 + index * 15; // 调整y位置
+    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='12' font-weight='${index === 0 ? 'bold' : 'normal'}' fill='${scheme.text}' font-family='Arial, sans-serif'>${line}</text>`;
   });
   
   // 创建SVG
