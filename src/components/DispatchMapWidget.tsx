@@ -64,7 +64,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
     let active = true;
     const fetchSamsara = async () => {
       try {
-        const SAMSARA_TOKEN = "samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke";
+        const SAMSARA_TOKEN = import.meta.env.VITE_SAMSARA_TOKEN || "samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke";
         // 这里尝试直连，如果浏览器报CORS，则需要后台中转。但我们先试着在前端直连。
         const res = await fetch('https://api.samsara.com/fleet/vehicles/locations', {
             headers: {
@@ -76,6 +76,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
            const data = await res.json();
            if (active && data.data) {
               setSamsaraLocs(data.data);
+              console.log(`✅ 获取到 ${data.data.length} 辆 Samsara 车辆`);
            }
         }
       } catch (e) {

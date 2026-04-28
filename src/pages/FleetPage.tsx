@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Power, Pencil, Trash2 } from "lucide-react";
+import { Plus, Power, Pencil, Trash2, RefreshCw } from "lucide-react";
 import { formatPhone } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -52,6 +52,51 @@ export function FleetPage() {
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["vehicles-all"] }); },
+  });
+
+  const syncSamsara = useMutation({
+    mutationFn: async () => {
+      const SAMSARA_TOKEN = import.meta.env.VITE_SAMSARA_TOKEN || "samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke";
+      const res = await fetch('https://api.samsara.com/fleet/vehicles/locations', {
+        headers: {
+          'Authorization': `Bearer ${SAMSARA_TOKEN}`,
+          'Accept': 'application/json'
+        }
+      });
+      
+      if (!res.ok) throw new Error(`Samsara API 错误: ${res.status}`);
+      
+      const data = await res.json();
+      const samsaraVehicles = data.data || [];
+      
+      // 获取现有车辆
+      const { data: existingVehicles } = await supabase.from("vehicles").select("samsara_id");
+      const existingIds = new Set(existingVehicles?.map(v => v.samsara_id).filter(Boolean) || []);
+      
+      // 添加新车辆
+      const newVehicles = samsaraVehicles.filter((v: any) => v.id && v.name && !existingIds.has(v.id));
+      
+      if (newVehicles.length > 0) {
+        const inserts = newVehicles.map((v: any) => ({
+          name: v.name,
+          type: "MACK" as const,
+          plate: v.name, // 暂时用名称作为车牌
+          samsara_id: v.id,
+          max_bin_size: "40",
+          is_active: true
+        }));
+        
+        const { error } = await supabase.from("vehicles").insert(inserts);
+        if (error) throw error;
+      }
+      
+      return { total: samsaraVehicles.length, added: newVehicles.length };
+    },
+    onSuccess: (result) => {
+      toast.success(`同步成功！共 ${result.total} 辆车，新增 ${result.added} 辆`);
+      qc.invalidateQueries({ queryKey: ["vehicles-all"] });
+    },
+    onError: (e: Error) => toast.error(`同步失败: ${e.message}`),
   });
 
   const deleteDriver = useMutation({
@@ -107,7 +152,15 @@ export function FleetPage() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold">车辆 ({vehicles.length})</h2>
-            <Button size="sm" onClick={() => setAddingVehicle(true)}><Plus className="h-4 w-4 mr-1" /> 添加车辆</Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => syncSamsara.mutate()} disabled={syncSamsara.isPending}>
+                <RefreshCw className={cn("h-4 w-4 mr-1", syncSamsara.isPending && "animate-spin")} />
+                从 Samsara 同步
+              </Button>
+              <Button size="sm" onClick={() => setAddingVehicle(true)}>
+                <Plus className="h-4 w-4 mr-1" /> 添加车辆
+              </Button>
+            </div>
           </div>
           <div className="space-y-2">
             {vehicles.map((v) => (
