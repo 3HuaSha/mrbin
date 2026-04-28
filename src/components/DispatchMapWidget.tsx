@@ -135,13 +135,48 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
 
       const vehicleType = extractVehicleType(name);
       
-      // 查找分配给该车辆的司机
-      const assignment = vehicleAssignments.find((a: any) => {
+      // 查找分配给该车辆的司机 - 使用多种匹配方式
+      let assignment = null;
+      
+      // 方法1: 通过 samsara_id 精确匹配
+      assignment = vehicleAssignments.find((a: any) => {
         const vehicleSamsaraId = a.vehicles?.samsara_id;
         return vehicleSamsaraId && vehicleSamsaraId === truck.id;
       });
       
+      // 方法2: 如果方法1失败，通过车辆名称模糊匹配
+      if (!assignment) {
+        assignment = vehicleAssignments.find((a: any) => {
+          const vehicleName = (a.vehicles?.name || "").toUpperCase();
+          const truckName = name.toUpperCase();
+          // 移除空格和特殊字符后比较
+          const cleanVehicleName = vehicleName.replace(/[^A-Z0-9]/g, '');
+          const cleanTruckName = truckName.replace(/[^A-Z0-9]/g, '');
+          return cleanVehicleName === cleanTruckName || 
+                 vehicleName.includes(truckName) || 
+                 truckName.includes(vehicleName);
+        });
+      }
+      
       const driverName = assignment ? (assignment.profiles?.name || "已分配") : "";
+      
+      // 调试日志
+      if (assignment) {
+        console.log(`✅ 车辆匹配成功: ${name} -> ${driverName}`, {
+          truckId: truck.id,
+          vehicleSamsaraId: assignment.vehicles?.samsara_id,
+          vehicleName: assignment.vehicles?.name
+        });
+      } else {
+        console.log(`❌ 车辆未匹配: ${name}`, {
+          truckId: truck.id,
+          availableAssignments: vehicleAssignments.map((a: any) => ({
+            vehicleName: a.vehicles?.name,
+            samsaraId: a.vehicles?.samsara_id,
+            driverName: a.profiles?.name
+          }))
+        });
+      }
       
       // 创建标签文本：车辆类型 + 驾驶员
       const labelText = driverName ? `${vehicleType} ${driverName}` : vehicleType;
@@ -195,6 +230,9 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
               </div>
               <div style="color:#666;margin-bottom:4px;">
                 <strong>驾驶员:</strong> ${driverInfo}
+              </div>
+              <div style="color:#666;margin-bottom:4px;">
+                <strong>Samsara ID:</strong> ${truck.id}
               </div>
               <div style="color:#666;">
                 <strong>位置:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}
