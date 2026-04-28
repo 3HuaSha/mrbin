@@ -566,15 +566,18 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
     return addr.replace(/,?\s*[A-Z]\d[A-Z]\s*\d[A-Z]\d\s*$/i, '').trim();
   };
   
-  // 计算图标尺寸（根据内容动态调整）
+  // 计算图标尺寸 - 增大到和车辆图标相似的尺寸
   const lines = [
     `${order.type} ${order.bin_size || ''}`,
     order.time_window || '',
     cleanAddress(order.address)
   ].filter(line => line.trim());
   
-  const height = 6 + lines.length * 13 + 35;
-  const width = 100;
+  // 使用更大的渲染尺寸，让字体看起来更大
+  const baseHeight = 6 + lines.length * 13 + 35;
+  const scaleFactor = 1.8; // 放大1.8倍，让字体和车辆标签一样大
+  const width = 100 * scaleFactor;
+  const height = baseHeight * scaleFactor;
   
   marker.setIcon({
     url: iconUrl,
