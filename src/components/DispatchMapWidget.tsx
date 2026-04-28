@@ -15,7 +15,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
   const [samsaraLocs, setSamsaraLocs] = useState<any[]>([]);
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<Set<string>>(new Set());
   
-  // 获取车辆分配信息
+  // 获取车辆分配信息（包含车辆的 type 字段）
   const { data: vehicleAssignments = [] } = useQuery({
     queryKey: ["vehicle-assignments-map"],
     queryFn: async () => {
@@ -25,7 +25,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
           driver_id,
           vehicle_id,
           profiles!driver_vehicle_assignments_driver_id_fkey(name),
-          vehicles!driver_vehicle_assignments_vehicle_id_fkey(name, samsara_id)
+          vehicles!driver_vehicle_assignments_vehicle_id_fkey(name, samsara_id, type)
         `);
       if (error) {
         console.error("❌ 获取车辆分配失败:", error);
@@ -179,13 +179,16 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       }
       
       const driverName = assignment ? (assignment.profiles?.name || "已分配") : "";
+      // 使用车辆的 type 字段（HINO 或 MACK），如果没有则使用提取的类型
+      const vehicleTypeName = assignment?.vehicles?.type || vehicleType;
       
       // 调试日志
       if (assignment) {
-        console.log(`✅ 车辆匹配成功: ${name} -> ${driverName}`, {
+        console.log(`✅ 车辆匹配成功: ${name} -> ${driverName} (${vehicleTypeName})`, {
           truckId: truck.id,
           vehicleSamsaraId: assignment.vehicles?.samsara_id,
-          vehicleName: assignment.vehicles?.name
+          vehicleName: assignment.vehicles?.name,
+          vehicleType: assignment.vehicles?.type
         });
       } else {
         console.log(`❌ 车辆未匹配: ${name}`, {
@@ -193,16 +196,17 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
           availableAssignments: vehicleAssignments.map((a: any) => ({
             vehicleName: a.vehicles?.name,
             samsaraId: a.vehicles?.samsara_id,
-            driverName: a.profiles?.name
+            driverName: a.profiles?.name,
+            vehicleType: a.vehicles?.type
           }))
         });
       }
       
-      // 创建标签文本：车辆类型 + 驾驶员
-      const labelText = driverName ? `${vehicleType} ${driverName}` : vehicleType;
+      // 创建标签文本：使用车辆 type (HINO/MACK) + 驾驶员
+      const labelText = driverName ? `${vehicleTypeName} ${driverName}` : vehicleTypeName;
       
-      // 创建自定义车辆图标（带标签）
-      const iconUrl = createVehicleIconWithLabel(vehicleType, driverName);
+      // 创建自定义车辆图标（带标签）- 传入 vehicleTypeName 而不是 vehicleType
+      const iconUrl = createVehicleIconWithLabel(vehicleTypeName, driverName);
 
       const marker = markersRef.current[id] || new (window as any).google.maps.Marker({
         map: mapInstance.current,
@@ -217,7 +221,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       marker.setPosition({ lat, lng });
       
       // 更新图标（如果司机分配改变）
-      const newIconUrl = createVehicleIconWithLabel(vehicleType, driverName);
+      const newIconUrl = createVehicleIconWithLabel(vehicleTypeName, driverName);
       if (marker.getIcon()?.url !== newIconUrl) {
         marker.setIcon({
           url: newIconUrl,
@@ -239,7 +243,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
             <div style="padding:8px;font-size:12px;color:black;min-width:150px;">
               <div style="font-weight:bold;font-size:14px;margin-bottom:4px;">${name}</div>
               <div style="color:#666;margin-bottom:4px;">
-                <strong>类型:</strong> ${vehicleType}
+                <strong>车型:</strong> ${vehicleTypeName}
               </div>
               <div style="color:#666;margin-bottom:4px;">
                 <strong>驾驶员:</strong> ${driverInfo}
