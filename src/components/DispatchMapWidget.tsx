@@ -59,28 +59,23 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
     });
   }, [mapLoaded]);
 
-  // 3. 直连 Samsara API
+  // 3. 通过后端 API 获取 Samsara 数据
   useEffect(() => {
     let active = true;
     const fetchSamsara = async () => {
       try {
-        const SAMSARA_TOKEN = import.meta.env.VITE_SAMSARA_TOKEN || "samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke";
-        // 这里尝试直连，如果浏览器报CORS，则需要后台中转。但我们先试着在前端直连。
-        const res = await fetch('https://api.samsara.com/fleet/vehicles/locations', {
-            headers: {
-                'Authorization': `Bearer ${SAMSARA_TOKEN}`,
-                'Accept': 'application/json'
-            }
-        });
+        const res = await fetch('/api/samsara');
         if (res.ok) {
-           const data = await res.json();
-           if (active && data.data) {
-              setSamsaraLocs(data.data);
-              console.log(`✅ 获取到 ${data.data.length} 辆 Samsara 车辆`);
+           const result = await res.json();
+           if (active && result.success && result.data) {
+              setSamsaraLocs(result.data);
+              console.log(`✅ 获取到 ${result.data.length} 辆 Samsara 车辆`);
            }
+        } else {
+          console.warn("Samsara API 返回错误:", res.status);
         }
       } catch (e) {
-        console.warn("Samsara direct fetch error (CORS?):", e);
+        console.warn("Samsara fetch error:", e);
       }
     };
     

@@ -56,18 +56,19 @@ export function FleetPage() {
 
   const syncSamsara = useMutation({
     mutationFn: async () => {
-      const SAMSARA_TOKEN = import.meta.env.VITE_SAMSARA_TOKEN || "samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke";
-      const res = await fetch('https://api.samsara.com/fleet/vehicles/locations', {
-        headers: {
-          'Authorization': `Bearer ${SAMSARA_TOKEN}`,
-          'Accept': 'application/json'
-        }
-      });
+      const res = await fetch('/api/samsara');
       
-      if (!res.ok) throw new Error(`Samsara API 错误: ${res.status}`);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || `API 错误: ${res.status}`);
+      }
       
-      const data = await res.json();
-      const samsaraVehicles = data.data || [];
+      const result = await res.json();
+      if (!result.success) {
+        throw new Error(result.error || 'API 返回失败');
+      }
+      
+      const samsaraVehicles = result.data || [];
       
       // 获取现有车辆
       const { data: existingVehicles } = await supabase.from("vehicles").select("samsara_id");
