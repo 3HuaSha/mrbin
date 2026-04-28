@@ -65,15 +65,24 @@ export function FleetPage() {
       
       const samsaraVehicles = result.data || [];
       
-      // 1. 删除现有所有车辆数据
-      // 注意：如果有派遣任务引用了这些车辆，可能会报错（外键约束）
+      // 1. 深度清理：按顺序删除受约束的数据
+      console.log("🔄 正在清理旧的派遣数据...");
+      
+      // 先删步骤 (依赖于 assignments)
+      await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+      
+      // 再删派遣记录 (依赖于 vehicles)
+      await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+      
+      // 最后删除所有车辆
       const { error: deleteError } = await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+      
       if (deleteError) {
         console.error("❌ 删除旧车辆失败:", deleteError);
         throw new Error(`清除旧数据失败: ${deleteError.message}`);
       }
       
-      console.log("✅ 已清除旧车辆数据");
+      console.log("✅ 已完成深度清理");
 
       // 2. 准备新数据
       const inserts = samsaraVehicles.map((v: any) => ({
