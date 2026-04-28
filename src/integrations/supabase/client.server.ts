@@ -6,17 +6,16 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
 function createSupabaseAdminClient() {
-  // 同时支持带 VITE_ 前缀的变量名，兼容 Cloudflare Pages 不同的环境变量配置方式
+  // SUPABASE_URL 不是密鑰，已内置为备用默认値（客户端 JS 里本来就公开）
   const SUPABASE_URL =
     process.env.SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL;
+    process.env.VITE_SUPABASE_URL ||
+    'https://gkirxxwlkimmpukvwvgb.supabase.co';
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error(
-      `Missing Supabase server environment variables. ` +
-      `SUPABASE_URL=${SUPABASE_URL ? 'OK' : 'MISSING'}, ` +
-      `SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY ? 'OK' : 'MISSING'}`
+      'Missing SUPABASE_SERVICE_ROLE_KEY. Please add it in Cloudflare Pages Settings -> Variables and Secrets.'
     );
   }
 
