@@ -22,6 +22,7 @@ export function FleetPage() {
   const [addingVehicle, setAddingVehicle] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState<string>("ALL");
 
   const { data: drivers = [] } = useQuery({
     queryKey: ["drivers-all"],
@@ -39,6 +40,20 @@ export function FleetPage() {
       return data as Vehicle[];
     },
   });
+
+  // 提取车辆类型前缀（例如 "BIN#1" -> "BIN", "FLAT#2" -> "FLAT"）
+  const extractVehiclePrefix = (name: string): string => {
+    const match = name.match(/^([A-Z]+)#/);
+    return match ? match[1] : "OTHER";
+  };
+
+  // 获取所有唯一的车辆类型
+  const vehicleTypes = ["ALL", ...Array.from(new Set(vehicles.map(v => extractVehiclePrefix(v.name)))).sort()];
+
+  // 根据筛选条件过滤车辆
+  const filteredVehicles = vehicleTypeFilter === "ALL" 
+    ? vehicles 
+    : vehicles.filter(v => extractVehiclePrefix(v.name) === vehicleTypeFilter);
 
   const toggleDriver = useMutation({
     mutationFn: async (d: Driver) => {
@@ -171,7 +186,7 @@ export function FleetPage() {
 
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">车辆 ({vehicles.length})</h2>
+            <h2 className="font-semibold">车辆 ({filteredVehicles.length}/{vehicles.length})</h2>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => syncSamsara.mutate()} disabled={syncSamsara.isPending}>
                 <RefreshCw className={cn("h-4 w-4 mr-1", syncSamsara.isPending && "animate-spin")} />
@@ -182,8 +197,24 @@ export function FleetPage() {
               </Button>
             </div>
           </div>
+          
+          {/* 车辆类型筛选器 */}
+          <div className="mb-3 flex flex-wrap gap-2">
+            {vehicleTypes.map((type) => (
+              <Button
+                key={type}
+                size="sm"
+                variant={vehicleTypeFilter === type ? "default" : "outline"}
+                onClick={() => setVehicleTypeFilter(type)}
+              >
+                {type === "ALL" ? "全部" : type}
+                {type !== "ALL" && ` (${vehicles.filter(v => extractVehiclePrefix(v.name) === type).length})`}
+              </Button>
+            ))}
+          </div>
+
           <div className="space-y-2">
-            {vehicles.map((v) => (
+            {filteredVehicles.map((v) => (
               <div key={v.id} className={cn("bg-card border rounded-lg p-3 flex items-center gap-3", !v.is_active && "opacity-50")}>
                 <div className="flex-1">
                   <div className="font-medium flex items-center gap-2">
