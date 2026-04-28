@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { json } from '@tanstack/react-start'
 
 export const Route = createFileRoute('/api/samsara')({
   loader: async () => {
@@ -17,41 +18,31 @@ export const Route = createFileRoute('/api/samsara')({
       if (!response.ok) {
         const errorText = await response.text();
         console.error('❌ Samsara API 错误:', response.status, errorText);
-        return new Response(JSON.stringify({
+        return json({
           success: false,
           error: `Samsara API Error: ${response.status} - ${errorText}`,
           data: []
-        }), {
-          status: response.status,
-          headers: { 
-            'Content-Type': 'application/json'
-          }
+        }, {
+          status: response.status as any
         });
       }
 
       const data = await response.json();
       console.log('✅ Samsara API 成功，获取到', data.data?.length || 0, '辆车');
       
-      return new Response(JSON.stringify({
+      return json({
         success: true,
         data: data.data || [],
         timestamp: new Date().toISOString()
-      }), {
-        headers: { 
-          'Content-Type': 'application/json'
-        }
       });
     } catch (error: any) {
       console.error('❌ Samsara API 异常:', error);
-      return new Response(JSON.stringify({
+      return json({
         success: false,
         error: error.message || 'Unknown error',
         data: []
-      }), {
-        status: 500,
-        headers: { 
-          'Content-Type': 'application/json'
-        }
+      }, {
+        status: 500
       });
     }
   }
