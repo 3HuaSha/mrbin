@@ -21,11 +21,31 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
     queryFn: async () => {
       const { data, error } = await supabase
         .from("driver_vehicle_assignments")
-        .select("driver_id, vehicle_id, profiles(name), vehicles(name, samsara_id)");
-      if (error) throw error;
+        .select(`
+          driver_id,
+          vehicle_id,
+          profiles!driver_vehicle_assignments_driver_id_fkey(name),
+          vehicles!driver_vehicle_assignments_vehicle_id_fkey(name, samsara_id)
+        `);
+      if (error) {
+        console.error("❌ 获取车辆分配失败:", error);
+        throw error;
+      }
+      console.log("✅ 获取到车辆分配:", data);
       return data || [];
     },
   });
+  
+  // 调试：打印车辆分配数据
+  useEffect(() => {
+    if (vehicleAssignments.length > 0) {
+      console.log("📋 车辆分配数据详情:", vehicleAssignments.map((a: any) => ({
+        driverName: a.profiles?.name,
+        vehicleName: a.vehicles?.name,
+        samsaraId: a.vehicles?.samsara_id
+      })));
+    }
+  }, [vehicleAssignments]);
   
   // 提取车辆类型
   const extractVehicleType = (name: string): string => {
