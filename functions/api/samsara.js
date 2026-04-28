@@ -1,5 +1,5 @@
 // Cloudflare Pages Function
-export async function onRequest(context: any) {
+export async function onRequest(context) {
   // 在 Cloudflare Pages 中，环境变量通过 context.env 访问
   const SAMSARA_TOKEN = context.env.SAMSARA_TOKEN || context.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke';
   
@@ -42,7 +42,7 @@ export async function onRequest(context: any) {
         'Access-Control-Allow-Origin': '*'
       }
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('❌ Samsara API 异常:', error);
     return new Response(JSON.stringify({
       success: false,
