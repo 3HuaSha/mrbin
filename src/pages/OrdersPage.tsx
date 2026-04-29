@@ -19,6 +19,7 @@ type Order = {
   order_number: string;
   type: string;
   bin_size: string | null;
+  bin_type: string | null;
   service_date: string;
   time_window: string;
   time_window_custom: string | null;
@@ -147,6 +148,7 @@ export function OrdersPage() {
               <th className="px-3 py-2 w-8"></th>
               <th className="px-3 py-2">订单号</th>
               <th className="px-3 py-2">类型</th>
+              <th className="px-3 py-2">桶类型</th>
               <th className="px-3 py-2">尺寸</th>
               <th className="px-3 py-2">日期</th>
               <th className="px-3 py-2">时段</th>
@@ -159,10 +161,10 @@ export function OrdersPage() {
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">加载中…</td></tr>
+              <tr><td colSpan={12} className="px-3 py-8 text-center text-muted-foreground">加载中…</td></tr>
             )}
             {!isLoading && filtered.length === 0 && (
-              <tr><td colSpan={11} className="px-3 py-8 text-center text-muted-foreground">暂无订单</td></tr>
+              <tr><td colSpan={12} className="px-3 py-8 text-center text-muted-foreground">暂无订单</td></tr>
             )}
             {filtered.map((o) => {
               const tm = typeMeta(o.type);
@@ -197,6 +199,16 @@ function FragmentRow({
   order: Order; open: boolean; onToggle: () => void; onEdit: () => void; onCancel: () => void;
   typeBadgeClass: string; typeLabel: string;
 }) {
+  // 桶类型中文映射
+  const binTypeNames: Record<string, string> = {
+    'garbage': '垃圾桶',
+    'brick': '砖桶',
+    'soil': '土桶',
+    'cement': '水泥桶',
+    'asphalt': '沥青桶'
+  };
+  const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '—';
+  
   return (
     <>
       <tr className="border-t hover:bg-accent/40 cursor-pointer" onClick={onToggle}>
@@ -207,6 +219,7 @@ function FragmentRow({
         <td className="px-3 py-2">
           <Badge className={cn("text-xs font-semibold", typeBadgeClass)}>{typeLabel}</Badge>
         </td>
+        <td className="px-3 py-2">{binTypeName}</td>
         <td className="px-3 py-2">{order.bin_size ? `${order.bin_size}yd` : "—"}</td>
         <td className="px-3 py-2">{order.service_date}</td>
         <td className="px-3 py-2">{order.time_window === "custom" ? order.time_window_custom : order.time_window}</td>
@@ -243,13 +256,24 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
     },
   });
 
+  // 桶类型中文映射
+  const binTypeNames: Record<string, string> = {
+    'garbage': '垃圾桶',
+    'brick': '砖桶',
+    'soil': '土桶',
+    'cement': '水泥桶',
+    'asphalt': '沥青桶'
+  };
+  const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '—';
+
   return (
     <tr className="bg-accent/20 border-t">
-      <td colSpan={11} className="px-6 py-4">
+      <td colSpan={12} className="px-6 py-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           <div>
             <div className="font-semibold mb-2">订单详情</div>
             <dl className="space-y-1 text-muted-foreground">
+              <div><span className="text-foreground">桶类型:</span> {binTypeName}</div>
               <div><span className="text-foreground">备注:</span> {order.customer_notes || "—"}</div>
               <div><span className="text-foreground">NetSuite:</span> {order.netsuite_order_id || "—"}</div>
             </dl>
