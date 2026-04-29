@@ -349,6 +349,9 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
               const driverName = assignments.find(a => a.order_id === order.id)?.driver_id 
                 ? drivers.find(d => d.id === assignments.find(a => a.order_id === order.id)?.driver_id)?.name 
                 : "未分配";
+              
+              // 显示自定义时段或默认时段
+              const timeDisplay = order.time_window_custom || order.time_window || '—';
                 
               infoWindowRef.current.setContent(`
                 <div style="padding:8px;font-size:12px;color:black;min-width:180px;">
@@ -363,7 +366,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
                   </div>
                   <div style="margin-bottom:4px;">
                     <span style="font-weight:bold;color:#666;">时段:</span> 
-                    <span style="color:#9C27B0;margin-left:4px;">${order.time_window || '—'}</span>
+                    <span style="color:#9C27B0;margin-left:4px;">${timeDisplay}</span>
                   </div>
                   <div style="margin-bottom:6px;">
                     <span style="font-weight:bold;color:#666;">地址:</span> 
@@ -508,14 +511,14 @@ function createVehicleIconWithLabel(vehicleType: string, driverName: string): st
 
 // 辅助函数: 创建带标签的订单图标
 function createOrderIconWithLabel(order: any): string {
-  // 为每种订单类型定义配色方案
+  // 为每种订单类型定义配色方案 - 使用更显眼的颜色（深色文字+亮色背景）
   const colorSchemes: Record<string, { bg: string; text: string; pin: string }> = {
-    'delivery': { bg: '#2196F3', text: '#FFFFFF', pin: '#2196F3' },  // 蓝色
-    'pickup': { bg: '#4CAF50', text: '#FFFFFF', pin: '#4CAF50' },    // 绿色
-    'swap': { bg: '#9C27B0', text: '#FFFFFF', pin: '#9C27B0' }       // 紫色
+    'delivery': { bg: '#2196F3', text: '#FFFFFF', pin: '#1976D2' },  // 亮蓝底白字
+    'pickup': { bg: '#4CAF50', text: '#FFFFFF', pin: '#388E3C' },    // 亮绿底白字
+    'swap': { bg: '#9C27B0', text: '#FFFFFF', pin: '#7B1FA2' }       // 亮紫底白字
   };
   
-  const scheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', pin: '#FF9800' };
+  const scheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', pin: '#F57C00' };
   
   // 订单类型中文映射
   const typeNames: Record<string, string> = {
@@ -540,49 +543,52 @@ function createOrderIconWithLabel(order: any): string {
     return streetNumber && city ? `${streetNumber}, ${city}` : addr.substring(0, 20);
   };
   
+  // 显示自定义时段或默认时段
+  const timeDisplay = order.time_window_custom || order.time_window || '';
+  
   // 构建标签文本 - 两行：第一行是类型+尺寸+时段，第二行是简化地址
-  const line1 = `${typeName} ${order.bin_size || ''} ${order.time_window || ''}`.trim();
+  const line1 = `${typeName} ${order.bin_size || ''} ${timeDisplay}`.trim();
   const line2 = extractAddressShort(order.address);
   
   const lines = [line1, line2].filter(line => line);
   
-  // 计算卡片尺寸
+  // 计算卡片尺寸 - 增大字体和padding
   const maxLineWidth = Math.max(...lines.map(line => {
     return line.split('').reduce((width, char) => {
-      return width + (/[\u4e00-\u9fa5]/.test(char) ? 11 : 7);
+      return width + (/[\u4e00-\u9fa5]/.test(char) ? 13 : 8); // 增大字符宽度
     }, 0);
   }));
   
-  const cardWidth = Math.max(maxLineWidth + 16, 80);
-  const cardHeight = 8 + lines.length * 15; // 增大行高到15px
-  const svgWidth = Math.max(cardWidth + 10, 100);
-  const svgHeight = cardHeight + 35;
+  const cardWidth = Math.max(maxLineWidth + 20, 100); // 增大padding
+  const cardHeight = 12 + lines.length * 18; // 增大行高到18px
+  const svgWidth = Math.max(cardWidth + 12, 120);
+  const svgHeight = cardHeight + 40;
   
   const cardX = (svgWidth - cardWidth) / 2;
   const pinX = svgWidth / 2;
   
-  // 生成文本行 - 增大字体到12px
+  // 生成文本行 - 增大字体到14px，使用白色文字
   let textElements = '';
   lines.forEach((line, index) => {
-    const y = 13 + index * 15; // 调整y位置
-    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='12' font-weight='${index === 0 ? 'bold' : 'normal'}' fill='${scheme.text}' font-family='Arial, sans-serif'>${line}</text>`;
+    const y = 16 + index * 18; // 调整y位置
+    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='14' font-weight='${index === 0 ? 'bold' : '600'}' fill='${scheme.text}' font-family='Arial, sans-serif' stroke='${scheme.pin}' stroke-width='0.3'>${line}</text>`;
   });
   
   // 创建SVG
   const svg = `
     <svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
-      <!-- 顶部信息卡片 -->
-      <rect x='${cardX}' y='0' width='${cardWidth}' height='${cardHeight}' rx='3' fill='${scheme.bg}' stroke='#333' stroke-width='1' opacity='0.95'/>
+      <!-- 顶部信息卡片 - 更显眼的颜色 -->
+      <rect x='${cardX}' y='0' width='${cardWidth}' height='${cardHeight}' rx='4' fill='${scheme.bg}' stroke='${scheme.pin}' stroke-width='2' opacity='0.98'/>
       ${textElements}
       
       <!-- 连接线 -->
-      <line x1='${pinX}' y1='${cardHeight}' x2='${pinX}' y2='${cardHeight + 3}' stroke='${scheme.pin}' stroke-width='1.5'/>
+      <line x1='${pinX}' y1='${cardHeight}' x2='${pinX}' y2='${cardHeight + 4}' stroke='${scheme.pin}' stroke-width='2'/>
       
-      <!-- 底部图钉 -->
-      <g transform='translate(${pinX - 12}, ${cardHeight + 3})'>
-        <circle cx='12' cy='10' r='10' fill='${scheme.pin}' stroke='#333' stroke-width='1.5'/>
-        <circle cx='12' cy='10' r='4' fill='white' opacity='0.9'/>
-        <line x1='12' y1='20' x2='12' y2='32' stroke='${scheme.pin}' stroke-width='2.5'/>
+      <!-- 底部图钉 - 增大尺寸 -->
+      <g transform='translate(${pinX - 14}, ${cardHeight + 4})'>
+        <circle cx='14' cy='12' r='12' fill='${scheme.pin}' stroke='#000' stroke-width='2'/>
+        <circle cx='14' cy='12' r='5' fill='white' opacity='0.95'/>
+        <line x1='14' y1='24' x2='14' y2='36' stroke='${scheme.pin}' stroke-width='3'/>
       </g>
     </svg>
   `.trim();
@@ -604,14 +610,17 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
     return streetNumber && city ? `${streetNumber}, ${city}` : addr.substring(0, 20);
   };
   
-  // 计算图标尺寸 - 和车辆图标相同的缩放
-  const line1 = `${order.type} ${order.bin_size || ''} ${order.time_window || ''}`.trim();
+  // 显示自定义时段或默认时段
+  const timeDisplay = order.time_window_custom || order.time_window || '';
+  
+  // 计算图标尺寸 - 增大尺寸
+  const line1 = `${order.type} ${order.bin_size || ''} ${timeDisplay}`.trim();
   const line2 = extractAddressShort(order.address);
   const lines = [line1, line2].filter(line => line);
   
-  const baseHeight = 8 + lines.length * 14 + 35;
-  const scaleFactor = 1.0; // 使用1.0倍，和车辆图标一样的大小
-  const width = 100 * scaleFactor;
+  const baseHeight = 12 + lines.length * 18 + 40;
+  const scaleFactor = 1.2; // 增大到1.2倍
+  const width = 120 * scaleFactor;
   const height = baseHeight * scaleFactor;
   
   marker.setIcon({
