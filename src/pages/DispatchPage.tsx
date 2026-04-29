@@ -67,6 +67,40 @@ type Assignment = {
 
 const BACKLOG_ID = "__backlog__";
 
+// 判断时间段是否属于 AM
+function isAMTimeWindow(timeWindow: string, customTime: string | null): boolean {
+  const time = timeWindow === "custom" ? (customTime || "") : timeWindow;
+  const timeLower = time.toLowerCase();
+  
+  // AM 时段包括：
+  // - 明确包含 "am" 的
+  // - 7-9am, 8-10am 等
+  // - noon 或 中午（如果在上午范围）
+  if (timeLower.includes('am')) return true;
+  if (timeLower.includes('noon') || timeLower.includes('中午')) {
+    // noon 可能是 11-1 或 12-2，算作 AM
+    return true;
+  }
+  
+  return false;
+}
+
+// 判断时间段是否属于 PM
+function isPMTimeWindow(timeWindow: string, customTime: string | null): boolean {
+  const time = timeWindow === "custom" ? (customTime || "") : timeWindow;
+  const timeLower = time.toLowerCase();
+  
+  // PM 时段包括：
+  // - 明确包含 "pm" 的
+  // - 不包含 am 和 noon 的其他时段
+  if (timeLower.includes('pm')) return true;
+  
+  // 如果不是 AM 也不是明确的 noon，就算 PM
+  if (!isAMTimeWindow(timeWindow, customTime)) return true;
+  
+  return false;
+}
+
 function timeLabel(o: Order) {
   return o.time_window === "custom" ? (o.time_window_custom || "自定义") : o.time_window;
 }
@@ -458,15 +492,58 @@ export function DispatchPage() {
 // ============ Backlog Column ============
 function BacklogColumn({ orders, completedOrders }: { orders: Order[], completedOrders: Order[] }) {
   const { setNodeRef, isOver } = useDroppable({ id: BACKLOG_ID });
+  const [timeFilter, setTimeFilter] = useState<'ALL' | 'AM' | 'PM'>('ALL');
+  
+  // 根据时间段筛选订单
+  const filteredOrders = useMemo(() => {
+    if (timeFilter === 'ALL') return orders;
+    if (timeFilter === 'AM') {
+      return orders.filter(o => isAMTimeWindow(o.time_window, o.time_window_custom));
+    }
+    if (timeFilter === 'PM') {
+      return orders.filter(o => isPMTimeWindow(o.time_window, o.time_window_custom));
+    }
+    return orders;
+  }, [orders, timeFilter]);
 
   return (
     <div className="w-[260px] flex flex-col h-full bg-muted/30 rounded-lg">
-      <div className="px-3 py-2 border-b bg-card rounded-t-lg flex items-center justify-between">
-        <div>
-          <div className="font-semibold text-sm tracking-tight">📥 待排班</div>
-          <div className="text-[10px] text-muted-foreground">未分配订单</div>
+      <div className="px-3 py-2 border-b bg-card rounded-t-lg">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <div className="font-semibold text-sm tracking-tight">📥 待排班</div>
+            <div className="text-[10px] text-muted-foreground">未分配订单</div>
+          </div>
+          <Badge variant="secondary" className="px-1.5">{filteredOrders.length}/{orders.length}</Badge>
         </div>
-        <Badge variant="secondary" className="px-1.5">{orders.length}</Badge>
+        
+        {/* 时间段筛选按钮 */}
+        <div className="flex gap-1">
+          <Button
+            size="sm"
+            variant={timeFilter === 'ALL' ? 'default' : 'outline'}
+            onClick={() => setTimeFilter('ALL')}
+            className="flex-1 h-7 text-xs"
+          >
+            全部
+          </Button>
+          <Button
+            size="sm"
+            variant={timeFilter === 'AM' ? 'default' : 'outline'}
+            onClick={() => setTimeFilter('AM')}
+            className="flex-1 h-7 text-xs"
+          >
+            AM
+          </Button>
+          <Button
+            size="sm"
+            variant={timeFilter === 'PM' ? 'default' : 'outline'}
+            onClick={() => setTimeFilter('PM')}
+            className="flex-1 h-7 text-xs"
+          >
+            PM
+          </Button>
+        </div>
       </div>
       <div
         ref={setNodeRef}
@@ -476,15 +553,20 @@ function BacklogColumn({ orders, completedOrders }: { orders: Order[], completed
         )}
       >
         <SortableContext
-          items={orders.map((o) => cardId.fromOrder(o.id))}
+          items={filteredOrders.map((o) => cardId.fromOrder(o.id))}
           strategy={verticalListSortingStrategy}
         >
-          {orders.map((o) => (
+          {filteredOrders.map((o) => (
             <SortableOrderCard key={o.id} id={cardId.fromOrder(o.id)}>
               <OrderCardDisplay order={o} binNumber={null} />
             </SortableOrderCard>
           ))}
         </SortableContext>
+        {filteredOrders.length === 0 && orders.length > 0 && (
+          <div className="text-center text-muted-foreground text-[11px] py-6">
+            {timeFilter === 'AM' ? '无 AM 订单' : timeFilter === 'PM' ? '无 PM 订单' : '全部已排班 🎉'}
+          </div>
+        )}
         {orders.length === 0 && (
           <div className="text-center text-muted-foreground text-[11px] py-6">
             全部已排班 🎉
