@@ -733,47 +733,45 @@ function OrderNodeDisplay({
   const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '';
 
   return (
-    <div className="relative rounded border-l-4 border-l-blue-500 bg-card shadow-sm p-2 transition-colors">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap mb-1">
-            <Badge className={cn("text-[10px]", tm.className)}>{tm.label}</Badge>
-            <span className="text-[11px] text-muted-foreground font-mono">
-              {order.order_number}
-            </span>
-          </div>
-          <div className="text-sm font-semibold">
-            {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
-          </div>
-          <div className="text-xs text-muted-foreground mt-1">{order.address}</div>
-          <div className="text-xs text-primary mt-1">{timeLabel(order)}</div>
-          {order.customer_notes && (
-            <div className="text-[10px] text-status-progress mt-1 truncate">
-              📝 {order.customer_notes}
-            </div>
-          )}
-          {conflict && vehicle && (
-            <div className="text-[10px] text-destructive font-bold mt-1 flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3" /> {vehicle.type} 不支持 {order.bin_size}yd 桶
-            </div>
-          )}
+    <div className="group relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-3 transition-all duration-300 hover:shadow-xl hover:scale-105 hover:-translate-y-1 w-[220px] shrink-0">
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge className={cn("text-[10px]", tm.className)}>{tm.label}</Badge>
+          <span className="text-[11px] text-muted-foreground font-mono">
+            {order.order_number}
+          </span>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="text-muted-foreground/50 hover:text-foreground">
-              <MoreVertical className="h-4 w-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="text-xs min-w-[120px]">
-            <DropdownMenuItem onClick={() => alert(`订单号:${order.order_number}\n客户:${order.customer_name}\n地址:${order.address}`)}>
-              查看详情
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onCancel(assignment.id)} className="text-destructive">
-              取消分配
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="text-sm font-semibold">
+          {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
+        </div>
+        <div className="text-xs text-muted-foreground truncate" title={order.address}>{order.address}</div>
+        <div className="text-xs text-primary font-medium">{timeLabel(order)}</div>
+        {order.customer_notes && (
+          <div className="text-[10px] text-status-progress truncate">
+            📝 {order.customer_notes}
+          </div>
+        )}
+        {conflict && vehicle && (
+          <div className="text-[10px] text-destructive font-bold flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3" /> {vehicle.type} 不支持 {order.bin_size}yd 桶
+          </div>
+        )}
       </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="absolute top-2 right-2 text-muted-foreground/50 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+            <MoreVertical className="h-4 w-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="text-xs min-w-[120px]">
+          <DropdownMenuItem onClick={() => alert(`订单号:${order.order_number}\n客户:${order.customer_name}\n地址:${order.address}`)}>
+            查看详情
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onCancel(assignment.id)} className="text-destructive">
+            取消分配
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -795,41 +793,37 @@ function StepNodeDisplay({
   const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
 
   return (
-    <div className="relative rounded border-l-4 border-l-gray-400 bg-card shadow-sm p-2 transition-colors">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <Badge variant="outline" className="text-[10px]">手动步骤</Badge>
-          </div>
-          <div className="text-sm font-semibold">
-            {stepLabel}
-          </div>
-          <div className="text-xs text-muted-foreground mt-1">
-            <MapPin className="h-3 w-3 inline mr-1" />
-            {step.location}
-          </div>
-          {step.bin_id && (
-            <div className="text-xs text-primary mt-1">桶号: {step.bin_id}</div>
-          )}
-          {step.notes && (
-            <div className="text-[10px] text-muted-foreground mt-1">
-              📝 {step.notes}
-            </div>
-          )}
+    <div className="group relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:-translate-y-1 w-[180px] shrink-0">
+      <div className="flex flex-col gap-1.5">
+        <Badge variant="outline" className="text-[9px] w-fit">手动步骤</Badge>
+        <div className="text-xs font-semibold">
+          {stepLabel}
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="text-muted-foreground/50 hover:text-foreground">
-              <MoreVertical className="h-4 w-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="text-xs min-w-[120px]">
-            <DropdownMenuItem onClick={() => onDelete(step.id)} className="text-destructive">
-              删除步骤
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="text-[10px] text-muted-foreground truncate" title={step.location}>
+          <MapPin className="h-2.5 w-2.5 inline mr-1" />
+          {step.location}
+        </div>
+        {step.bin_id && (
+          <div className="text-[10px] text-primary">桶号: {step.bin_id}</div>
+        )}
+        {step.notes && (
+          <div className="text-[9px] text-muted-foreground truncate">
+            📝 {step.notes}
+          </div>
+        )}
       </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="absolute top-1.5 right-1.5 text-muted-foreground/50 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+            <MoreVertical className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="text-xs min-w-[120px]">
+          <DropdownMenuItem onClick={() => onDelete(step.id)} className="text-destructive">
+            删除步骤
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -870,32 +864,18 @@ function InsertStepButton({
     setShowCustomLocation(false);
   };
 
-  if (!isActive) {
-    return (
-      <button
-        onClick={onClick}
-        className="w-full py-1 border-t border-dashed border-muted-foreground/20 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
-      >
-        <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground group-hover:text-primary">
-          <Plus className="h-3 w-3" />
-          <span className="opacity-0 group-hover:opacity-100 transition-opacity">插入步骤</span>
-        </div>
-      </button>
-    );
-  }
-
   return (
-    <div className="w-full p-3 border-2 border-primary rounded-lg bg-primary/5 space-y-2">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-semibold">插入步骤</span>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+    <div className="w-full p-3 border-2 border-primary rounded-lg bg-card shadow-lg space-y-2.5">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-sm font-semibold text-primary">✨ 插入步骤</span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
           ✕
         </button>
       </div>
       
       {!showCustomLocation ? (
         <div>
-          <Label className="text-xs">地点</Label>
+          <Label className="text-xs font-medium">📍 地点</Label>
           <Select value={location} onValueChange={(v) => {
             if (v === "custom") {
               setShowCustomLocation(true);
@@ -913,7 +893,7 @@ function InsertStepButton({
                   {loc.name} - {loc.address}
                 </SelectItem>
               ))}
-              <SelectItem value="custom" className="text-xs text-primary">
+              <SelectItem value="custom" className="text-xs text-primary font-medium">
                 + 手动输入地址
               </SelectItem>
             </SelectContent>
@@ -921,7 +901,7 @@ function InsertStepButton({
         </div>
       ) : (
         <div>
-          <Label className="text-xs">自定义地址</Label>
+          <Label className="text-xs font-medium">📍 自定义地址</Label>
           <div className="flex gap-1 mt-1">
             <input
               type="text"
@@ -946,23 +926,23 @@ function InsertStepButton({
       )}
       
       <div>
-        <Label className="text-xs">动作</Label>
+        <Label className="text-xs font-medium">⚡ 动作</Label>
         <Select value={stepType} onValueChange={setStepType}>
           <SelectTrigger className="mt-1 h-8 text-xs">
             <SelectValue placeholder="选择动作" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="pickup_bin" className="text-xs">取桶</SelectItem>
-            <SelectItem value="drop_bin" className="text-xs">放桶</SelectItem>
-            <SelectItem value="dump_waste" className="text-xs">倒垃圾</SelectItem>
-            <SelectItem value="load_material" className="text-xs">装料</SelectItem>
-            <SelectItem value="unload_material" className="text-xs">卸料</SelectItem>
+            <SelectItem value="pickup_bin" className="text-xs">🔼 取桶</SelectItem>
+            <SelectItem value="drop_bin" className="text-xs">🔽 放桶</SelectItem>
+            <SelectItem value="dump_waste" className="text-xs">🗑️ 倒垃圾</SelectItem>
+            <SelectItem value="load_material" className="text-xs">📦 装料</SelectItem>
+            <SelectItem value="unload_material" className="text-xs">📤 卸料</SelectItem>
           </SelectContent>
         </Select>
       </div>
       
       <div>
-        <Label className="text-xs">桶号 (可选)</Label>
+        <Label className="text-xs font-medium">🪣 桶号 (可选)</Label>
         <Select value={binId || "none"} onValueChange={(v) => setBinId(v === "none" ? "" : v)}>
           <SelectTrigger className="mt-1 h-8 text-xs">
             <SelectValue placeholder="不指定" />
@@ -979,7 +959,7 @@ function InsertStepButton({
       </div>
       
       <div>
-        <Label className="text-xs">备注 (可选)</Label>
+        <Label className="text-xs font-medium">📝 备注 (可选)</Label>
         <input
           type="text"
           value={notes}
@@ -990,10 +970,10 @@ function InsertStepButton({
       </div>
       
       <div className="flex gap-2 pt-1">
-        <Button size="sm" onClick={handleInsert} className="flex-1 h-7 text-xs">
-          确认插入
+        <Button size="sm" onClick={handleInsert} className="flex-1 h-8 text-xs font-medium">
+          ✓ 确认插入
         </Button>
-        <Button size="sm" variant="outline" onClick={onClose} className="h-7 text-xs">
+        <Button size="sm" variant="outline" onClick={onClose} className="h-8 text-xs">
           取消
         </Button>
       </div>
@@ -1188,24 +1168,37 @@ function DriverColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          "p-3 flex flex-col gap-2 overflow-y-auto min-h-[100px] transition-colors",
+          "p-3 flex flex-row gap-3 overflow-x-auto min-h-[160px] transition-colors group custom-scrollbar",
           isOver ? "bg-primary/5" : "bg-muted/5"
         )}
       >
-        {/* 顶部插入按钮 */}
-        <InsertStepButton
-          driverId={driver.id}
-          position={0}
-          isActive={insertStepAt?.driverId === driver.id && insertStepAt?.position === 0}
-          onClick={() => setInsertStepAt({ driverId: driver.id, position: 0 })}
-          onClose={() => setInsertStepAt(null)}
-          onInsert={onInsertStep}
-          commonLocations={commonLocations}
-          bins={bins}
-        />
+        {/* 顶部插入按钮 - 只在悬停时显示 */}
+        <div className="relative shrink-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+          {insertStepAt?.driverId === driver.id && insertStepAt?.position === 0 ? (
+            <div className="w-[240px]">
+              <InsertStepButton
+                driverId={driver.id}
+                position={0}
+                isActive={true}
+                onClick={() => {}}
+                onClose={() => setInsertStepAt(null)}
+                onInsert={onInsertStep}
+                commonLocations={commonLocations}
+                bins={bins}
+              />
+            </div>
+          ) : (
+            <button
+              onClick={() => setInsertStepAt({ driverId: driver.id, position: 0 })}
+              className="w-10 h-10 rounded-full border-2 border-dashed border-primary/40 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          )}
+        </div>
         
         {allNodes.map((node, index) => (
-          <div key={node.type === 'order' ? (node.data as Assignment).id : (node.data as JobStep).id}>
+          <div key={node.type === 'order' ? (node.data as Assignment).id : (node.data as JobStep).id} className="flex items-center gap-3 shrink-0">
             {node.type === 'order' ? (
               <OrderNodeDisplay
                 assignment={node.data as Assignment}
@@ -1219,17 +1212,30 @@ function DriverColumn({
               />
             )}
             
-            {/* 节点之间的插入按钮 */}
-            <InsertStepButton
-              driverId={driver.id}
-              position={node.stepNumber + 1}
-              isActive={insertStepAt?.driverId === driver.id && insertStepAt?.position === node.stepNumber + 1}
-              onClick={() => setInsertStepAt({ driverId: driver.id, position: node.stepNumber + 1 })}
-              onClose={() => setInsertStepAt(null)}
-              onInsert={onInsertStep}
-              commonLocations={commonLocations}
-              bins={bins}
-            />
+            {/* 节点之间的插入按钮 - 只在悬停时显示 */}
+            <div className="relative shrink-0 flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+              {insertStepAt?.driverId === driver.id && insertStepAt?.position === node.stepNumber + 1 ? (
+                <div className="w-[240px]">
+                  <InsertStepButton
+                    driverId={driver.id}
+                    position={node.stepNumber + 1}
+                    isActive={true}
+                    onClick={() => {}}
+                    onClose={() => setInsertStepAt(null)}
+                    onInsert={onInsertStep}
+                    commonLocations={commonLocations}
+                    bins={bins}
+                  />
+                </div>
+              ) : (
+                <button
+                  onClick={() => setInsertStepAt({ driverId: driver.id, position: node.stepNumber + 1 })}
+                  className="w-10 h-10 rounded-full border-2 border-dashed border-primary/40 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary"
+                >
+                  <Plus className="h-5 w-5" />
+                </button>
+              )}
+            </div>
           </div>
         ))}
         

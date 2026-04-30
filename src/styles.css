@@ -143,4 +143,37 @@
     color: var(--color-foreground);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+  
+  /* 自定义滚动条样式 */
+  .custom-scrollbar::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: oklch(0.96 0.01 245);
+    border-radius: 4px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(0.7 0.02 250);
+    border-radius: 4px;
+    transition: background 0.2s;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.55 0.15 255);
+  }
+  
+  .dark .custom-scrollbar::-webkit-scrollbar-track {
+    background: oklch(0.28 0.04 255);
+  }
+  
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(0.5 0.02 250);
+  }
+  
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.65 0.16 255);
+  }
 }
