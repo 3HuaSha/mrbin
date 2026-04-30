@@ -260,19 +260,81 @@ export function DispatchPage() {
       const updates = localAssignments.filter(a => !a.id.startsWith("temp-"));
       const deletes = assignments.filter(a => !localAssignments.some(la => la.id === a.id));
 
+      // 删除 assignments 和对应的 job_steps
       for (const d of deletes) {
+        // 先删除关联的 job_steps
+        await supabase.from("job_steps").delete().eq("assignment_id", d.id);
+        // 再删除 assignment
         await supabase.from("dispatch_assignments").delete().eq("id", d.id);
       }
+      
+      // 插入新的 assignments 和 job_steps
       for (const i of inserts) {
-        await supabase.from("dispatch_assignments").insert({
-          order_id: i.order_id,
-          driver_id: i.driver_id,
-          vehicle_id: i.vehicle_id,
-          bin_id: i.bin_id,
-          scheduled_date: i.scheduled_date,
-          sequence: i.sequence,
-        });
+        // 插入 assignment
+        const { data: newAssignment, error: assignmentError } = await supabase
+          .from("dispatch_assignments")
+          .insert({
+            order_id: i.order_id,
+            driver_id: i.driver_id,
+            vehicle_id: i.vehicle_id,
+            bin_id: i.bin_id,
+            scheduled_date: i.scheduled_date,
+            sequence: i.sequence,
+          })
+          .select()
+          .single();
+        
+        if (assignmentError) throw assignmentError;
+        
+        // 为这个 assignment 创建 job_steps（根据订单类型自动生成）
+        const order = i.orders;
+        const steps = [];
+        
+        if (order.type === "delivery") {
+          steps.push({
+            assignment_id: newAssignment.id,
+            driver_id: i.driver_id,
+            scheduled_date: i.scheduled_date,
+            order_id: order.id,
+            node_type: 'order' as const,
+            step_number: i.sequence,
+            step_type: 'delivery',
+            location: order.address,
+            status: 'locked',
+          });
+        } else if (order.type === "pickup") {
+          steps.push({
+            assignment_id: newAssignment.id,
+            driver_id: i.driver_id,
+            scheduled_date: i.scheduled_date,
+            order_id: order.id,
+            node_type: 'order' as const,
+            step_number: i.sequence,
+            step_type: 'pickup',
+            location: order.address,
+            status: 'locked',
+          });
+        } else if (order.type === "swap") {
+          steps.push({
+            assignment_id: newAssignment.id,
+            driver_id: i.driver_id,
+            scheduled_date: i.scheduled_date,
+            order_id: order.id,
+            node_type: 'order' as const,
+            step_number: i.sequence,
+            step_type: 'swap',
+            location: order.address,
+            status: 'locked',
+          });
+        }
+        
+        if (steps.length > 0) {
+          const { error: stepsError } = await supabase.from("job_steps").insert(steps);
+          if (stepsError) throw stepsError;
+        }
       }
+      
+      // 更新现有的 assignments
       for (const u of updates) {
         const old = assignments.find(a => a.id === u.id);
         if (old && (old.sequence !== u.sequence || old.vehicle_id !== u.vehicle_id || old.driver_id !== u.driver_id)) {
@@ -281,6 +343,12 @@ export function DispatchPage() {
             sequence: u.sequence,
             vehicle_id: u.vehicle_id
           }).eq("id", u.id);
+          
+          // 同时更新对应的 job_steps
+          await supabase.from("job_steps").update({
+            driver_id: u.driver_id,
+            step_number: u.sequence,
+          }).eq("assignment_id", u.id);
         }
       }
     },
@@ -895,12 +963,12 @@ function InsertStepButton({
       
       <div>
         <Label className="text-xs">桶号 (可选)</Label>
-        <Select value={binId} onValueChange={setBinId}>
+        <Select value={binId || "none"} onValueChange={(v) => setBinId(v === "none" ? "" : v)}>
           <SelectTrigger className="mt-1 h-8 text-xs">
             <SelectValue placeholder="不指定" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="" className="text-xs">不指定</SelectItem>
+            <SelectItem value="none" className="text-xs">不指定</SelectItem>
             {bins.map((bin) => (
               <SelectItem key={bin.id} value={bin.id} className="text-xs">
                 {bin.bin_number} ({bin.size}yd)
@@ -1066,10 +1134,18 @@ function DriverColumn({
     const nodes: Array<{ type: 'order' | 'step'; data: Assignment | JobStep; stepNumber: number }> = [];
     
     // 添加订单节点（从 assignments）
+    // 每个 assignment 对应一个或多个 job_steps
     assignments.forEach(a => {
-      const step = jobSteps.find(s => s.assignment_id === a.id);
-      if (step) {
-        nodes.push({ type: 'order', data: a, stepNumber: step.step_number });
+      // 查找这个 assignment 对应的 job_steps
+      const assignmentSteps = jobSteps.filter(s => s.assignment_id === a.id);
+      
+      if (assignmentSteps.length > 0) {
+        // 使用第一个 step 的 step_number（通常一个 assignment 只有一个主步骤）
+        const mainStep = assignmentSteps[0];
+        nodes.push({ type: 'order', data: a, stepNumber: mainStep.step_number });
+      } else {
+        // 如果没有对应的 job_steps，使用 sequence 作为 stepNumber
+        nodes.push({ type: 'order', data: a, stepNumber: a.sequence });
       }
     });
     
