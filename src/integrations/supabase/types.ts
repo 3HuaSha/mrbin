@@ -252,19 +252,25 @@ export type Database = {
       }
       job_steps: {
         Row: {
-          assignment_id: string
+          assignment_id: string | null
+          bin_id: string | null
           bin_number_reported: string | null
           completed_at: string | null
           created_at: string | null
+          driver_id: string
           dump_site: string | null
           id: string
           location: string
+          node_type: 'order' | 'step'
+          notes: string | null
           old_bin_number_reported: string | null
+          order_id: string | null
           photo_url: string | null
           requires_bin_number: boolean | null
           requires_photo: boolean | null
           requires_weigh_ticket: boolean | null
           requires_weight: boolean | null
+          scheduled_date: string
           status: Database["public"]["Enums"]["step_status"] | null
           step_number: number
           step_type: Database["public"]["Enums"]["step_type"]
@@ -272,19 +278,25 @@ export type Database = {
           weight_kg: number | null
         }
         Insert: {
-          assignment_id: string
+          assignment_id?: string | null
+          bin_id?: string | null
           bin_number_reported?: string | null
           completed_at?: string | null
           created_at?: string | null
+          driver_id: string
           dump_site?: string | null
           id?: string
           location: string
+          node_type?: 'order' | 'step'
+          notes?: string | null
           old_bin_number_reported?: string | null
+          order_id?: string | null
           photo_url?: string | null
           requires_bin_number?: boolean | null
           requires_photo?: boolean | null
           requires_weigh_ticket?: boolean | null
           requires_weight?: boolean | null
+          scheduled_date: string
           status?: Database["public"]["Enums"]["step_status"] | null
           step_number: number
           step_type: Database["public"]["Enums"]["step_type"]
@@ -292,19 +304,25 @@ export type Database = {
           weight_kg?: number | null
         }
         Update: {
-          assignment_id?: string
+          assignment_id?: string | null
+          bin_id?: string | null
           bin_number_reported?: string | null
           completed_at?: string | null
           created_at?: string | null
+          driver_id?: string
           dump_site?: string | null
           id?: string
           location?: string
+          node_type?: 'order' | 'step'
+          notes?: string | null
           old_bin_number_reported?: string | null
+          order_id?: string | null
           photo_url?: string | null
           requires_bin_number?: boolean | null
           requires_photo?: boolean | null
           requires_weigh_ticket?: boolean | null
           requires_weight?: boolean | null
+          scheduled_date?: string
           status?: Database["public"]["Enums"]["step_status"] | null
           step_number?: number
           step_type?: Database["public"]["Enums"]["step_type"]
@@ -319,7 +337,48 @@ export type Database = {
             referencedRelation: "dispatch_assignments"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "job_steps_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_steps_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
         ]
+      }
+      common_locations: {
+        Row: {
+          id: string
+          name: string
+          address: string
+          type: string | null
+          is_active: boolean | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          name: string
+          address: string
+          type?: string | null
+          is_active?: boolean | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          address?: string
+          type?: string | null
+          is_active?: boolean | null
+          created_at?: string | null
+        }
+        Relationships: []
       }
       orders: {
         Row: {

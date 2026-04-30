@@ -41,6 +41,7 @@ type Order = {
   order_number: string;
   type: string;
   bin_size: string | null;
+  bin_type: string | null;
   service_date: string;
   time_window: string;
   time_window_custom: string | null;
@@ -63,6 +64,26 @@ type Assignment = {
   orders: Order;
   vehicles: Vehicle;
   bins: Bin | null;
+};
+type JobStep = {
+  id: string;
+  driver_id: string;
+  scheduled_date: string;
+  step_number: number;
+  order_id: string | null;
+  assignment_id: string | null;
+  node_type: 'order' | 'step';
+  location: string;
+  step_type: string;
+  bin_id: string | null;
+  notes: string | null;
+  status: string;
+};
+type CommonLocation = {
+  id: string;
+  name: string;
+  address: string;
+  type: string;
 };
 
 const BACKLOG_ID = "__backlog__";
@@ -121,7 +142,9 @@ export function DispatchPage() {
   const audit = useAudit();
   const [date, setDate] = useState(todayISO());
   const [localAssignments, setLocalAssignments] = useState<Assignment[] | null>(null);
+  const [localJobSteps, setLocalJobSteps] = useState<JobStep[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [insertStepAt, setInsertStepAt] = useState<{ driverId: string; position: number } | null>(null);
 
   const { data: drivers = [] } = useQuery({
     queryKey: ["drivers-active"],
@@ -167,6 +190,33 @@ export function DispatchPage() {
         .eq("scheduled_date", date).order("sequence");
       if (error) throw error;
       return (data ?? []) as unknown as Assignment[];
+    },
+  });
+
+  // 查询 job_steps (包含订单节点和步骤节点)
+  const { data: jobSteps = [] } = useQuery({
+    queryKey: ["job-steps", date],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("job_steps")
+        .select("*")
+        .eq("scheduled_date", date)
+        .order("driver_id")
+        .order("step_number");
+      if (error) throw error;
+      return (data ?? []) as JobStep[];
+    },
+  });
+
+  // 查询常用地点
+  const { data: commonLocations = [] } = useQuery({
+    queryKey: ["common-locations"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("common_locations")
+        .select("*")
+        .eq("is_active", true)
+        .order("name");
+      if (error) throw error;
+      return (data ?? []) as CommonLocation[];
     },
   });
 
@@ -239,6 +289,101 @@ export function DispatchPage() {
       setLocalAssignments(null);
       qc.invalidateQueries({ queryKey: ["dispatch-assignments", date] });
       qc.invalidateQueries({ queryKey: ["dispatch-orders", date] });
+      qc.invalidateQueries({ queryKey: ["job-steps", date] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const insertManualStep = useMutation({
+    mutationFn: async (params: {
+      driverId: string;
+      position: number;
+      location: string;
+      stepType: string;
+      binId?: string;
+      notes?: string;
+    }) => {
+      const { driverId, position, location, stepType, binId, notes } = params;
+      
+      // 获取该司机当天的所有步骤
+      const driverSteps = (localJobSteps || jobSteps).filter(
+        s => s.driver_id === driverId && s.scheduled_date === date
+      ).sort((a, b) => a.step_number - b.step_number);
+      
+      // 在指定位置插入新步骤，并重新编号
+      const newStep: JobStep = {
+        id: `temp-step-${Date.now()}`,
+        driver_id: driverId,
+        scheduled_date: date,
+        step_number: position,
+        order_id: null,
+        assignment_id: null,
+        node_type: 'step',
+        location,
+        step_type: stepType,
+        bin_id: binId || null,
+        notes: notes || null,
+        status: 'locked',
+      };
+      
+      // 插入新步骤到数据库
+      const { data, error } = await supabase.from("job_steps").insert({
+        driver_id: newStep.driver_id,
+        scheduled_date: newStep.scheduled_date,
+        step_number: newStep.step_number,
+        node_type: newStep.node_type,
+        location: newStep.location,
+        step_type: newStep.step_type,
+        bin_id: newStep.bin_id,
+        notes: newStep.notes,
+        status: newStep.status,
+      }).select().single();
+      
+      if (error) throw error;
+      
+      // 更新后续步骤的编号
+      const stepsToUpdate = driverSteps.filter(s => s.step_number >= position);
+      for (const step of stepsToUpdate) {
+        await supabase.from("job_steps")
+          .update({ step_number: step.step_number + 1 })
+          .eq("id", step.id);
+      }
+      
+      return data;
+    },
+    onSuccess: () => {
+      toast.success("已插入步骤");
+      setInsertStepAt(null);
+      qc.invalidateQueries({ queryKey: ["job-steps", date] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteManualStep = useMutation({
+    mutationFn: async (stepId: string) => {
+      const step = jobSteps.find(s => s.id === stepId);
+      if (!step) throw new Error("步骤不存在");
+      
+      // 删除步骤
+      const { error } = await supabase.from("job_steps").delete().eq("id", stepId);
+      if (error) throw error;
+      
+      // 更新后续步骤的编号
+      const laterSteps = jobSteps.filter(
+        s => s.driver_id === step.driver_id && 
+             s.scheduled_date === step.scheduled_date && 
+             s.step_number > step.step_number
+      );
+      
+      for (const laterStep of laterSteps) {
+        await supabase.from("job_steps")
+          .update({ step_number: laterStep.step_number - 1 })
+          .eq("id", laterStep.id);
+      }
+    },
+    onSuccess: () => {
+      toast.success("已删除步骤");
+      qc.invalidateQueries({ queryKey: ["job-steps", date] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -429,6 +574,7 @@ export function DispatchPage() {
               {drivers.map((d) => {
                 const list = activeAssignments.filter((a) => a.driver_id === d.id)
                   .sort((x, y) => x.sequence - y.sequence);
+                const driverSteps = jobSteps.filter(s => s.driver_id === d.id);
 
                 // 检查该司机是否有未保存的更改
                 const driverServer = assignments.filter(a => a.driver_id === d.id);
@@ -453,6 +599,9 @@ export function DispatchPage() {
                       }
                     }}
                     assignments={list}
+                    jobSteps={driverSteps}
+                    commonLocations={commonLocations}
+                    bins={bins}
                     onCancel={(id) => {
                       const newAssignments = [...currentAssignments];
                       const idx = newAssignments.findIndex(x => x.id === id);
@@ -464,6 +613,10 @@ export function DispatchPage() {
                     hasChanges={hasChanges}
                     onSave={() => saveAllChanges.mutate()}
                     isSaving={saveAllChanges.isPending}
+                    onInsertStep={(params) => insertManualStep.mutate(params)}
+                    onDeleteStep={(stepId) => deleteManualStep.mutate(stepId)}
+                    insertStepAt={insertStepAt}
+                    setInsertStepAt={setInsertStepAt}
                   />
                 );
               })}
@@ -486,6 +639,297 @@ export function DispatchPage() {
 
       </div>
     </TooltipProvider>
+  );
+}
+
+// ============ Order Node Display ============
+function OrderNodeDisplay({
+  assignment, vehicle, onCancel
+}: {
+  assignment: Assignment;
+  vehicle: Vehicle | undefined;
+  onCancel: (id: string) => void;
+}) {
+  const order = assignment.orders;
+  const tm = typeMeta(order.type);
+  const conflict = vehicle ? !vehicleCanCarry(vehicle.type, order.bin_size) : false;
+  
+  // 桶类型中文映射
+  const binTypeNames: Record<string, string> = {
+    'garbage': '垃圾桶',
+    'brick': '砖桶',
+    'soil': '土桶',
+    'cement': '水泥桶',
+    'asphalt': '沥青桶'
+  };
+  const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '';
+
+  return (
+    <div className="relative rounded border-l-4 border-l-blue-500 bg-card shadow-sm p-2 transition-colors">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <Badge className={cn("text-[10px]", tm.className)}>{tm.label}</Badge>
+            <span className="text-[11px] text-muted-foreground font-mono">
+              {order.order_number}
+            </span>
+          </div>
+          <div className="text-sm font-semibold">
+            {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">{order.address}</div>
+          <div className="text-xs text-primary mt-1">{timeLabel(order)}</div>
+          {order.customer_notes && (
+            <div className="text-[10px] text-status-progress mt-1 truncate">
+              📝 {order.customer_notes}
+            </div>
+          )}
+          {conflict && vehicle && (
+            <div className="text-[10px] text-destructive font-bold mt-1 flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" /> {vehicle.type} 不支持 {order.bin_size}yd 桶
+            </div>
+          )}
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="text-muted-foreground/50 hover:text-foreground">
+              <MoreVertical className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="text-xs min-w-[120px]">
+            <DropdownMenuItem onClick={() => alert(`订单号:${order.order_number}\n客户:${order.customer_name}\n地址:${order.address}`)}>
+              查看详情
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onCancel(assignment.id)} className="text-destructive">
+              取消分配
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+}
+
+// ============ Step Node Display ============
+function StepNodeDisplay({
+  step, onDelete
+}: {
+  step: JobStep;
+  onDelete: (id: string) => void;
+}) {
+  const stepTypeLabels: Record<string, string> = {
+    'pickup_bin': '取桶',
+    'drop_bin': '放桶',
+    'dump_waste': '倒垃圾',
+    'load_material': '装料',
+    'unload_material': '卸料',
+  };
+  const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
+
+  return (
+    <div className="relative rounded border-l-4 border-l-gray-400 bg-card shadow-sm p-2 transition-colors">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <Badge variant="outline" className="text-[10px]">手动步骤</Badge>
+          </div>
+          <div className="text-sm font-semibold">
+            {stepLabel}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1">
+            <MapPin className="h-3 w-3 inline mr-1" />
+            {step.location}
+          </div>
+          {step.bin_id && (
+            <div className="text-xs text-primary mt-1">桶号: {step.bin_id}</div>
+          )}
+          {step.notes && (
+            <div className="text-[10px] text-muted-foreground mt-1">
+              📝 {step.notes}
+            </div>
+          )}
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="text-muted-foreground/50 hover:text-foreground">
+              <MoreVertical className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="text-xs min-w-[120px]">
+            <DropdownMenuItem onClick={() => onDelete(step.id)} className="text-destructive">
+              删除步骤
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+}
+
+// ============ Insert Step Button ============
+function InsertStepButton({
+  driverId, position, isActive, onClick, onClose, onInsert, commonLocations, bins
+}: {
+  driverId: string;
+  position: number;
+  isActive: boolean;
+  onClick: () => void;
+  onClose: () => void;
+  onInsert: (params: { driverId: string; position: number; location: string; stepType: string; binId?: string; notes?: string }) => void;
+  commonLocations: CommonLocation[];
+  bins: Bin[];
+}) {
+  const [location, setLocation] = useState("");
+  const [customLocation, setCustomLocation] = useState("");
+  const [stepType, setStepType] = useState("");
+  const [binId, setBinId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [showCustomLocation, setShowCustomLocation] = useState(false);
+
+  const handleInsert = () => {
+    const finalLocation = showCustomLocation ? customLocation : location;
+    if (!finalLocation || !stepType) {
+      toast.error("请填写地点和动作");
+      return;
+    }
+    onInsert({ driverId, position, location: finalLocation, stepType, binId, notes });
+    // 重置表单
+    setLocation("");
+    setCustomLocation("");
+    setStepType("");
+    setBinId("");
+    setNotes("");
+    setShowCustomLocation(false);
+  };
+
+  if (!isActive) {
+    return (
+      <button
+        onClick={onClick}
+        className="w-full py-1 border-t border-dashed border-muted-foreground/20 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
+      >
+        <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground group-hover:text-primary">
+          <Plus className="h-3 w-3" />
+          <span className="opacity-0 group-hover:opacity-100 transition-opacity">插入步骤</span>
+        </div>
+      </button>
+    );
+  }
+
+  return (
+    <div className="w-full p-3 border-2 border-primary rounded-lg bg-primary/5 space-y-2">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-semibold">插入步骤</span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          ✕
+        </button>
+      </div>
+      
+      {!showCustomLocation ? (
+        <div>
+          <Label className="text-xs">地点</Label>
+          <Select value={location} onValueChange={(v) => {
+            if (v === "custom") {
+              setShowCustomLocation(true);
+              setLocation("");
+            } else {
+              setLocation(v);
+            }
+          }}>
+            <SelectTrigger className="mt-1 h-8 text-xs">
+              <SelectValue placeholder="选择常用地点" />
+            </SelectTrigger>
+            <SelectContent>
+              {commonLocations.map((loc) => (
+                <SelectItem key={loc.id} value={loc.address} className="text-xs">
+                  {loc.name} - {loc.address}
+                </SelectItem>
+              ))}
+              <SelectItem value="custom" className="text-xs text-primary">
+                + 手动输入地址
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      ) : (
+        <div>
+          <Label className="text-xs">自定义地址</Label>
+          <div className="flex gap-1 mt-1">
+            <input
+              type="text"
+              value={customLocation}
+              onChange={(e) => setCustomLocation(e.target.value)}
+              placeholder="输入地址"
+              className="flex-1 h-8 px-2 rounded-md border bg-background text-xs"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setShowCustomLocation(false);
+                setCustomLocation("");
+              }}
+              className="h-8 px-2 text-xs"
+            >
+              取消
+            </Button>
+          </div>
+        </div>
+      )}
+      
+      <div>
+        <Label className="text-xs">动作</Label>
+        <Select value={stepType} onValueChange={setStepType}>
+          <SelectTrigger className="mt-1 h-8 text-xs">
+            <SelectValue placeholder="选择动作" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="pickup_bin" className="text-xs">取桶</SelectItem>
+            <SelectItem value="drop_bin" className="text-xs">放桶</SelectItem>
+            <SelectItem value="dump_waste" className="text-xs">倒垃圾</SelectItem>
+            <SelectItem value="load_material" className="text-xs">装料</SelectItem>
+            <SelectItem value="unload_material" className="text-xs">卸料</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      
+      <div>
+        <Label className="text-xs">桶号 (可选)</Label>
+        <Select value={binId} onValueChange={setBinId}>
+          <SelectTrigger className="mt-1 h-8 text-xs">
+            <SelectValue placeholder="不指定" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="" className="text-xs">不指定</SelectItem>
+            {bins.map((bin) => (
+              <SelectItem key={bin.id} value={bin.id} className="text-xs">
+                {bin.bin_number} ({bin.size}yd)
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      
+      <div>
+        <Label className="text-xs">备注 (可选)</Label>
+        <input
+          type="text"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="备注信息"
+          className="w-full h-8 px-2 rounded-md border bg-background text-xs mt-1"
+        />
+      </div>
+      
+      <div className="flex gap-2 pt-1">
+        <Button size="sm" onClick={handleInsert} className="flex-1 h-7 text-xs">
+          确认插入
+        </Button>
+        <Button size="sm" variant="outline" onClick={onClose} className="h-7 text-xs">
+          取消
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -596,26 +1040,53 @@ function BacklogColumn({ orders, completedOrders }: { orders: Order[], completed
 
 // ============ Driver Column ============
 function DriverColumn({
-  driver, vehicle, vehicles, onChangeVehicle, assignments, onCancel, hasChanges, onSave, isSaving
+  driver, vehicle, vehicles, onChangeVehicle, assignments, jobSteps, commonLocations, bins, onCancel, hasChanges, onSave, isSaving, onInsertStep, onDeleteStep, insertStepAt, setInsertStepAt
 }: {
   driver: Profile;
   vehicle: Vehicle | undefined;
   vehicles: Vehicle[];
   onChangeVehicle: (id: string) => void;
   assignments: Assignment[];
+  jobSteps: JobStep[];
+  commonLocations: CommonLocation[];
+  bins: Bin[];
   onCancel: (id: string) => void;
   hasChanges?: boolean;
   onSave?: () => void;
   isSaving?: boolean;
+  onInsertStep: (params: { driverId: string; position: number; location: string; stepType: string; binId?: string; notes?: string }) => void;
+  onDeleteStep: (stepId: string) => void;
+  insertStepAt: { driverId: string; position: number } | null;
+  setInsertStepAt: (value: { driverId: string; position: number } | null) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: driver.id });
+  
+  // 合并订单节点和步骤节点，按 step_number 排序
+  const allNodes = useMemo(() => {
+    const nodes: Array<{ type: 'order' | 'step'; data: Assignment | JobStep; stepNumber: number }> = [];
+    
+    // 添加订单节点（从 assignments）
+    assignments.forEach(a => {
+      const step = jobSteps.find(s => s.assignment_id === a.id);
+      if (step) {
+        nodes.push({ type: 'order', data: a, stepNumber: step.step_number });
+      }
+    });
+    
+    // 添加步骤节点（从 jobSteps，node_type === 'step'）
+    jobSteps.filter(s => s.node_type === 'step').forEach(s => {
+      nodes.push({ type: 'step', data: s, stepNumber: s.step_number });
+    });
+    
+    return nodes.sort((a, b) => a.stepNumber - b.stepNumber);
+  }, [assignments, jobSteps]);
 
   return (
     <div className="bg-card border rounded-lg shadow-sm flex flex-col overflow-hidden">
       <div className="px-4 py-2.5 border-b bg-muted/20 flex items-center justify-between">
         <div className="font-semibold text-base tracking-tight flex items-center gap-2">
           <span>👤</span> {driver.name}
-          <Badge variant="secondary" className="px-2 text-[11px] font-normal">{assignments.length} 单</Badge>
+          <Badge variant="secondary" className="px-2 text-[11px] font-normal">{allNodes.length} 步骤</Badge>
         </div>
         <div className="flex items-center gap-3">
           <Select value={vehicle?.id ?? ""} onValueChange={onChangeVehicle}>
@@ -641,39 +1112,54 @@ function DriverColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          "p-3 flex gap-2 overflow-x-auto min-h-[100px] transition-colors",
+          "p-3 flex flex-col gap-2 overflow-y-auto min-h-[100px] transition-colors",
           isOver ? "bg-primary/5" : "bg-muted/5"
         )}
       >
-        <SortableContext
-          items={assignments.map((a) => cardId.fromAssignment(a.id))}
-          strategy={rectSortingStrategy}
-        >
-          {assignments.map((a) => {
-            const conflict = vehicle
-              ? !vehicleCanCarry(vehicle.type, a.orders.bin_size)
-              : false;
-            return (
-              <SortableOrderCard key={a.id} id={cardId.fromAssignment(a.id)}>
-                <OrderCardDisplay
-                  order={a.orders}
-                  binNumber={a.bins?.bin_number ?? null}
-                  conflict={conflict}
-                  conflictLabel={
-                    conflict && vehicle
-                      ? `${vehicle.type} 不支持 ${a.orders.bin_size}yd 桶`
-                      : undefined
-                  }
-                  onCancel={() => onCancel(a.id)}
-                  isRowLayout
-                />
-              </SortableOrderCard>
-            );
-          })}
-        </SortableContext>
-        {assignments.length === 0 && (
+        {/* 顶部插入按钮 */}
+        <InsertStepButton
+          driverId={driver.id}
+          position={0}
+          isActive={insertStepAt?.driverId === driver.id && insertStepAt?.position === 0}
+          onClick={() => setInsertStepAt({ driverId: driver.id, position: 0 })}
+          onClose={() => setInsertStepAt(null)}
+          onInsert={onInsertStep}
+          commonLocations={commonLocations}
+          bins={bins}
+        />
+        
+        {allNodes.map((node, index) => (
+          <div key={node.type === 'order' ? (node.data as Assignment).id : (node.data as JobStep).id}>
+            {node.type === 'order' ? (
+              <OrderNodeDisplay
+                assignment={node.data as Assignment}
+                vehicle={vehicle}
+                onCancel={onCancel}
+              />
+            ) : (
+              <StepNodeDisplay
+                step={node.data as JobStep}
+                onDelete={onDeleteStep}
+              />
+            )}
+            
+            {/* 节点之间的插入按钮 */}
+            <InsertStepButton
+              driverId={driver.id}
+              position={node.stepNumber + 1}
+              isActive={insertStepAt?.driverId === driver.id && insertStepAt?.position === node.stepNumber + 1}
+              onClick={() => setInsertStepAt({ driverId: driver.id, position: node.stepNumber + 1 })}
+              onClose={() => setInsertStepAt(null)}
+              onInsert={onInsertStep}
+              commonLocations={commonLocations}
+              bins={bins}
+            />
+          </div>
+        ))}
+        
+        {allNodes.length === 0 && (
           <div className="w-full self-center text-center text-xs text-muted-foreground/50 py-4">
-            拖拽任务至此处
+            拖拽任务至此处或点击 + 插入步骤
           </div>
         )}
       </div>

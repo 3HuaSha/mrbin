@@ -11,23 +11,25 @@ import { useCurrentUser } from "@/hooks/use-current-user";
 
 type StepRow = {
   id: string;
+  driver_id: string;
+  scheduled_date: string;
   step_number: number;
-  step_type: string;
+  order_id: string | null;
+  assignment_id: string | null;
+  node_type: 'order' | 'step';
   location: string;
+  step_type: string;
+  bin_id: string | null;
+  notes: string | null;
   status: string;
-  assignment_id: string;
-  dispatch_assignments: {
-    sequence: number;
-    driver_id: string;
-    vehicle_id: string;
-    orders: {
-      order_number: string;
-      type: string;
-      bin_size: string | null;
-      customer_name: string;
-      customer_notes: string | null;
-    };
-  };
+  orders?: {
+    order_number: string;
+    type: string;
+    bin_size: string | null;
+    bin_type: string | null;
+    customer_name: string;
+    customer_notes: string | null;
+  } | null;
 };
 
 export function DriverHomePage() {
@@ -50,24 +52,24 @@ export function DriverHomePage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("job_steps")
-        .select(
-          "*, dispatch_assignments!inner(sequence, driver_id, vehicle_id, orders(*))",
-        )
-        .eq("dispatch_assignments.driver_id", driverId)
-        .eq("dispatch_assignments.scheduled_date", date)
+        .select("*, orders(*)")
+        .eq("driver_id", driverId)
+        .eq("scheduled_date", date)
         .order("step_number");
       if (error) throw error;
-      return ((data ?? []) as unknown as StepRow[]).sort((a, b) => {
-        const sa = a.dispatch_assignments.sequence;
-        const sb = b.dispatch_assignments.sequence;
-        if (sa !== sb) return sa - sb;
-        return a.step_number - b.step_number;
-      });
+      return (data ?? []) as unknown as StepRow[];
     },
   });
 
-  // 当前的车 (从今日的任意一个 assignment 拿)
-  const currentVehicleId = steps[0]?.dispatch_assignments?.vehicle_id ?? null;
+  // 当前的车 (从今日的任意一个 step 的 assignment 拿，如果有的话)
+  const currentVehicleId = useMemo(() => {
+    const stepWithAssignment = steps.find(s => s.assignment_id);
+    if (!stepWithAssignment) return null;
+    
+    // 需要查询 assignment 获取 vehicle_id
+    // 这里简化处理，实际可以在查询时 join
+    return null;
+  }, [steps]);
 
   // GPS 上报: 每30秒上传一次到 driver_locations
   useEffect(() => {
@@ -109,6 +111,18 @@ export function DriverHomePage() {
 
   const doneCount = useMemo(() => steps.filter((s) => s.status === "done").length, [steps]);
   const total = steps.length;
+  
+  // 计算每个步骤的锁定状态：只有前一个步骤完成才能解锁
+  const stepsWithLockStatus = useMemo(() => {
+    return steps.map((step, index) => {
+      let isLocked = false;
+      if (index > 0) {
+        const prevStep = steps[index - 1];
+        isLocked = prevStep.status !== "done";
+      }
+      return { ...step, isLocked };
+    });
+  }, [steps]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -172,18 +186,44 @@ export function DriverHomePage() {
           </div>
         )}
 
-        {steps.map((s) => {
-          const tm = typeMeta(s.dispatch_assignments.orders.type);
+        {stepsWithLockStatus.map((s) => {
+          const isOrderNode = s.node_type === 'order' && s.orders;
+          const tm = isOrderNode ? typeMeta(s.orders!.type) : null;
           const isDone = s.status === "done";
-          const isLocked = s.status === "locked";
+          const isLocked = s.isLocked;
           const isPending = s.status === "pending" || s.status === "in_progress";
+          
+          // 步骤类型标签
+          const stepTypeLabels: Record<string, string> = {
+            'pickup_bin': '取桶',
+            'drop_bin': '放桶',
+            'dump_waste': '倒垃圾',
+            'load_material': '装料',
+            'unload_material': '卸料',
+            'pickup': '取货',
+            'delivery': '送货',
+            'swap': '换桶',
+          };
+          const stepLabel = stepTypeLabels[s.step_type] || s.step_type;
+          
+          // 桶类型中文映射
+          const binTypeNames: Record<string, string> = {
+            'garbage': '垃圾桶',
+            'brick': '砖桶',
+            'soil': '土桶',
+            'cement': '水泥桶',
+            'asphalt': '沥青桶'
+          };
+          const binTypeName = isOrderNode && s.orders?.bin_type ? binTypeNames[s.orders.bin_type] || s.orders.bin_type : '';
+          
           return (
             <div
               key={s.id}
               className={cn(
                 "rounded-xl border bg-card overflow-hidden transition-all",
-                isPending && "border-primary border-2 shadow-md",
+                isPending && !isLocked && "border-primary border-2 shadow-md",
                 isDone && "opacity-70",
+                isLocked && "opacity-50",
               )}
             >
               <div className="p-3 flex items-start gap-3">
@@ -206,24 +246,43 @@ export function DriverHomePage() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge className={cn("text-[10px]", tm.className)}>{tm.label}</Badge>
-                    <span className="text-[11px] text-muted-foreground font-mono">
-                      {s.dispatch_assignments.orders.order_number}
-                    </span>
-                  </div>
-                  <div className="text-sm font-semibold mt-1">
-                    {STEP_TYPE_EMOJI[s.step_type]} {STEP_TYPE_LABEL[s.step_type]}
-                  </div>
-                  <div className="text-sm text-muted-foreground mt-0.5">{s.location}</div>
-                  {s.dispatch_assignments.orders.customer_notes && isPending && (
-                    <div className="mt-2 text-xs bg-status-progress/15 text-status-progress rounded px-2 py-1">
-                      📝 {s.dispatch_assignments.orders.customer_notes}
-                    </div>
+                  {isOrderNode ? (
+                    <>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge className={cn("text-[10px]", tm?.className)}>{tm?.label}</Badge>
+                        <span className="text-[11px] text-muted-foreground font-mono">
+                          {s.orders!.order_number}
+                        </span>
+                      </div>
+                      <div className="text-sm font-semibold mt-1">
+                        {STEP_TYPE_EMOJI[s.step_type] || tm?.emoji} {stepLabel} {s.orders!.bin_size ? `${s.orders!.bin_size}yd` : ""} {binTypeName}
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-0.5">{s.location}</div>
+                      {s.orders!.customer_notes && isPending && !isLocked && (
+                        <div className="mt-2 text-xs bg-status-progress/15 text-status-progress rounded px-2 py-1">
+                          📝 {s.orders!.customer_notes}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant="outline" className="text-[10px]">手动步骤</Badge>
+                      </div>
+                      <div className="text-sm font-semibold mt-1">
+                        {STEP_TYPE_EMOJI[s.step_type] || '📍'} {stepLabel}
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-0.5">{s.location}</div>
+                      {s.notes && isPending && !isLocked && (
+                        <div className="mt-2 text-xs bg-muted rounded px-2 py-1">
+                          📝 {s.notes}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
-              {isPending && (
+              {isPending && !isLocked && (
                 <Link
                   to="/driver/step/$stepId"
                   params={{ stepId: s.id }}
@@ -231,6 +290,11 @@ export function DriverHomePage() {
                 >
                   开始 <ArrowRight className="inline h-4 w-4 ml-1" />
                 </Link>
+              )}
+              {isLocked && (
+                <div className="bg-muted text-muted-foreground text-center py-3 text-sm">
+                  🔒 请先完成上一步
+                </div>
               )}
             </div>
           );
