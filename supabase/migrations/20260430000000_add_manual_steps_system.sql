@@ -89,8 +89,10 @@ DROP POLICY IF EXISTS "Drivers can view their own steps" ON public.job_steps;
 DROP POLICY IF EXISTS "Drivers can update their own steps" ON public.job_steps;
 DROP POLICY IF EXISTS "Dispatchers and admins can insert steps" ON public.job_steps;
 DROP POLICY IF EXISTS "Dispatchers and admins can delete steps" ON public.job_steps;
+DROP POLICY IF EXISTS "Staff can insert steps" ON public.job_steps;
+DROP POLICY IF EXISTS "Staff can delete steps" ON public.job_steps;
 
--- 司机可以查看自己的步骤，调度员和管理员可以查看所有步骤
+-- 司机可以查看自己的步骤，staff 可以查看所有步骤
 CREATE POLICY "Drivers can view their own steps" 
 ON public.job_steps
 FOR SELECT
@@ -101,11 +103,11 @@ USING (
   EXISTS (
     SELECT 1 FROM public.profiles
     WHERE profiles.id = auth.uid()
-    AND profiles.role IN ('admin', 'dispatcher')
+    AND profiles.role = 'staff'
   )
 );
 
--- 司机可以更新自己的步骤，调度员和管理员可以更新所有步骤
+-- 司机可以更新自己的步骤，staff 可以更新所有步骤
 CREATE POLICY "Drivers can update their own steps" 
 ON public.job_steps
 FOR UPDATE
@@ -116,7 +118,7 @@ USING (
   EXISTS (
     SELECT 1 FROM public.profiles
     WHERE profiles.id = auth.uid()
-    AND profiles.role IN ('admin', 'dispatcher')
+    AND profiles.role = 'staff'
   )
 )
 WITH CHECK (
@@ -125,12 +127,12 @@ WITH CHECK (
   EXISTS (
     SELECT 1 FROM public.profiles
     WHERE profiles.id = auth.uid()
-    AND profiles.role IN ('admin', 'dispatcher')
+    AND profiles.role = 'staff'
   )
 );
 
--- 调度员和管理员可以插入步骤
-CREATE POLICY "Dispatchers and admins can insert steps" 
+-- staff 可以插入步骤
+CREATE POLICY "Staff can insert steps" 
 ON public.job_steps
 FOR INSERT
 TO authenticated
@@ -138,12 +140,12 @@ WITH CHECK (
   EXISTS (
     SELECT 1 FROM public.profiles
     WHERE profiles.id = auth.uid()
-    AND profiles.role IN ('admin', 'dispatcher')
+    AND profiles.role = 'staff'
   )
 );
 
--- 调度员和管理员可以删除步骤
-CREATE POLICY "Dispatchers and admins can delete steps" 
+-- staff 可以删除步骤
+CREATE POLICY "Staff can delete steps" 
 ON public.job_steps
 FOR DELETE
 TO authenticated
@@ -151,7 +153,7 @@ USING (
   EXISTS (
     SELECT 1 FROM public.profiles
     WHERE profiles.id = auth.uid()
-    AND profiles.role IN ('admin', 'dispatcher')
+    AND profiles.role = 'staff'
   )
 );
 
