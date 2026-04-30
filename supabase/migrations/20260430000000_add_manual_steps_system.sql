@@ -38,7 +38,11 @@ ADD COLUMN IF NOT EXISTS node_type TEXT CHECK (node_type IN ('order', 'step')) D
 ALTER TABLE public.job_steps 
 ADD COLUMN IF NOT EXISTS notes TEXT;
 
--- 6. 将 location 改为可选（因为原来是 NOT NULL）
+-- 6. 添加 bin_id 字段（可选）
+ALTER TABLE public.job_steps 
+ADD COLUMN IF NOT EXISTS bin_id UUID REFERENCES public.bins(id);
+
+-- 7. 将 location 改为可选（因为原来是 NOT NULL）
 ALTER TABLE public.job_steps 
 ALTER COLUMN location DROP NOT NULL;
 
