@@ -221,6 +221,7 @@ export function DispatchPage() {
   });
 
   const currentAssignments = localAssignments ?? assignments;
+  const currentJobSteps = localJobSteps ?? jobSteps;
 
   // 区分已完成和未完成的订单
   const completedOrders = useMemo(() => orders.filter(o => o.status === "done"), [orders]);
@@ -355,6 +356,7 @@ export function DispatchPage() {
     onSuccess: () => {
       toast.success("已保存并同步给相关司机");
       setLocalAssignments(null);
+      setLocalJobSteps(null);
       qc.invalidateQueries({ queryKey: ["dispatch-assignments", date] });
       qc.invalidateQueries({ queryKey: ["dispatch-orders", date] });
       qc.invalidateQueries({ queryKey: ["job-steps", date] });
@@ -374,7 +376,7 @@ export function DispatchPage() {
       const { driverId, position, location, stepType, binId, notes } = params;
       
       // 获取该司机当天的所有步骤
-      const driverSteps = (localJobSteps || jobSteps).filter(
+      const driverSteps = currentJobSteps.filter(
         s => s.driver_id === driverId && s.scheduled_date === date
       ).sort((a, b) => a.step_number - b.step_number);
       
@@ -429,7 +431,7 @@ export function DispatchPage() {
 
   const deleteManualStep = useMutation({
     mutationFn: async (stepId: string) => {
-      const step = jobSteps.find(s => s.id === stepId);
+      const step = currentJobSteps.find(s => s.id === stepId);
       if (!step) throw new Error("步骤不存在");
       
       // 删除步骤
@@ -437,7 +439,7 @@ export function DispatchPage() {
       if (error) throw error;
       
       // 更新后续步骤的编号
-      const laterSteps = jobSteps.filter(
+      const laterSteps = currentJobSteps.filter(
         s => s.driver_id === step.driver_id && 
              s.scheduled_date === step.scheduled_date && 
              s.step_number > step.step_number
@@ -486,7 +488,7 @@ export function DispatchPage() {
           activeAssignment = currentAssignments.find(a => a.id === assignmentId);
         } else {
           const stepId = activeIdStr.slice(5);
-          activeStep = (localJobSteps || jobSteps).find(s => s.id === stepId);
+          activeStep = currentJobSteps.find(s => s.id === stepId);
         }
         
         if (overIdStr.startsWith('a:')) {
@@ -494,7 +496,7 @@ export function DispatchPage() {
           overAssignment = currentAssignments.find(a => a.id === assignmentId);
         } else {
           const stepId = overIdStr.slice(5);
-          overStep = (localJobSteps || jobSteps).find(s => s.id === stepId);
+          overStep = currentJobSteps.find(s => s.id === stepId);
         }
         
         console.log('找到的项:', { activeAssignment, activeStep, overAssignment, overStep });
@@ -526,7 +528,7 @@ export function DispatchPage() {
         
         // 获取该司机的所有 assignments 和 steps
         const driverAssignments = currentAssignments.filter(a => a.driver_id === activeDriverId);
-        const driverSteps = (localJobSteps || jobSteps).filter(s => s.driver_id === activeDriverId && s.node_type === 'step');
+        const driverSteps = currentJobSteps.filter(s => s.driver_id === activeDriverId && s.node_type === 'step');
         
         console.log('司机的项:', { driverAssignments: driverAssignments.length, driverSteps: driverSteps.length });
         
@@ -535,7 +537,7 @@ export function DispatchPage() {
         const allItems: NodeItem[] = [];
         
         driverAssignments.forEach(a => {
-          const assignmentSteps = (localJobSteps || jobSteps).filter(s => s.assignment_id === a.id);
+          const assignmentSteps = currentJobSteps.filter(s => s.assignment_id === a.id);
           const stepNumber = assignmentSteps.length > 0 ? assignmentSteps[0].step_number : a.sequence;
           allItems.push({ type: 'assignment', data: a, stepNumber });
         });
@@ -579,7 +581,7 @@ export function DispatchPage() {
         
         // 更新 sequence 和 step_number
         const newAssignments = [...currentAssignments];
-        const newSteps = [...(localJobSteps || jobSteps)];
+        const newSteps = [...currentJobSteps];
         
         reordered.forEach((item, index) => {
           const newStepNumber = index + 1;
@@ -789,7 +791,7 @@ export function DispatchPage() {
               {drivers.map((d) => {
                 const list = activeAssignments.filter((a) => a.driver_id === d.id)
                   .sort((x, y) => x.sequence - y.sequence);
-                const driverSteps = jobSteps.filter(s => s.driver_id === d.id);
+                const driverSteps = currentJobSteps.filter(s => s.driver_id === d.id);
 
                 // 检查该司机是否有未保存的更改
                 const driverServer = assignments.filter(a => a.driver_id === d.id);
