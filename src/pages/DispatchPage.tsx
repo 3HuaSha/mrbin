@@ -352,6 +352,23 @@ export function DispatchPage() {
           }).eq("assignment_id", u.id);
         }
       }
+      
+      // 更新手动步骤的位置（如果有本地修改）
+      if (localJobSteps) {
+        for (const localStep of localJobSteps) {
+          // 只处理手动步骤（node_type === 'step'）
+          if (localStep.node_type === 'step' && !localStep.id.startsWith('temp-')) {
+            const originalStep = jobSteps.find(s => s.id === localStep.id);
+            // 如果 step_number 或 driver_id 发生变化，则更新
+            if (originalStep && (originalStep.step_number !== localStep.step_number || originalStep.driver_id !== localStep.driver_id)) {
+              await supabase.from("job_steps").update({
+                step_number: localStep.step_number,
+                driver_id: localStep.driver_id,
+              }).eq("id", localStep.id);
+            }
+          }
+        }
+      }
     },
     onSuccess: () => {
       toast.success("已保存并同步给相关司机");
