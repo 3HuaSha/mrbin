@@ -466,11 +466,98 @@ export function DispatchPage() {
     const { active, over } = e;
     if (!over) return;
 
-    const card = cardId.parse(active.id as string);
+    const activeIdStr = active.id as string;
+    const overIdStr = over.id as string;
+
+    // 处理司机行内的拖拽排序
+    if (activeIdStr.startsWith('a:') || activeIdStr.startsWith('step:')) {
+      if (overIdStr.startsWith('a:') || overIdStr.startsWith('step:')) {
+        // 同一司机行内拖拽
+        // 找到对应的 assignment 或 step
+        let activeAssignment: Assignment | undefined;
+        let activeStep: JobStep | undefined;
+        
+        if (activeIdStr.startsWith('a:')) {
+          const assignmentId = activeIdStr.slice(2);
+          activeAssignment = currentAssignments.find(a => a.id === assignmentId);
+        } else {
+          const stepId = activeIdStr.slice(5);
+          activeStep = jobSteps.find(s => s.id === stepId);
+        }
+        
+        if (!activeAssignment && !activeStep) return;
+        
+        // 获取司机 ID
+        const driverId = activeAssignment?.driver_id || activeStep?.driver_id;
+        if (!driverId) return;
+        
+        // 获取该司机的所有节点
+        const driverNodes = allNodes.filter(n => {
+          if (n.type === 'order') {
+            return (n.data as Assignment).driver_id === driverId;
+          } else {
+            return (n.data as JobStep).driver_id === driverId;
+          }
+        });
+        
+        const oldIndex = driverNodes.findIndex(n => {
+          if (n.type === 'order') {
+            return (n.data as Assignment).id === (activeAssignment?.id || '');
+          } else {
+            return (n.data as JobStep).id === (activeStep?.id || '');
+          }
+        });
+        
+        const newIndex = driverNodes.findIndex(n => {
+          const nodeId = n.type === 'order' 
+            ? `a:${(n.data as Assignment).id}`
+            : `step:${(n.data as JobStep).id}`;
+          return nodeId === overIdStr;
+        });
+        
+        if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
+        
+        // 重新排序
+        const reordered = arrayMove(driverNodes, oldIndex, newIndex);
+        
+        // 更新 sequence 和 step_number
+        const newAssignments = [...currentAssignments];
+        const newSteps = [...jobSteps];
+        
+        reordered.forEach((node, index) => {
+          const newStepNumber = index + 1;
+          if (node.type === 'order') {
+            const assignment = node.data as Assignment;
+            const aIndex = newAssignments.findIndex(a => a.id === assignment.id);
+            if (aIndex >= 0) {
+              newAssignments[aIndex] = { ...newAssignments[aIndex], sequence: newStepNumber };
+            }
+            // 更新对应的 job_steps
+            const stepIndex = newSteps.findIndex(s => s.assignment_id === assignment.id);
+            if (stepIndex >= 0) {
+              newSteps[stepIndex] = { ...newSteps[stepIndex], step_number: newStepNumber };
+            }
+          } else {
+            const step = node.data as JobStep;
+            const sIndex = newSteps.findIndex(s => s.id === step.id);
+            if (sIndex >= 0) {
+              newSteps[sIndex] = { ...newSteps[sIndex], step_number: newStepNumber };
+            }
+          }
+        });
+        
+        setLocalAssignments(newAssignments);
+        setLocalJobSteps(newSteps);
+        return;
+      }
+    }
+
+    // 原有的拖拽逻辑（从待排班列拖到司机行）
+    const card = cardId.parse(activeIdStr);
     if (!card) return;
 
     let targetColumnId: string | null = null;
-    const overParsed = cardId.parse(over.id as string);
+    const overParsed = cardId.parse(overIdStr);
     if (overParsed) {
       if (overParsed.kind === "assignment") {
         const a = currentAssignments.find((x) => x.id === overParsed.id);
@@ -479,7 +566,7 @@ export function DispatchPage() {
         targetColumnId = BACKLOG_ID;
       }
     } else {
-      targetColumnId = over.id as string;
+      targetColumnId = overIdStr;
     }
 
     if (!targetColumnId) return;
@@ -1170,61 +1257,92 @@ function DriverColumn({
           isOver ? "bg-primary/5" : "bg-muted/5"
         )}
       >
-        {/* 插入表单 - 固定在容器顶部中央 */}
-        {insertStepAt?.driverId === driver.id && (
-          <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50">
-            <InsertStepButton
-              driverId={driver.id}
-              position={insertStepAt.position}
-              isActive={true}
-              onClick={() => {}}
-              onClose={() => setInsertStepAt(null)}
-              onInsert={onInsertStep}
-              commonLocations={commonLocations}
-              bins={bins}
-            />
-          </div>
-        )}
-        
-        {allNodes.map((node, index) => (
-          <div key={node.type === 'order' ? (node.data as Assignment).id : (node.data as JobStep).id} className="relative flex items-center shrink-0 group/item">
-            {/* 前置插入按钮 - 只在第一个节点前显示，且只在悬停时显示 */}
-            {index === 0 && (
-              <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-20">
-                <button
-                  onClick={() => setInsertStepAt({ driverId: driver.id, position: 0 })}
-                  className="w-8 h-8 rounded-full border-2 border-dashed border-primary/50 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary bg-card shadow-md"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-            )}
+        <SortableContext
+          items={allNodes.map(node => 
+            node.type === 'order' 
+              ? cardId.fromAssignment((node.data as Assignment).id)
+              : `step:${(node.data as JobStep).id}`
+          )}
+          strategy={rectSortingStrategy}
+        >
+          {allNodes.map((node, index) => {
+            const nodeId = node.type === 'order' 
+              ? cardId.fromAssignment((node.data as Assignment).id)
+              : `step:${(node.data as JobStep).id}`;
             
-            {/* 卡片内容 */}
-            {node.type === 'order' ? (
-              <OrderNodeDisplay
-                assignment={node.data as Assignment}
-                vehicle={vehicle}
-                onCancel={onCancel}
-              />
-            ) : (
-              <StepNodeDisplay
-                step={node.data as JobStep}
-                onDelete={onDeleteStep}
-              />
-            )}
-            
-            {/* 后置插入按钮 - 只在悬停时显示 */}
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-20">
-              <button
-                onClick={() => setInsertStepAt({ driverId: driver.id, position: node.stepNumber + 1 })}
-                className="w-8 h-8 rounded-full border-2 border-dashed border-primary/50 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary bg-card shadow-md"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        ))}
+            return (
+              <SortableNode key={nodeId} id={nodeId}>
+                <div className="relative flex items-center shrink-0 group/item">
+                  {/* 前置插入按钮 - 只在第一个节点前显示，且只在悬停时显示 */}
+                  {index === 0 && (
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-20">
+                      <button
+                        onClick={() => setInsertStepAt({ driverId: driver.id, position: 0 })}
+                        className="w-8 h-8 rounded-full border-2 border-dashed border-primary/50 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary bg-card shadow-md"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      {/* 插入表单 - 贴着按钮显示 */}
+                      {insertStepAt?.driverId === driver.id && insertStepAt?.position === 0 && (
+                        <div className="absolute left-full top-0 ml-2 z-50">
+                          <InsertStepButton
+                            driverId={driver.id}
+                            position={0}
+                            isActive={true}
+                            onClick={() => {}}
+                            onClose={() => setInsertStepAt(null)}
+                            onInsert={onInsertStep}
+                            commonLocations={commonLocations}
+                            bins={bins}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* 卡片内容 */}
+                  {node.type === 'order' ? (
+                    <OrderNodeDisplay
+                      assignment={node.data as Assignment}
+                      vehicle={vehicle}
+                      onCancel={onCancel}
+                    />
+                  ) : (
+                    <StepNodeDisplay
+                      step={node.data as JobStep}
+                      onDelete={onDeleteStep}
+                    />
+                  )}
+                  
+                  {/* 后置插入按钮 - 只在悬停时显示 */}
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-20">
+                    <button
+                      onClick={() => setInsertStepAt({ driverId: driver.id, position: node.stepNumber + 1 })}
+                      className="w-8 h-8 rounded-full border-2 border-dashed border-primary/50 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary bg-card shadow-md"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                    {/* 插入表单 - 贴着按钮显示 */}
+                    {insertStepAt?.driverId === driver.id && insertStepAt?.position === node.stepNumber + 1 && (
+                      <div className="absolute left-full top-0 ml-2 z-50">
+                        <InsertStepButton
+                          driverId={driver.id}
+                          position={node.stepNumber + 1}
+                          isActive={true}
+                          onClick={() => {}}
+                          onClose={() => setInsertStepAt(null)}
+                          onInsert={onInsertStep}
+                          commonLocations={commonLocations}
+                          bins={bins}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </SortableNode>
+            );
+          })}
+        </SortableContext>
         
         {allNodes.length === 0 && (
           <div className="w-full self-center text-center text-xs text-muted-foreground/50 py-4">
@@ -1244,6 +1362,23 @@ function SortableOrderCard({ id, children }: { id: string; children: React.React
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.4 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {children}
+    </div>
+  );
+}
+
+// ============ Sortable Node (for driver rows) ============
+function SortableNode({ id, children }: { id: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    cursor: isDragging ? 'grabbing' : 'grab',
   };
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
