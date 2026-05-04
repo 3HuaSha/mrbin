@@ -1193,6 +1193,13 @@ function DriverColumn({
   setInsertStepAt: (value: { driverId: string; position: number } | null) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: driver.id });
+  const [buttonPosition, setButtonPosition] = useState<{ x: number; y: number } | null>(null);
+  
+  const handleButtonClick = (position: number, event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setButtonPosition({ x: rect.left + rect.width / 2, y: rect.top });
+    setInsertStepAt({ driverId: driver.id, position });
+  };
   
   // 合并订单节点和步骤节点，按 step_number 排序
   const allNodes = useMemo(() => {
@@ -1257,16 +1264,29 @@ function DriverColumn({
           isOver ? "bg-primary/5" : "bg-muted/5"
         )}
       >
-        {/* 插入表单 - 悬浮在容器顶部 */}
-        {insertStepAt?.driverId === driver.id && (
-          <div className="absolute top-2 left-4 z-[100]">
+        {/* 插入表单 - 使用 fixed 定位悬浮在按钮上方 */}
+        {insertStepAt?.driverId === driver.id && buttonPosition && (
+          <div 
+            className="fixed z-[100]" 
+            style={{ 
+              left: `${buttonPosition.x}px`, 
+              top: `${Math.max(80, buttonPosition.y - 10)}px`,
+              transform: 'translateX(-50%)'
+            }}
+          >
             <InsertStepButton
               driverId={driver.id}
               position={insertStepAt.position}
               isActive={true}
               onClick={() => {}}
-              onClose={() => setInsertStepAt(null)}
-              onInsert={onInsertStep}
+              onClose={() => {
+                setInsertStepAt(null);
+                setButtonPosition(null);
+              }}
+              onInsert={(params) => {
+                onInsertStep(params);
+                setButtonPosition(null);
+              }}
               commonLocations={commonLocations}
               bins={bins}
             />
@@ -1293,7 +1313,7 @@ function DriverColumn({
                   {index === 0 && (
                     <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-20">
                       <button
-                        onClick={() => setInsertStepAt({ driverId: driver.id, position: 0 })}
+                        onClick={(e) => handleButtonClick(0, e)}
                         className="w-8 h-8 rounded-full border-2 border-dashed border-primary/50 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary bg-card shadow-md"
                       >
                         <Plus className="h-4 w-4" />
@@ -1318,7 +1338,7 @@ function DriverColumn({
                   {/* 后置插入按钮 - 只在悬停时显示 */}
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-20">
                     <button
-                      onClick={() => setInsertStepAt({ driverId: driver.id, position: node.stepNumber + 1 })}
+                      onClick={(e) => handleButtonClick(node.stepNumber + 1, e)}
                       className="w-8 h-8 rounded-full border-2 border-dashed border-primary/50 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary bg-card shadow-md"
                     >
                       <Plus className="h-4 w-4" />
