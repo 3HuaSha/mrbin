@@ -473,61 +473,88 @@ export function DispatchPage() {
     if (activeIdStr.startsWith('a:') || activeIdStr.startsWith('step:')) {
       if (overIdStr.startsWith('a:') || overIdStr.startsWith('step:')) {
         // 同一司机行内拖拽
-        // 找到对应的 assignment 或 step
         let activeAssignment: Assignment | undefined;
         let activeStep: JobStep | undefined;
+        let overAssignment: Assignment | undefined;
+        let overStep: JobStep | undefined;
         
         if (activeIdStr.startsWith('a:')) {
           const assignmentId = activeIdStr.slice(2);
           activeAssignment = currentAssignments.find(a => a.id === assignmentId);
         } else {
           const stepId = activeIdStr.slice(5);
-          activeStep = jobSteps.find(s => s.id === stepId);
+          activeStep = (localJobSteps || jobSteps).find(s => s.id === stepId);
+        }
+        
+        if (overIdStr.startsWith('a:')) {
+          const assignmentId = overIdStr.slice(2);
+          overAssignment = currentAssignments.find(a => a.id === assignmentId);
+        } else {
+          const stepId = overIdStr.slice(5);
+          overStep = (localJobSteps || jobSteps).find(s => s.id === stepId);
         }
         
         if (!activeAssignment && !activeStep) return;
+        if (!overAssignment && !overStep) return;
         
         // 获取司机 ID
-        const driverId = activeAssignment?.driver_id || activeStep?.driver_id;
-        if (!driverId) return;
+        const activeDriverId = activeAssignment?.driver_id || activeStep?.driver_id;
+        const overDriverId = overAssignment?.driver_id || overStep?.driver_id;
         
-        // 获取该司机的所有节点
-        const driverNodes = allNodes.filter(n => {
-          if (n.type === 'order') {
-            return (n.data as Assignment).driver_id === driverId;
+        // 只处理同一司机的拖拽
+        if (activeDriverId !== overDriverId) return;
+        if (!activeDriverId) return;
+        
+        // 获取该司机的所有 assignments 和 steps
+        const driverAssignments = currentAssignments.filter(a => a.driver_id === activeDriverId);
+        const driverSteps = (localJobSteps || jobSteps).filter(s => s.driver_id === activeDriverId && s.node_type === 'step');
+        
+        // 合并并排序
+        type NodeItem = { type: 'assignment' | 'step'; data: Assignment | JobStep; stepNumber: number };
+        const allItems: NodeItem[] = [];
+        
+        driverAssignments.forEach(a => {
+          const assignmentSteps = (localJobSteps || jobSteps).filter(s => s.assignment_id === a.id);
+          const stepNumber = assignmentSteps.length > 0 ? assignmentSteps[0].step_number : a.sequence;
+          allItems.push({ type: 'assignment', data: a, stepNumber });
+        });
+        
+        driverSteps.forEach(s => {
+          allItems.push({ type: 'step', data: s, stepNumber: s.step_number });
+        });
+        
+        allItems.sort((a, b) => a.stepNumber - b.stepNumber);
+        
+        // 找到拖拽的项和目标项的索引
+        const oldIndex = allItems.findIndex(item => {
+          if (item.type === 'assignment') {
+            return (item.data as Assignment).id === activeAssignment?.id;
           } else {
-            return (n.data as JobStep).driver_id === driverId;
+            return (item.data as JobStep).id === activeStep?.id;
           }
         });
         
-        const oldIndex = driverNodes.findIndex(n => {
-          if (n.type === 'order') {
-            return (n.data as Assignment).id === (activeAssignment?.id || '');
+        const newIndex = allItems.findIndex(item => {
+          if (item.type === 'assignment') {
+            return (item.data as Assignment).id === overAssignment?.id;
           } else {
-            return (n.data as JobStep).id === (activeStep?.id || '');
+            return (item.data as JobStep).id === overStep?.id;
           }
-        });
-        
-        const newIndex = driverNodes.findIndex(n => {
-          const nodeId = n.type === 'order' 
-            ? `a:${(n.data as Assignment).id}`
-            : `step:${(n.data as JobStep).id}`;
-          return nodeId === overIdStr;
         });
         
         if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
         
         // 重新排序
-        const reordered = arrayMove(driverNodes, oldIndex, newIndex);
+        const reordered = arrayMove(allItems, oldIndex, newIndex);
         
         // 更新 sequence 和 step_number
         const newAssignments = [...currentAssignments];
-        const newSteps = [...jobSteps];
+        const newSteps = [...(localJobSteps || jobSteps)];
         
-        reordered.forEach((node, index) => {
+        reordered.forEach((item, index) => {
           const newStepNumber = index + 1;
-          if (node.type === 'order') {
-            const assignment = node.data as Assignment;
+          if (item.type === 'assignment') {
+            const assignment = item.data as Assignment;
             const aIndex = newAssignments.findIndex(a => a.id === assignment.id);
             if (aIndex >= 0) {
               newAssignments[aIndex] = { ...newAssignments[aIndex], sequence: newStepNumber };
@@ -538,7 +565,7 @@ export function DispatchPage() {
               newSteps[stepIndex] = { ...newSteps[stepIndex], step_number: newStepNumber };
             }
           } else {
-            const step = node.data as JobStep;
+            const step = item.data as JobStep;
             const sIndex = newSteps.findIndex(s => s.id === step.id);
             if (sIndex >= 0) {
               newSteps[sIndex] = { ...newSteps[sIndex], step_number: newStepNumber };
