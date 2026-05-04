@@ -29,7 +29,7 @@ import {
   setUserRole,
   toggleProfileActive,
   bindAuthToProfile,
-} from "@/server/users";
+} from "@/actions/users";
 import { useAudit } from "@/hooks/use-audit";
 import { cn } from "@/lib/utils";
 

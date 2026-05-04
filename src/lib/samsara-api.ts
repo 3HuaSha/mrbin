@@ -25,7 +25,7 @@ export interface SamsaraResponse {
   timestamp?: string;
 }
 
-import { fetchSamsaraData } from "@/server/samsara";
+import { fetchSamsaraData } from "@/actions/samsara";
 
 /**
  * 获取 Samsara 车辆位置
