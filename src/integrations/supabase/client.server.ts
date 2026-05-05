@@ -15,7 +15,7 @@ function createSupabaseAdminClient() {
 
   if (!SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error(
-      'Missing SUPABASE_SERVICE_ROLE_KEY. Please add it in Cloudflare Pages Settings -> Variables and Secrets.'
+      'Missing SUPABASE_SERVICE_ROLE_KEY. Please add it to your environment variables.'
     );
   }
 
