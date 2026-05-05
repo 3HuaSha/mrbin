@@ -197,8 +197,12 @@ export function DriverStepPage() {
                 onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
             </label>
             {photoUrl && (
-              <div className="mt-3 rounded-lg overflow-hidden border">
-                <img src={photoUrl} alt="预览" className="w-full" />
+              <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
+                <img 
+                  src={photoUrl} 
+                  alt="预览" 
+                  className="w-full h-auto max-h-[300px] object-contain"
+                />
               </div>
             )}
           </div>
@@ -252,8 +256,12 @@ export function DriverStepPage() {
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "weigh")} />
               </label>
               {weighTicketUrl && (
-                <div className="mt-3 rounded-lg overflow-hidden border">
-                  <img src={weighTicketUrl} alt="磅单预览" className="w-full" />
+                <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
+                  <img 
+                    src={weighTicketUrl} 
+                    alt="磅单预览" 
+                    className="w-full h-auto max-h-[300px] object-contain"
+                  />
                 </div>
               )}
             </div>
