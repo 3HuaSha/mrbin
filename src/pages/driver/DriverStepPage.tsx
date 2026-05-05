@@ -169,40 +169,39 @@ export function DriverStepPage() {
         <div className="bg-card border rounded-xl p-4 space-y-4">
           <div className="font-semibold text-sm">需要完成</div>
 
-          {step.requires_photo && (
-            <div>
-              <Label className="text-base font-semibold">📷 拍照上传 *</Label>
-              <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
-                {uploading === "photo" ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <span className="text-sm text-muted-foreground">上传中...</span>
+          {/* 所有步骤都显示拍照上传 */}
+          <div>
+            <Label className="text-base font-semibold">📷 拍照上传 {step.requires_photo && '*'}</Label>
+            <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
+              {uploading === "photo" ? (
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <span className="text-sm text-muted-foreground">上传中...</span>
+                </div>
+              ) : photoUrl ? (
+                <div className="flex flex-col items-center gap-2 w-full">
+                  <div className="text-status-done font-semibold text-base flex items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5" />
+                    照片已上传
                   </div>
-                ) : photoUrl ? (
-                  <div className="flex flex-col items-center gap-2 w-full">
-                    <div className="text-status-done font-semibold text-base flex items-center gap-2">
-                      <CheckCircle2 className="h-5 w-5" />
-                      照片已上传
-                    </div>
-                    <span className="text-xs text-muted-foreground">点击重新拍照</span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-2">
-                    <Camera className="h-10 w-10 text-primary" />
-                    <span className="font-medium text-base">点击拍照</span>
-                    <span className="text-xs text-muted-foreground">或选择相册图片</span>
-                  </div>
-                )}
-                <input type="file" accept="image/*" capture="environment" className="hidden"
-                  onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
-              </label>
-              {photoUrl && (
-                <div className="mt-3 rounded-lg overflow-hidden border">
-                  <img src={photoUrl} alt="预览" className="w-full" />
+                  <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <Camera className="h-10 w-10 text-primary" />
+                  <span className="font-medium text-base">点击拍照</span>
+                  <span className="text-xs text-muted-foreground">或选择相册图片</span>
                 </div>
               )}
-            </div>
-          )}
+              <input type="file" accept="image/*" capture="environment" className="hidden"
+                onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
+            </label>
+            {photoUrl && (
+              <div className="mt-3 rounded-lg overflow-hidden border">
+                <img src={photoUrl} alt="预览" className="w-full" />
+              </div>
+            )}
+          </div>
 
           {step.requires_bin_number && (
             <div>
@@ -269,10 +268,24 @@ export function DriverStepPage() {
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background border-t">
-        <Button onClick={() => complete.mutate()} disabled={!canComplete() || complete.isPending}
-          className="w-full h-14 text-base font-bold">
-          {complete.isPending ? "提交中..." : "完成此步骤"}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background border-t shadow-lg">
+        <Button 
+          onClick={() => complete.mutate()} 
+          disabled={!canComplete() || complete.isPending}
+          className="w-full h-14 text-base font-bold"
+          size="lg"
+        >
+          {complete.isPending ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              提交中...
+            </span>
+          ) : (
+            <span className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5" />
+              完成此步骤
+            </span>
+          )}
         </Button>
       </div>
     </div>
