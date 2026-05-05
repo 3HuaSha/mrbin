@@ -319,7 +319,6 @@ export function FleetMapPage() {
                                 </div>
                               </div>
                             );
-                            );
                           } else {
                             // 手动步骤节点卡片 - 完全匹配排班页面样式
                             const stepTypeLabels: Record<string, string> = {
