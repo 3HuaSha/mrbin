@@ -1051,7 +1051,7 @@ function InsertStepButton({
             <SelectTrigger className="mt-0.5 h-7 text-[10px]">
               <SelectValue placeholder="选择地点" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="z-[110]">
               {commonLocations.map((loc) => (
                 <SelectItem key={loc.id} value={loc.address} className="text-[10px]">
                   {loc.name}
@@ -1095,7 +1095,7 @@ function InsertStepButton({
           <SelectTrigger className="mt-0.5 h-7 text-[10px]">
             <SelectValue placeholder="选择动作" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="z-[110]">
             <SelectItem value="pickup_bin" className="text-[10px]">取桶</SelectItem>
             <SelectItem value="drop_bin" className="text-[10px]">放桶</SelectItem>
             <SelectItem value="dump_waste" className="text-[10px]">倒垃圾</SelectItem>
@@ -1111,7 +1111,7 @@ function InsertStepButton({
           <SelectTrigger className="mt-0.5 h-7 text-[10px]">
             <SelectValue placeholder="不指定" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="z-[110]">
             <SelectItem value="none" className="text-[10px]">不指定</SelectItem>
             {bins.map((bin) => (
               <SelectItem key={bin.id} value={bin.id} className="text-[10px]">
