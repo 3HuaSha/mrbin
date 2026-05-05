@@ -397,33 +397,17 @@ export function DispatchPage() {
         s => s.driver_id === driverId && s.scheduled_date === date
       ).sort((a, b) => a.step_number - b.step_number);
       
-      // 在指定位置插入新步骤，并重新编号
-      const newStep: JobStep = {
-        id: `temp-step-${Date.now()}`,
+      // 插入新步骤到数据库
+      const { data, error } = await supabase.from("job_steps").insert({
         driver_id: driverId,
         scheduled_date: date,
         step_number: position,
-        order_id: null,
-        assignment_id: null,
         node_type: 'step',
         location,
         step_type: stepType,
         bin_id: binId || null,
         notes: notes || null,
         status: 'locked',
-      };
-      
-      // 插入新步骤到数据库
-      const { data, error } = await supabase.from("job_steps").insert({
-        driver_id: newStep.driver_id,
-        scheduled_date: newStep.scheduled_date,
-        step_number: newStep.step_number,
-        node_type: newStep.node_type,
-        location: newStep.location,
-        step_type: newStep.step_type,
-        bin_id: newStep.bin_id,
-        notes: newStep.notes,
-        status: newStep.status,
       }).select().single();
       
       if (error) throw error;
@@ -436,9 +420,27 @@ export function DispatchPage() {
           .eq("id", step.id);
       }
       
-      return data;
+      return { newStep: data as JobStep, stepsToUpdate };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      const { newStep, stepsToUpdate } = result;
+      
+      // 立即更新本地状态
+      const updatedSteps = [...currentJobSteps];
+      
+      // 添加新步骤
+      updatedSteps.push(newStep);
+      
+      // 更新后续步骤的编号
+      stepsToUpdate.forEach(oldStep => {
+        const index = updatedSteps.findIndex(s => s.id === oldStep.id);
+        if (index >= 0) {
+          updatedSteps[index] = { ...updatedSteps[index], step_number: oldStep.step_number + 1 };
+        }
+      });
+      
+      setLocalJobSteps(updatedSteps);
+      
       toast.success("已插入步骤");
       setInsertStepAt(null);
       qc.invalidateQueries({ queryKey: ["job-steps", date] });
@@ -467,8 +469,25 @@ export function DispatchPage() {
           .update({ step_number: laterStep.step_number - 1 })
           .eq("id", laterStep.id);
       }
+      
+      return { deletedStep: step, laterSteps };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      const { deletedStep, laterSteps } = result;
+      
+      // 立即更新本地状态
+      let updatedSteps = currentJobSteps.filter(s => s.id !== deletedStep.id);
+      
+      // 更新后续步骤的编号
+      updatedSteps = updatedSteps.map(s => {
+        if (laterSteps.some(ls => ls.id === s.id)) {
+          return { ...s, step_number: s.step_number - 1 };
+        }
+        return s;
+      });
+      
+      setLocalJobSteps(updatedSteps);
+      
       toast.success("已删除步骤");
       qc.invalidateQueries({ queryKey: ["job-steps", date] });
     },
@@ -489,6 +508,18 @@ export function DispatchPage() {
     const overIdStr = over.id as string;
 
     console.log('拖拽结束:', { activeIdStr, overIdStr });
+
+    // ============ 处理手动步骤拖到待排班区域（删除步骤）============
+    if (activeIdStr.startsWith('step:') && overIdStr === BACKLOG_ID) {
+      const stepId = activeIdStr.slice(5);
+      const step = currentJobSteps.find(s => s.id === stepId);
+      
+      if (step && step.node_type === 'step') {
+        console.log('手动步骤拖到待排班区域，删除步骤:', stepId);
+        deleteManualStep.mutate(stepId);
+        return;
+      }
+    }
 
     // 处理司机行内的拖拽排序
     if (activeIdStr.startsWith('a:') || activeIdStr.startsWith('step:')) {
@@ -698,6 +729,63 @@ export function DispatchPage() {
     if (targetColumnId === BACKLOG_ID) {
       newAssignments.splice(aIndex, 1);
       const driverAsgs = newAssignments.filter(x => x.driver_id === a.driver_id).sort((x, y) => x.sequence - y.sequence);
+      driverAsgs.forEach((x, i) => x.sequence = i + 1);
+      setLocalAssignments(newAssignments);
+      return;
+    }
+
+    const targetDriver = targetColumnId;
+    const sameColumn = a.driver_id === targetDriver;
+
+    if (sameColumn) {
+      const driverAsgs = newAssignments
+        .filter((x) => x.driver_id === targetDriver)
+        .sort((x, y) => x.sequence - y.sequence);
+
+      const oldIndex = driverAsgs.findIndex((x) => x.id === a.id);
+      let newIndex = oldIndex;
+      if (overParsed?.kind === "assignment") {
+        newIndex = driverAsgs.findIndex((x) => x.id === overParsed.id);
+      } else {
+        newIndex = driverAsgs.length - 1;
+      }
+
+      if (newIndex < 0) newIndex = driverAsgs.length - 1;
+      if (oldIndex === newIndex) return;
+
+      const reordered = arrayMove(driverAsgs, oldIndex, newIndex);
+      reordered.forEach((x, i) => { x.sequence = i + 1; });
+
+      const finalAssignments = newAssignments.map(x => {
+        if (x.driver_id === targetDriver) {
+          return reordered.find(r => r.id === x.id)!;
+        }
+        return x;
+      });
+      setLocalAssignments(finalAssignments);
+      return;
+    }
+
+    // 跨司机移动
+    newAssignments.splice(aIndex, 1);
+    const oldDriverAsgs = newAssignments.filter(x => x.driver_id === a.driver_id).sort((x, y) => x.sequence - y.sequence);
+    oldDriverAsgs.forEach((x, i) => x.sequence = i + 1);
+
+    a.driver_id = targetDriver;
+    a.vehicle_id = getDriverVehicle(targetDriver);
+
+    const targetDriverAsgs = newAssignments.filter(x => x.driver_id === targetDriver).sort((x, y) => x.sequence - y.sequence);
+    let insertIndex = targetDriverAsgs.length;
+    if (overParsed && overParsed.kind === "assignment") {
+      insertIndex = targetDriverAsgs.findIndex(x => x.id === overParsed.id);
+      if (insertIndex < 0) insertIndex = targetDriverAsgs.length;
+    }
+
+    targetDriverAsgs.splice(insertIndex, 0, a);
+    targetDriverAsgs.forEach((x, i) => x.sequence = i + 1);
+
+    setLocalAssignments(newAssignments);
+  };
       driverAsgs.forEach((x, i) => x.sequence = i + 1);
       setLocalAssignments(newAssignments);
       return;

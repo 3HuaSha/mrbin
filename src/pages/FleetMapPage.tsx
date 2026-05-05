@@ -1,15 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { todayISO } from "@/lib/business";
+import { todayISO, typeMeta } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Truck, ChevronDown, ChevronRight, MapPin } from "lucide-react";
+import { Truck, ChevronDown, ChevronRight, MapPin, AlertTriangle } from "lucide-react";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 
 type Driver = { id: string; name: string };
 
-type Order = { id: string; order_number: string; address: string; type: string; status: string; customer_notes?: string };
+type Order = { 
+  id: string; 
+  order_number: string; 
+  address: string; 
+  type: string; 
+  status: string; 
+  customer_notes?: string;
+  bin_size?: string;
+  bin_type?: string;
+  time_window?: string;
+  time_window_custom?: string;
+};
 
 type Assignment = {
   id: string;
@@ -17,6 +28,22 @@ type Assignment = {
   order_id: string;
   sequence: number;
   orders: Order;
+};
+
+type JobStep = {
+  id: string;
+  driver_id: string;
+  scheduled_date: string;
+  step_number: number;
+  order_id: string | null;
+  assignment_id: string | null;
+  node_type: 'order' | 'step';
+  location: string | null;
+  step_type: string;
+  bin_id: string | null;
+  notes: string | null;
+  status: string;
+  orders?: Order | null;
 };
 
 export function FleetMapPage() {
@@ -51,34 +78,52 @@ export function FleetMapPage() {
     },
   });
 
-  const { data: assignments = [] } = useQuery({
-    queryKey: ["map-assignments", date],
+  // 获取所有任务步骤（包含订单节点和手动步骤节点）
+  const { data: jobSteps = [] } = useQuery({
+    queryKey: ["map-job-steps", date],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("dispatch_assignments")
-        .select("id,driver_id,order_id,sequence,orders(*)")
+        .from("job_steps")
+        .select("*, orders(*)")
         .eq("scheduled_date", date)
-        .order("sequence");
+        .order("step_number");
       if (error) throw error;
-      return (data ?? []) as unknown as Assignment[];
+      return (data ?? []) as unknown as JobStep[];
     },
   });
   
+  // 提取所有订单（只包含订单节点，用于地图显示）
   const orders = useMemo(() => {
     const uniqueOrders = new Map<string, Order>();
-    assignments.forEach(a => {
-      if (a.orders) uniqueOrders.set(a.orders.id, a.orders);
+    jobSteps.forEach(step => {
+      if (step.node_type === 'order' && step.orders) {
+        uniqueOrders.set(step.orders.id, step.orders);
+      }
     });
     return Array.from(uniqueOrders.values());
-  }, [assignments]);
+  }, [jobSteps]);
 
-  const driverAssignments = useMemo(() => {
-    const map: Record<string, Assignment[]> = {};
-    for (const a of assignments) {
-      (map[a.driver_id] ??= []).push(a);
+  // 按司机分组任务步骤
+  const driverJobSteps = useMemo(() => {
+    const map: Record<string, JobStep[]> = {};
+    for (const step of jobSteps) {
+      (map[step.driver_id] ??= []).push(step);
     }
     return map;
-  }, [assignments]);
+  }, [jobSteps]);
+  
+  // 为了兼容地图组件，仍然需要 assignments
+  const assignments = useMemo(() => {
+    return jobSteps
+      .filter(step => step.node_type === 'order' && step.assignment_id)
+      .map(step => ({
+        id: step.assignment_id!,
+        driver_id: step.driver_id,
+        order_id: step.order_id!,
+        sequence: step.step_number,
+        orders: step.orders!
+      }));
+  }, [jobSteps]);
 
   return (
     <div className="p-0 h-screen flex flex-col">
@@ -102,7 +147,7 @@ export function FleetMapPage() {
           
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {drivers.map(d => {
-              const ass = driverAssignments[d.id] ?? [];
+              const steps = driverJobSteps[d.id] ?? [];
               const isExpanded = expandedDrivers.has(d.id);
               
               return (
@@ -115,33 +160,88 @@ export function FleetMapPage() {
                       {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground"/> : <ChevronRight className="h-4 w-4 text-muted-foreground"/>}
                       {d.name}
                     </div>
-                    <Badge variant="secondary" className="text-xs">{ass.length}</Badge>
+                    <Badge variant="secondary" className="text-xs">{steps.length}</Badge>
                   </div>
                   
                   {isExpanded && (
                     <div className="p-2 space-y-1.5 border-t bg-muted/10">
-                      {ass.length === 0 ? (
+                      {steps.length === 0 ? (
                         <div className="text-xs text-muted-foreground text-center py-3">暂无任务</div>
                       ) : (
-                        ass.map((a, i) => (
-                          <div key={a.id} className="text-xs p-2 rounded bg-background border shadow-sm flex flex-col gap-1 hover:border-primary/30 transition-colors">
-                            <div className="flex items-center gap-1.5">
-                              <span className="bg-primary/10 text-primary w-4 h-4 rounded-full flex items-center justify-center text-[10px] shrink-0">{i+1}</span>
-                              <span className="uppercase text-[10px] bg-muted px-1.5 py-0.5 rounded">{a.orders.type}</span>
-                            </div>
-                            {/* 尺寸和时段放在同一行 */}
-                            <div className="flex items-center gap-2 text-[10px]">
-                              <span className="text-muted-foreground">{a.orders.bin_size || "—"}</span>
-                              <span className="text-muted-foreground">·</span>
-                              <span className="text-muted-foreground">{a.orders.time_window || "—"}</span>
-                            </div>
-                            {/* 地址截断显示 */}
-                            <div className="text-muted-foreground truncate text-[10px]" title={a.orders.address}>
-                              <MapPin className="h-3 w-3 inline mr-1 text-primary/50"/>
-                              {a.orders.address}
-                            </div>
-                          </div>
-                        ))
+                        steps.map((step, i) => {
+                          if (step.node_type === 'order' && step.orders) {
+                            // 订单节点卡片 - 完全匹配排班页面样式
+                            const order = step.orders;
+                            const tm = typeMeta(order.type);
+                            
+                            // 桶类型中文映射
+                            const binTypeNames: Record<string, string> = {
+                              'garbage': '垃圾桶',
+                              'brick': '砖桶',
+                              'soil': '土桶',
+                              'cement': '水泥桶',
+                              'asphalt': '沥青桶'
+                            };
+                            const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '';
+                            
+                            // 时段标签
+                            const timeLabel = order.time_window_custom || order.time_window || '';
+                            
+                            return (
+                              <div key={step.id} className="relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl">
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="text-xs font-semibold leading-tight">
+                                    {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground leading-snug break-words" title={order.address}>
+                                    {order.address}
+                                  </div>
+                                  <div className="text-[10px] text-primary font-medium">{timeLabel}</div>
+                                  {order.customer_notes && (
+                                    <div className="text-[9px] text-status-progress truncate">
+                                      📝 {order.customer_notes}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          } else {
+                            // 手动步骤节点卡片 - 完全匹配排班页面样式
+                            const stepTypeLabels: Record<string, string> = {
+                              'pickup_bin': '取桶',
+                              'drop_bin': '放桶',
+                              'dump_waste': '倒垃圾',
+                              'load_material': '装料',
+                              'unload_material': '卸料',
+                            };
+                            const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
+                            
+                            return (
+                              <div key={step.id} className="relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg">
+                                <div className="flex flex-col gap-1">
+                                  <Badge variant="outline" className="text-[8px] w-fit">手动步骤</Badge>
+                                  <div className="text-[11px] font-semibold">
+                                    {stepLabel}
+                                  </div>
+                                  {step.location && (
+                                    <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
+                                      <MapPin className="h-2 w-2 inline mr-0.5" />
+                                      {step.location}
+                                    </div>
+                                  )}
+                                  {step.bin_id && (
+                                    <div className="text-[9px] text-primary">桶: {step.bin_id}</div>
+                                  )}
+                                  {step.notes && (
+                                    <div className="text-[8px] text-muted-foreground truncate">
+                                      📝 {step.notes}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                        })
                       )}
                     </div>
                   )}
