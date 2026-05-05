@@ -1,11 +1,12 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import handler from './dist/server/server.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const port = process.env.PORT || 3000;
+const clientDir = join(__dirname, 'dist/client');
 
 // MIME types
 const mimeTypes = {
@@ -16,33 +17,66 @@ const mimeTypes = {
   '.json': 'application/json',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.webp': 'image/webp',
 };
+
+async function serveStaticFile(pathname, res) {
+  try {
+    const filePath = join(clientDir, pathname);
+    
+    // 安全检查：确保文件在 clientDir 内
+    if (!filePath.startsWith(clientDir)) {
+      return false;
+    }
+    
+    const stats = await stat(filePath);
+    if (!stats.isFile()) {
+      return false;
+    }
+    
+    const content = await readFile(filePath);
+    const ext = extname(pathname);
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
+    
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': content.length,
+      'Cache-Control': pathname.startsWith('/assets/') 
+        ? 'public, max-age=31536000, immutable' 
+        : 'public, max-age=0, must-revalidate',
+    });
+    res.end(content);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
 
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = url.pathname;
+    
+    console.log(`${req.method} ${pathname}`);
     
     // 尝试提供静态文件
-    if (url.pathname.startsWith('/assets/') || url.pathname === '/favicon.ico') {
-      try {
-        const filePath = join(__dirname, 'dist/client', url.pathname);
-        const content = await readFile(filePath);
-        const ext = extname(url.pathname);
-        const contentType = mimeTypes[ext] || 'application/octet-stream';
-        
-        res.writeHead(200, {
-          'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=31536000, immutable',
-        });
-        res.end(content);
+    // 1. /assets/* 路径
+    // 2. favicon.ico
+    // 3. 其他可能的静态资源
+    if (pathname.startsWith('/assets/') || 
+        pathname === '/favicon.ico' ||
+        pathname.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|webp)$/)) {
+      const served = await serveStaticFile(pathname, res);
+      if (served) {
         return;
-      } catch (err) {
-        // 文件不存在，继续到 handler
       }
     }
     
@@ -90,7 +124,7 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Server listening on http://0.0.0.0:${port}`);
-  console.log(`📁 Serving static files from: ${join(__dirname, 'dist/client')}`);
+  console.log(`📁 Serving static files from: ${clientDir}`);
 });
 
 // 优雅关闭

@@ -10,6 +10,9 @@ export default defineConfig({
         basepath: "/",
         routesDirectory: "routes",
       },
+      client: {
+        base: "/assets",
+      },
     }),
     viteReact(),
     viteTsConfigPaths(),
