@@ -73,7 +73,7 @@
     "vite-tsconfig-paths": "^6.0.2",
     "zod": "^3.24.2",
     "@samsarahq/samsara": "latest",
-    "@tanstack/nitro-v2-vite-plugin": "^1.167.14",
+    "nitro": "^2.10.4",
     "@vitejs/plugin-react": "^5.0.4",
     "vite": "^7.3.1"
   },
