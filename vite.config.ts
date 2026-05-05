@@ -17,6 +17,9 @@ export default defineConfig({
     viteReact(),
     viteTsConfigPaths(),
   ],
+  css: {
+    postcss: './postcss.config.js',
+  },
   server: {
     port: 3000,
   },
