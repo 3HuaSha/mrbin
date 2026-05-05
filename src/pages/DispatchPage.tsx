@@ -786,63 +786,6 @@ export function DispatchPage() {
 
     setLocalAssignments(newAssignments);
   };
-      driverAsgs.forEach((x, i) => x.sequence = i + 1);
-      setLocalAssignments(newAssignments);
-      return;
-    }
-
-    const targetDriver = targetColumnId;
-    const sameColumn = a.driver_id === targetDriver;
-
-    if (sameColumn) {
-      const driverAsgs = newAssignments
-        .filter((x) => x.driver_id === targetDriver)
-        .sort((x, y) => x.sequence - y.sequence);
-
-      const oldIndex = driverAsgs.findIndex((x) => x.id === a.id);
-      let newIndex = oldIndex;
-      if (overParsed?.kind === "assignment") {
-        newIndex = driverAsgs.findIndex((x) => x.id === overParsed.id);
-      } else {
-        newIndex = driverAsgs.length - 1;
-      }
-
-      if (newIndex < 0) newIndex = driverAsgs.length - 1;
-      if (oldIndex === newIndex) return;
-
-      const reordered = arrayMove(driverAsgs, oldIndex, newIndex);
-      reordered.forEach((x, i) => { x.sequence = i + 1; });
-
-      const finalAssignments = newAssignments.map(x => {
-        if (x.driver_id === targetDriver) {
-          return reordered.find(r => r.id === x.id)!;
-        }
-        return x;
-      });
-      setLocalAssignments(finalAssignments);
-      return;
-    }
-
-    // 跨司机移动
-    newAssignments.splice(aIndex, 1);
-    const oldDriverAsgs = newAssignments.filter(x => x.driver_id === a.driver_id).sort((x, y) => x.sequence - y.sequence);
-    oldDriverAsgs.forEach((x, i) => x.sequence = i + 1);
-
-    a.driver_id = targetDriver;
-    a.vehicle_id = getDriverVehicle(targetDriver);
-
-    const targetDriverAsgs = newAssignments.filter(x => x.driver_id === targetDriver).sort((x, y) => x.sequence - y.sequence);
-    let insertIndex = targetDriverAsgs.length;
-    if (overParsed && overParsed.kind === "assignment") {
-      insertIndex = targetDriverAsgs.findIndex(x => x.id === overParsed.id);
-      if (insertIndex < 0) insertIndex = targetDriverAsgs.length;
-    }
-
-    targetDriverAsgs.splice(insertIndex, 0, a);
-    targetDriverAsgs.forEach((x, i) => x.sequence = i + 1);
-
-    setLocalAssignments(newAssignments);
-  };
 
   const activeCard = activeId ? cardId.parse(activeId) : null;
   const activeOrder =
