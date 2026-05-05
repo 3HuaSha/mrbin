@@ -67,6 +67,8 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         departureTime: new Date().toISOString(),
       };
 
+      console.log('🔄 调用 Vehicle Routes API:', { url, requestBody });
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -76,6 +78,8 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         },
         body: JSON.stringify(requestBody)
       });
+
+      console.log('📡 Vehicle Routes API 响应状态:', response.status, response.statusText);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -87,7 +91,7 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
       }
 
       const responseData = await response.json();
-      console.log('✅ Samsara Vehicle Routes API 成功');
+      console.log('✅ Samsara Vehicle Routes API 成功:', responseData);
       
       // 解析响应数据
       const legs = responseData.route?.legs || responseData.legs || [];
