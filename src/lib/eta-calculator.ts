@@ -1,9 +1,9 @@
 /**
  * ETA (预计到达时间) 计算工具
- * 使用 Samsara Routes API 计算从司机当前位置到订单位置的预计到达时间
+ * 使用 Samsara API 直接计算车辆到达地址的 ETA
  */
 
-import { calculateSamsaraRoute } from "@/actions/samsara";
+import { calculateSamsaraRouteForVehicle } from "@/actions/samsara";
 
 export interface ETAResult {
   orderId: string;
@@ -18,6 +18,7 @@ export interface DriverETA {
   driverId: string;
   driverName: string;
   vehicleId: string;
+  samsaraVehicleId: string;
   currentLocation: { lat: number; lng: number } | null;
   orders: ETAResult[];
   totalDistance: number; // 总距离（米）
@@ -26,20 +27,23 @@ export interface DriverETA {
 }
 
 /**
- * 使用 Samsara API 计算司机到达所有订单位置的 ETA
+ * 使用 Samsara API 直接计算车辆到达订单的 ETA
+ * Samsara 会自动使用车辆的当前位置作为起点
  */
 export async function calculateDriverETAWithSamsara(
   driverId: string,
   driverName: string,
   vehicleId: string,
+  samsaraVehicleId: string,
   currentLocation: { lat: number; lng: number },
-  orders: Array<{ id: string; address: string; lat?: number; lng?: number }>,
+  orders: Array<{ id: string; address: string }>,
 ): Promise<DriverETA> {
   if (orders.length === 0) {
     return {
       driverId,
       driverName,
       vehicleId,
+      samsaraVehicleId,
       currentLocation,
       orders: [],
       totalDistance: 0,
@@ -49,22 +53,20 @@ export async function calculateDriverETAWithSamsara(
   }
 
   try {
-    // 构建路线点：起点 + 所有订单位置
-    const waypoints = [
-      {
-        latitude: currentLocation.lat,
-        longitude: currentLocation.lng,
-        name: '当前位置'
-      },
-      ...orders.map(order => ({
-        latitude: order.lat || 0,
-        longitude: order.lng || 0,
-        name: order.address
-      }))
-    ];
+    // 构建目的地列表（只需要地址，Samsara 会自动使用车辆当前位置）
+    const destinations = orders.map(order => ({
+      address: order.address + ', Toronto, ON, Canada',
+      name: order.address
+    }));
 
     // 调用 Samsara Routes API（通过 Server Function）
-    const routeData = await calculateSamsaraRoute({ data: { waypoints } });
+    // 传入车辆 ID，Samsara 会自动使用车辆的当前位置作为起点
+    const routeData = await calculateSamsaraRouteForVehicle({ 
+      data: { 
+        vehicleId: samsaraVehicleId,
+        destinations 
+      } 
+    });
 
     if (!routeData.success) {
       throw new Error(routeData.error || 'Route calculation failed');
@@ -97,6 +99,7 @@ export async function calculateDriverETAWithSamsara(
       driverId,
       driverName,
       vehicleId,
+      samsaraVehicleId,
       currentLocation,
       orders: results,
       totalDistance: routeData.totalDistance || 0,
@@ -111,6 +114,7 @@ export async function calculateDriverETAWithSamsara(
       driverId,
       driverName,
       vehicleId,
+      samsaraVehicleId,
       currentLocation,
       orders: orders.map(order => ({
         orderId: order.id,

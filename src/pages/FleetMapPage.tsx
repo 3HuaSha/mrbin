@@ -166,8 +166,11 @@ export function FleetMapPage() {
         const assignment = vehicleAssignments?.find((a: any) => a.driver_id === driver.id);
         if (!assignment) continue;
 
+        const samsaraVehicleId = assignment.vehicles?.samsara_id;
+        if (!samsaraVehicleId) continue;
+
         // 找到车辆的实时位置
-        const vehicle = samsaraResult.data.find(v => v.id === assignment.vehicles?.samsara_id);
+        const vehicle = samsaraResult.data.find(v => v.id === samsaraVehicleId);
         if (!vehicle || !vehicle.location) continue;
 
         const currentLocation = {
@@ -175,48 +178,19 @@ export function FleetMapPage() {
           lng: vehicle.location.longitude,
         };
 
-        // 准备订单数据（需要地理编码获取坐标）
-        const ordersWithCoords = await Promise.all(
-          orderSteps.map(async (s) => {
-            const order = s.orders!;
-            // 使用 Google Geocoding API 获取坐标
-            try {
-              const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-                order.address + ', Toronto, ON, Canada'
-              )}&key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}`;
-              
-              const response = await fetch(geocodeUrl);
-              const data = await response.json();
-              
-              if (data.status === 'OK' && data.results[0]) {
-                const location = data.results[0].geometry.location;
-                return {
-                  id: order.id,
-                  address: order.address,
-                  lat: location.lat,
-                  lng: location.lng,
-                };
-              }
-            } catch (error) {
-              console.error(`地理编码失败: ${order.address}`, error);
-            }
-            
-            // 如果地理编码失败，使用默认坐标（多伦多市中心）
-            return {
-              id: order.id,
-              address: order.address,
-              lat: 43.65107,
-              lng: -79.347015,
-            };
-          })
-        );
+        // 准备订单数据（只需要地址，Samsara 会自动处理地理编码）
+        const ordersForETA = orderSteps.map(s => ({
+          id: s.orders!.id,
+          address: s.orders!.address,
+        }));
 
         const eta = await calculateDriverETAWithSamsara(
           driver.id,
           driver.name,
           assignment.vehicle_id,
+          samsaraVehicleId,
           currentLocation,
-          ordersWithCoords
+          ordersForETA
         );
 
         etas[driver.id] = eta;
