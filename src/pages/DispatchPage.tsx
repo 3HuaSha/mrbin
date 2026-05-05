@@ -507,17 +507,21 @@ export function DispatchPage() {
     const activeIdStr = active.id as string;
     const overIdStr = over.id as string;
 
-    console.log('拖拽结束:', { activeIdStr, overIdStr });
+    console.log('🔍 拖拽结束:', { activeIdStr, overIdStr, BACKLOG_ID });
 
     // ============ 处理手动步骤拖到待排班区域（删除步骤）============
     if (activeIdStr.startsWith('step:') && overIdStr === BACKLOG_ID) {
       const stepId = activeIdStr.slice(5);
       const step = currentJobSteps.find(s => s.id === stepId);
       
+      console.log('🗑️ 检测到手动步骤拖到待排班:', { stepId, step, nodeType: step?.node_type });
+      
       if (step && step.node_type === 'step') {
-        console.log('手动步骤拖到待排班区域，删除步骤:', stepId);
+        console.log('✅ 确认删除手动步骤:', stepId);
         deleteManualStep.mutate(stepId);
         return;
+      } else {
+        console.log('❌ 不是手动步骤，跳过删除');
       }
     }
 
