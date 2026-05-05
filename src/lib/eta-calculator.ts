@@ -10,7 +10,7 @@ export interface ETAResult {
   orderAddress: string;
   distance: number; // 米
   duration: number; // 秒
-  eta: Date; // 预计到达时间
+  eta: string; // 预计到达时间 (ISO 字符串)
   status: 'OK' | 'ERROR';
 }
 
@@ -95,7 +95,7 @@ export async function calculateDriverETAWithSamsara(
           orderAddress: order.address,
           distance: leg.distance || 0,
           duration: leg.duration || 0,
-          eta,
+          eta: eta.toISOString(), // 转换为 ISO 字符串
           status: 'OK',
         });
       }
@@ -127,7 +127,7 @@ export async function calculateDriverETAWithSamsara(
         orderAddress: order.address,
         distance: 0,
         duration: 0,
-        eta: new Date(),
+        eta: new Date().toISOString(), // 转换为 ISO 字符串
         status: 'ERROR' as const,
       })),
       totalDistance: 0,
@@ -166,7 +166,8 @@ export function formatDuration(seconds: number): string {
 /**
  * 格式化 ETA 时间显示（相对时间）
  */
-export function formatETA(eta: Date): string {
+export function formatETA(etaString: string): string {
+  const eta = new Date(etaString);
   const now = new Date();
   const diffMs = eta.getTime() - now.getTime();
   const diffMins = Math.round(diffMs / 60000);
@@ -185,7 +186,8 @@ export function formatETA(eta: Date): string {
 /**
  * 格式化 ETA 时间点显示
  */
-export function formatETATime(eta: Date): string {
+export function formatETATime(etaString: string): string {
+  const eta = new Date(etaString);
   return eta.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',

@@ -101,7 +101,7 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         })),
         totalDistance: responseData.route?.totalDistanceMeters || responseData.totalDistance || 0,
         totalDuration: responseData.route?.totalDurationSeconds || responseData.totalDuration || 0,
-        error: null,
+        error: null as string | null,
       };
       
       console.log('📤 返回结果:', result);
