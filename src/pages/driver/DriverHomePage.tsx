@@ -191,7 +191,8 @@ export function DriverHomePage() {
           const tm = isOrderNode ? typeMeta(s.orders!.type) : null;
           const isDone = s.status === "done";
           const isLocked = s.isLocked;
-          const isPending = s.status === "pending" || s.status === "in_progress";
+          // 只要不是 done 状态就算 pending
+          const isPending = s.status !== "done";
           
           // 步骤类型标签
           const stepTypeLabels: Record<string, string> = {
