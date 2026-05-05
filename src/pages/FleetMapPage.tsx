@@ -4,8 +4,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { todayISO, typeMeta } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Truck, ChevronDown, ChevronRight, MapPin, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Truck, ChevronDown, ChevronRight, MapPin, AlertTriangle, Clock, Loader2 } from "lucide-react";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
+import { calculateDriverETA, formatETA, formatETATime, type DriverETA } from "@/lib/eta-calculator";
+import { fetchSamsaraVehicles } from "@/lib/samsara-api";
+import { toast } from "sonner";
 
 type Driver = { id: string; name: string };
 
@@ -50,6 +54,9 @@ export function FleetMapPage() {
   const [date, setDate] = useState(todayISO());
   const [now, setNow] = useState(Date.now());
   const [expandedDrivers, setExpandedDrivers] = useState<Set<string>>(new Set());
+  const [showETA, setShowETA] = useState(false);
+  const [calculatingETA, setCalculatingETA] = useState(false);
+  const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>({});
 
   // 自动刷新
   useEffect(() => {
@@ -125,6 +132,82 @@ export function FleetMapPage() {
       }));
   }, [jobSteps]);
 
+  // 计算所有司机的 ETA
+  const handleCalculateETA = async () => {
+    setCalculatingETA(true);
+    try {
+      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+      if (!apiKey) {
+        toast.error('缺少 Google Maps API 密钥');
+        return;
+      }
+
+      // 获取 Samsara 车辆位置
+      const samsaraResult = await fetchSamsaraVehicles();
+      if (!samsaraResult.success) {
+        toast.error('无法获取车辆位置');
+        return;
+      }
+
+      // 获取车辆分配信息
+      const { data: vehicleAssignments } = await supabase
+        .from("driver_vehicle_assignments")
+        .select(`
+          driver_id,
+          vehicle_id,
+          profiles!driver_vehicle_assignments_driver_id_fkey(name),
+          vehicles!driver_vehicle_assignments_vehicle_id_fkey(name, samsara_id)
+        `);
+
+      const etas: Record<string, DriverETA> = {};
+
+      // 为每个司机计算 ETA
+      for (const driver of drivers) {
+        const driverSteps = driverJobSteps[driver.id] ?? [];
+        const orderSteps = driverSteps.filter(s => s.node_type === 'order' && s.orders);
+        
+        if (orderSteps.length === 0) continue;
+
+        // 找到司机的车辆
+        const assignment = vehicleAssignments?.find((a: any) => a.driver_id === driver.id);
+        if (!assignment) continue;
+
+        // 找到车辆的实时位置
+        const vehicle = samsaraResult.data.find(v => v.id === assignment.vehicles?.samsara_id);
+        if (!vehicle || !vehicle.location) continue;
+
+        const currentLocation = {
+          lat: vehicle.location.latitude,
+          lng: vehicle.location.longitude,
+        };
+
+        const ordersForETA = orderSteps.map(s => ({
+          id: s.orders!.id,
+          address: s.orders!.address,
+        }));
+
+        const eta = await calculateDriverETA(
+          driver.id,
+          driver.name,
+          currentLocation,
+          ordersForETA,
+          apiKey
+        );
+
+        etas[driver.id] = eta;
+      }
+
+      setDriverETAs(etas);
+      setShowETA(true);
+      toast.success('ETA 计算完成');
+    } catch (error) {
+      console.error('计算 ETA 失败:', error);
+      toast.error('计算 ETA 失败');
+    } finally {
+      setCalculatingETA(false);
+    }
+  };
+
   return (
     <div className="p-0 h-screen flex flex-col">
       <div className="flex-1 flex min-h-0">
@@ -135,14 +218,33 @@ export function FleetMapPage() {
             司机任务 ({drivers.length})
           </div>
           
-          {/* 日期选择器 - 移到左侧栏 */}
-          <div className="p-3 border-b bg-background shrink-0">
+          {/* 日期选择器和 ETA 按钮 */}
+          <div className="p-3 border-b bg-background shrink-0 space-y-2">
             <input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
               className="w-full h-9 px-3 rounded-md border bg-background text-sm"
             />
+            <Button
+              size="sm"
+              variant={showETA ? "default" : "outline"}
+              onClick={handleCalculateETA}
+              disabled={calculatingETA}
+              className="w-full h-8 text-xs"
+            >
+              {calculatingETA ? (
+                <>
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  计算中...
+                </>
+              ) : (
+                <>
+                  <Clock className="h-3 w-3 mr-1" />
+                  {showETA ? '刷新 ETA' : '显示 ETA'}
+                </>
+              )}
+            </Button>
           </div>
           
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
@@ -187,6 +289,10 @@ export function FleetMapPage() {
                             // 时段标签
                             const timeLabel = order.time_window_custom || order.time_window || '';
                             
+                            // 获取该订单的 ETA
+                            const driverETA = driverETAs[d.id];
+                            const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
+                            
                             return (
                               <div key={step.id} className="relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl">
                                 <div className="flex flex-col gap-1.5">
@@ -197,6 +303,15 @@ export function FleetMapPage() {
                                     {order.address}
                                   </div>
                                   <div className="text-[10px] text-primary font-medium">{timeLabel}</div>
+                                  
+                                  {/* ETA 显示 */}
+                                  {showETA && orderETA && orderETA.status === 'OK' && (
+                                    <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                      <Clock className="h-2.5 w-2.5" />
+                                      <span>ETA: {formatETATime(orderETA.eta)} ({formatETA(orderETA.eta)})</span>
+                                    </div>
+                                  )}
+                                  
                                   {order.customer_notes && (
                                     <div className="text-[9px] text-status-progress truncate">
                                       📝 {order.customer_notes}
@@ -204,6 +319,7 @@ export function FleetMapPage() {
                                   )}
                                 </div>
                               </div>
+                            );
                             );
                           } else {
                             // 手动步骤节点卡片 - 完全匹配排班页面样式
