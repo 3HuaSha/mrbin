@@ -1,12 +1,20 @@
-// Using @lovable.dev/vite-tanstack-config which correctly handles
-// the TanStack Start + vinxi + nitro wiring with node-server preset.
-// The Lovable npm package is just a config helper — it is NOT Cloudflare-specific.
-import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { defineConfig } from "vite";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import viteReact from "@vitejs/plugin-react";
+import viteTsConfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-  vite: {
-    nitro: {
-      preset: "node-server",
-    },
+  plugins: [
+    tanstackStart({
+      router: {
+        basepath: "/",
+        routesDirectory: "routes",
+      },
+    }),
+    viteReact(),
+    viteTsConfigPaths(),
+  ],
+  server: {
+    port: 3000,
   },
 });
