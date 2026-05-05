@@ -45,56 +45,59 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 function RootShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const queryClient = router.options.context.queryClient;
+  
+  const inlineStyles = `
+    :root {
+      --radius: 0.5rem;
+      --background: oklch(0.985 0.005 240);
+      --foreground: oklch(0.18 0.03 250);
+      --card: oklch(1 0 0);
+      --card-foreground: oklch(0.18 0.03 250);
+      --popover: oklch(1 0 0);
+      --popover-foreground: oklch(0.18 0.03 250);
+      --primary: oklch(0.45 0.15 255);
+      --primary-foreground: oklch(0.99 0 0);
+      --secondary: oklch(0.96 0.01 245);
+      --secondary-foreground: oklch(0.25 0.04 255);
+      --muted: oklch(0.96 0.01 245);
+      --muted-foreground: oklch(0.5 0.02 250);
+      --accent: oklch(0.94 0.02 250);
+      --accent-foreground: oklch(0.25 0.04 255);
+      --destructive: oklch(0.58 0.22 27);
+      --destructive-foreground: oklch(0.99 0 0);
+      --border: oklch(0.91 0.01 250);
+      --input: oklch(0.91 0.01 250);
+      --ring: oklch(0.55 0.15 255);
+      --sidebar: oklch(0.22 0.06 258);
+      --sidebar-foreground: oklch(0.92 0.02 250);
+      --sidebar-accent: oklch(0.32 0.08 258);
+      --sidebar-accent-foreground: oklch(0.99 0 0);
+      --sidebar-border: oklch(0.3 0.06 258);
+      --type-delivery: oklch(0.62 0.18 145);
+      --type-delivery-foreground: oklch(0.99 0 0);
+      --type-pickup: oklch(0.6 0.22 25);
+      --type-pickup-foreground: oklch(0.99 0 0);
+      --type-swap: oklch(0.55 0.18 250);
+      --type-swap-foreground: oklch(0.99 0 0);
+      --type-material: oklch(0.78 0.16 85);
+      --type-material-foreground: oklch(0.2 0.04 80);
+      --status-pending: oklch(0.7 0.02 250);
+      --status-assigned: oklch(0.6 0.15 230);
+      --status-progress: oklch(0.7 0.16 75);
+      --status-done: oklch(0.6 0.16 145);
+      --status-cancelled: oklch(0.55 0.05 250);
+    }
+    body {
+      background-color: oklch(0.985 0.005 240);
+      color: oklch(0.18 0.03 250);
+    }
+  `;
+  
   return (
     <html lang="zh-CN">
       <head>
         <HeadContent />
-        <style dangerouslySetInnerHTML={{__html: `
-          :root {
-            --radius: 0.5rem;
-            --background: oklch(0.985 0.005 240);
-            --foreground: oklch(0.18 0.03 250);
-            --card: oklch(1 0 0);
-            --card-foreground: oklch(0.18 0.03 250);
-            --popover: oklch(1 0 0);
-            --popover-foreground: oklch(0.18 0.03 250);
-            --primary: oklch(0.45 0.15 255);
-            --primary-foreground: oklch(0.99 0 0);
-            --secondary: oklch(0.96 0.01 245);
-            --secondary-foreground: oklch(0.25 0.04 255);
-            --muted: oklch(0.96 0.01 245);
-            --muted-foreground: oklch(0.5 0.02 250);
-            --accent: oklch(0.94 0.02 250);
-            --accent-foreground: oklch(0.25 0.04 255);
-            --destructive: oklch(0.58 0.22 27);
-            --destructive-foreground: oklch(0.99 0 0);
-            --border: oklch(0.91 0.01 250);
-            --input: oklch(0.91 0.01 250);
-            --ring: oklch(0.55 0.15 255);
-            --sidebar: oklch(0.22 0.06 258);
-            --sidebar-foreground: oklch(0.92 0.02 250);
-            --sidebar-accent: oklch(0.32 0.08 258);
-            --sidebar-accent-foreground: oklch(0.99 0 0);
-            --sidebar-border: oklch(0.3 0.06 258);
-            --type-delivery: oklch(0.62 0.18 145);
-            --type-delivery-foreground: oklch(0.99 0 0);
-            --type-pickup: oklch(0.6 0.22 25);
-            --type-pickup-foreground: oklch(0.99 0 0);
-            --type-swap: oklch(0.55 0.18 250);
-            --type-swap-foreground: oklch(0.99 0 0);
-            --type-material: oklch(0.78 0.16 85);
-            --type-material-foreground: oklch(0.2 0.04 80);
-            --status-pending: oklch(0.7 0.02 250);
-            --status-assigned: oklch(0.6 0.15 230);
-            --status-progress: oklch(0.7 0.16 75);
-            --status-done: oklch(0.6 0.16 145);
-            --status-cancelled: oklch(0.55 0.05 250);
-          }
-          body {
-            background-color: oklch(0.985 0.005 240);
-            color: oklch(0.18 0.03 250);
-          }
-        `}} />
+        <style dangerouslySetInnerHTML={{ __html: inlineStyles }} />
       </head>
       <body>
         <QueryClientProvider client={queryClient}>
