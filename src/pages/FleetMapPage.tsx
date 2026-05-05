@@ -308,18 +308,18 @@ export function FleetMapPage() {
                             const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
                             
                             // 调试日志
-                            if (driverETA) {
-                              console.log('🔍 司机 ETA 数据:', {
-                                driverId: d.id,
-                                driverName: d.name,
-                                orderId: order.id,
-                                orderAddress: order.address,
-                                hasDriverETA: !!driverETA,
-                                orderETACount: driverETA.orders.length,
-                                foundOrderETA: !!orderETA,
-                                orderETA: orderETA
-                              });
-                            }
+                            console.log('🔍 司机 ETA 数据:', {
+                              driverId: d.id,
+                              driverName: d.name,
+                              orderId: order.id,
+                              orderAddress: order.address,
+                              hasDriverETA: !!driverETA,
+                              orderETACount: driverETA?.orders.length,
+                              foundOrderETA: !!orderETA,
+                              orderETA: orderETA,
+                              orderETAStatus: orderETA?.status,
+                              shouldShow: !!(orderETA && orderETA.status === 'OK')
+                            });
                             
                             return (
                               <div key={step.id} className="relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl">
@@ -328,9 +328,10 @@ export function FleetMapPage() {
                                     <div className="text-xs font-semibold leading-tight">
                                       {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
                                     </div>
-                                    {orderETA && orderETA.status === 'OK' && (
-                                      <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium">
-                                        {formatETATime(orderETA.eta)}
+                                    {/* 调试：强制显示 ETA 区域 */}
+                                    {driverETA && (
+                                      <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
+                                        {orderETA && orderETA.status === 'OK' ? formatETATime(orderETA.eta) : '无ETA'}
                                       </div>
                                     )}
                                   </div>
