@@ -68,14 +68,16 @@
     "recharts": "^2.15.4",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0",
-    "tailwindcss": "^4.2.1",
+    "tailwindcss": "^3.4.17",
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
     "zod": "^3.24.2",
     "@samsarahq/samsara": "latest",
     "@vitejs/plugin-react": "^5.0.4",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",

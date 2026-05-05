@@ -1,48 +1,44 @@
-@import "tailwindcss";
-@import "tw-animate-css";
-
-@theme {
-  --radius: 0.5rem;
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  
-  /* 颜色映射到 Tailwind */
-  --color-background: oklch(0.985 0.005 240);
-  --color-foreground: oklch(0.18 0.03 250);
-  --color-card: oklch(1 0 0);
-  --color-card-foreground: oklch(0.18 0.03 250);
-  --color-popover: oklch(1 0 0);
-  --color-popover-foreground: oklch(0.18 0.03 250);
-  --color-primary: oklch(0.45 0.15 255);
-  --color-primary-foreground: oklch(0.99 0 0);
-  --color-secondary: oklch(0.96 0.01 245);
-  --color-secondary-foreground: oklch(0.25 0.04 255);
-  --color-muted: oklch(0.96 0.01 245);
-  --color-muted-foreground: oklch(0.5 0.02 250);
-  --color-accent: oklch(0.94 0.02 250);
-  --color-accent-foreground: oklch(0.25 0.04 255);
-  --color-destructive: oklch(0.58 0.22 27);
-  --color-destructive-foreground: oklch(0.99 0 0);
-  --color-border: oklch(0.91 0.01 250);
-  --color-input: oklch(0.91 0.01 250);
-  --color-ring: oklch(0.55 0.15 255);
-  --color-sidebar: oklch(0.22 0.06 258);
-  --color-sidebar-foreground: oklch(0.92 0.02 250);
-  --color-sidebar-accent: oklch(0.32 0.08 258);
-  --color-sidebar-accent-foreground: oklch(0.99 0 0);
-  --color-sidebar-border: oklch(0.3 0.06 258);
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 @layer base {
-  * {
-    border-color: oklch(0.91 0.01 250);
+  :root {
+    --radius: 0.5rem;
+    
+    /* 使用 HSL 格式 */
+    --background: 240 10% 98%;
+    --foreground: 250 30% 18%;
+    --card: 0 0% 100%;
+    --card-foreground: 250 30% 18%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 250 30% 18%;
+    --primary: 255 60% 45%;
+    --primary-foreground: 0 0% 99%;
+    --secondary: 245 20% 96%;
+    --secondary-foreground: 255 40% 25%;
+    --muted: 245 20% 96%;
+    --muted-foreground: 250 20% 50%;
+    --accent: 250 30% 94%;
+    --accent-foreground: 255 40% 25%;
+    --destructive: 27 80% 58%;
+    --destructive-foreground: 0 0% 99%;
+    --border: 250 20% 91%;
+    --input: 250 20% 91%;
+    --ring: 255 60% 55%;
+    --sidebar: 258 60% 22%;
+    --sidebar-foreground: 250 20% 92%;
+    --sidebar-accent: 258 60% 32%;
+    --sidebar-accent-foreground: 0 0% 99%;
+    --sidebar-border: 258 60% 30%;
   }
-  
+
+  * {
+    @apply border-border;
+  }
+
   body {
-    background-color: oklch(0.985 0.005 240);
-    color: oklch(0.18 0.03 250);
+    @apply bg-background text-foreground;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 }
