@@ -250,9 +250,6 @@ export function DriverHomePage() {
                     <>
                       <div className="flex items-center gap-2 flex-wrap">
                         <Badge className={cn("text-[10px]", tm?.className)}>{tm?.label}</Badge>
-                        <span className="text-[11px] text-muted-foreground font-mono">
-                          {s.orders!.order_number}
-                        </span>
                       </div>
                       <div className="text-sm font-semibold mt-1">
                         {STEP_TYPE_EMOJI[s.step_type] || tm?.emoji} {stepLabel} {s.orders!.bin_size ? `${s.orders!.bin_size}yd` : ""} {binTypeName}

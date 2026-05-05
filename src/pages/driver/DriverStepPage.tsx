@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Camera, Navigation, Phone, Loader2 } from "lucide-react";
+import { ArrowLeft, Camera, Navigation, Phone, Loader2, CheckCircle2 } from "lucide-react";
 import { STEP_TYPE_EMOJI, STEP_TYPE_LABEL } from "@/lib/business";
 import { toast } from "sonner";
 import { useAudit } from "@/hooks/use-audit";
@@ -140,7 +140,6 @@ export function DriverStepPage() {
 
       <div className="p-4 space-y-4">
         <div>
-          <div className="text-xs text-muted-foreground font-mono">{order.order_number}</div>
           <div className="text-2xl font-bold mt-1">{STEP_TYPE_EMOJI[step.step_type]} {STEP_TYPE_LABEL[step.step_type]}</div>
           <div className="text-base mt-2">{step.location}</div>
         </div>
@@ -172,15 +171,36 @@ export function DriverStepPage() {
 
           {step.requires_photo && (
             <div>
-              <Label>拍照 *</Label>
-              <label className="mt-1 flex items-center justify-center gap-2 h-14 rounded-md border-2 border-dashed border-border bg-background cursor-pointer">
-                {uploading === "photo" ? <Loader2 className="h-5 w-5 animate-spin" /> :
-                  photoUrl ? <span className="text-status-done font-medium">✓ 已上传(点击重传)</span> :
-                  <><Camera className="h-5 w-5" /><span>拍照</span></>}
+              <Label className="text-base font-semibold">📷 拍照上传 *</Label>
+              <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
+                {uploading === "photo" ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <span className="text-sm text-muted-foreground">上传中...</span>
+                  </div>
+                ) : photoUrl ? (
+                  <div className="flex flex-col items-center gap-2 w-full">
+                    <div className="text-status-done font-semibold text-base flex items-center gap-2">
+                      <CheckCircle2 className="h-5 w-5" />
+                      照片已上传
+                    </div>
+                    <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <Camera className="h-10 w-10 text-primary" />
+                    <span className="font-medium text-base">点击拍照</span>
+                    <span className="text-xs text-muted-foreground">或选择相册图片</span>
+                  </div>
+                )}
                 <input type="file" accept="image/*" capture="environment" className="hidden"
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
               </label>
-              {photoUrl && <img src={photoUrl} alt="预览" className="mt-2 max-h-40 rounded" />}
+              {photoUrl && (
+                <div className="mt-3 rounded-lg overflow-hidden border">
+                  <img src={photoUrl} alt="预览" className="w-full" />
+                </div>
+              )}
             </div>
           )}
 
@@ -207,14 +227,36 @@ export function DriverStepPage() {
 
           {step.requires_weigh_ticket && (
             <div>
-              <Label>磅单照片 *</Label>
-              <label className="mt-1 flex items-center justify-center gap-2 h-14 rounded-md border-2 border-dashed border-border bg-background cursor-pointer">
-                {uploading === "weigh" ? <Loader2 className="h-5 w-5 animate-spin" /> :
-                  weighTicketUrl ? <span className="text-status-done font-medium">✓ 已上传</span> :
-                  <><Camera className="h-5 w-5" /><span>拍磅单</span></>}
+              <Label className="text-base font-semibold">📋 磅单照片 *</Label>
+              <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
+                {uploading === "weigh" ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <span className="text-sm text-muted-foreground">上传中...</span>
+                  </div>
+                ) : weighTicketUrl ? (
+                  <div className="flex flex-col items-center gap-2 w-full">
+                    <div className="text-status-done font-semibold text-base flex items-center gap-2">
+                      <CheckCircle2 className="h-5 w-5" />
+                      磅单已上传
+                    </div>
+                    <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <Camera className="h-10 w-10 text-primary" />
+                    <span className="font-medium text-base">点击拍摄磅单</span>
+                    <span className="text-xs text-muted-foreground">或选择相册图片</span>
+                  </div>
+                )}
                 <input type="file" accept="image/*" capture="environment" className="hidden"
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "weigh")} />
               </label>
+              {weighTicketUrl && (
+                <div className="mt-3 rounded-lg overflow-hidden border">
+                  <img src={weighTicketUrl} alt="磅单预览" className="w-full" />
+                </div>
+              )}
             </div>
           )}
 
