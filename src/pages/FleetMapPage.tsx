@@ -200,6 +200,18 @@ export function FleetMapPage() {
         ordersForETA
       );
 
+      console.log('✅ ETA 计算结果:', {
+        driverId,
+        driverName,
+        ordersCount: eta.orders.length,
+        orders: eta.orders.map(o => ({
+          orderId: o.orderId,
+          address: o.orderAddress,
+          eta: o.eta,
+          status: o.status
+        }))
+      });
+
       setDriverETAs(prev => ({ ...prev, [driverId]: eta }));
       toast.success(`${driverName} 的 ETA 计算完成`);
     } catch (error) {
@@ -294,6 +306,20 @@ export function FleetMapPage() {
                             // 获取该订单的 ETA
                             const driverETA = driverETAs[d.id];
                             const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
+                            
+                            // 调试日志
+                            if (driverETA) {
+                              console.log('🔍 司机 ETA 数据:', {
+                                driverId: d.id,
+                                driverName: d.name,
+                                orderId: order.id,
+                                orderAddress: order.address,
+                                hasDriverETA: !!driverETA,
+                                orderETACount: driverETA.orders.length,
+                                foundOrderETA: !!orderETA,
+                                orderETA: orderETA
+                              });
+                            }
                             
                             return (
                               <div key={step.id} className="relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl">
