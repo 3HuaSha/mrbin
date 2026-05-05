@@ -5,10 +5,52 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --radius: 0.5rem;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  
+  /* 主题颜色变量 */
+  --background: oklch(0.985 0.005 240);
+  --foreground: oklch(0.18 0.03 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.03 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.03 250);
+  --primary: oklch(0.45 0.15 255);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.96 0.01 245);
+  --secondary-foreground: oklch(0.25 0.04 255);
+  --muted: oklch(0.96 0.01 245);
+  --muted-foreground: oklch(0.5 0.02 250);
+  --accent: oklch(0.94 0.02 250);
+  --accent-foreground: oklch(0.25 0.04 255);
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.91 0.01 250);
+  --input: oklch(0.91 0.01 250);
+  --ring: oklch(0.55 0.15 255);
+  --sidebar: oklch(0.22 0.06 258);
+  --sidebar-foreground: oklch(0.92 0.02 250);
+  --sidebar-accent: oklch(0.32 0.08 258);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --sidebar-border: oklch(0.3 0.06 258);
+  --type-delivery: oklch(0.62 0.18 145);
+  --type-delivery-foreground: oklch(0.99 0 0);
+  --type-pickup: oklch(0.6 0.22 25);
+  --type-pickup-foreground: oklch(0.99 0 0);
+  --type-swap: oklch(0.55 0.18 250);
+  --type-swap-foreground: oklch(0.99 0 0);
+  --type-material: oklch(0.78 0.16 85);
+  --type-material-foreground: oklch(0.2 0.04 80);
+  --status-pending: oklch(0.7 0.02 250);
+  --status-assigned: oklch(0.6 0.15 230);
+  --status-progress: oklch(0.7 0.16 75);
+  --status-done: oklch(0.6 0.16 145);
+  --status-cancelled: oklch(0.55 0.05 250);
+  
+  /* Tailwind 颜色映射 */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -29,14 +71,11 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-ring-offset-background: var(--background);
-
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
-
-  /* 业务类型色:送桶绿/收桶红/换桶蓝/砂石黄 */
   --color-type-delivery: var(--type-delivery);
   --color-type-delivery-foreground: var(--type-delivery-foreground);
   --color-type-pickup: var(--type-pickup);
@@ -45,68 +84,11 @@
   --color-type-swap-foreground: var(--type-swap-foreground);
   --color-type-material: var(--type-material);
   --color-type-material-foreground: var(--type-material-foreground);
-
   --color-status-pending: var(--status-pending);
   --color-status-assigned: var(--status-assigned);
   --color-status-progress: var(--status-progress);
   --color-status-done: var(--status-done);
   --color-status-cancelled: var(--status-cancelled);
-}
-
-:root {
-  --radius: 0.5rem;
-
-  --background: oklch(0.985 0.005 240);
-  --foreground: oklch(0.18 0.03 250);
-
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.03 250);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.03 250);
-
-  /* 主色:深蓝(用于按钮、链接) */
-  --primary: oklch(0.45 0.15 255);
-  --primary-foreground: oklch(0.99 0 0);
-
-  --secondary: oklch(0.96 0.01 245);
-  --secondary-foreground: oklch(0.25 0.04 255);
-
-  --muted: oklch(0.96 0.01 245);
-  --muted-foreground: oklch(0.5 0.02 250);
-
-  --accent: oklch(0.94 0.02 250);
-  --accent-foreground: oklch(0.25 0.04 255);
-
-  --destructive: oklch(0.58 0.22 27);
-  --destructive-foreground: oklch(0.99 0 0);
-
-  --border: oklch(0.91 0.01 250);
-  --input: oklch(0.91 0.01 250);
-  --ring: oklch(0.55 0.15 255);
-
-  /* 侧边栏:深蓝 */
-  --sidebar: oklch(0.22 0.06 258);
-  --sidebar-foreground: oklch(0.92 0.02 250);
-  --sidebar-accent: oklch(0.32 0.08 258);
-  --sidebar-accent-foreground: oklch(0.99 0 0);
-  --sidebar-border: oklch(0.3 0.06 258);
-
-  /* 业务类型色 */
-  --type-delivery: oklch(0.62 0.18 145);          /* 绿 - 送桶 */
-  --type-delivery-foreground: oklch(0.99 0 0);
-  --type-pickup: oklch(0.6 0.22 25);              /* 红 - 收桶 */
-  --type-pickup-foreground: oklch(0.99 0 0);
-  --type-swap: oklch(0.55 0.18 250);              /* 蓝 - 换桶 */
-  --type-swap-foreground: oklch(0.99 0 0);
-  --type-material: oklch(0.78 0.16 85);           /* 黄 - 砂石料 */
-  --type-material-foreground: oklch(0.2 0.04 80);
-
-  /* 状态色 */
-  --status-pending: oklch(0.7 0.02 250);
-  --status-assigned: oklch(0.6 0.15 230);
-  --status-progress: oklch(0.7 0.16 75);
-  --status-done: oklch(0.6 0.16 145);
-  --status-cancelled: oklch(0.55 0.05 250);
 }
 
 .dark {
