@@ -7,7 +7,7 @@
     "dev": "vite dev",
     "build": "vite build && npm run postbuild",
     "postbuild": "echo '=== Build Output ===' && ls -la dist/ && echo '=== Server Directory ===' && ls -la dist/server/ || echo 'No dist/server directory'",
-    "start": "node dist/server/server.js",
+    "start": "node server.mjs",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
