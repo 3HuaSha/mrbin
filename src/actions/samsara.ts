@@ -93,7 +93,7 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
       // 解析响应数据
       const legs = responseData.route?.legs || responseData.legs || [];
 
-      return {
+      const result = {
         success: true,
         legs: legs.map((leg: any) => ({
           distance: leg.distanceMeters || leg.distance || 0,
@@ -101,7 +101,11 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         })),
         totalDistance: responseData.route?.totalDistanceMeters || responseData.totalDistance || 0,
         totalDuration: responseData.route?.totalDurationSeconds || responseData.totalDuration || 0,
+        error: null,
       };
+      
+      console.log('📤 返回结果:', result);
+      return result;
     } catch (error: any) {
       console.error('❌ Samsara Vehicle Routes API 异常:', error);
       
@@ -173,7 +177,9 @@ async function fallbackToGeneralRoutesAPI(
       return {
         success: false,
         error: `Samsara API Error: ${routesResponse.status}`,
-        legs: []
+        legs: [],
+        totalDistance: 0,
+        totalDuration: 0,
       };
     }
 
@@ -190,13 +196,16 @@ async function fallbackToGeneralRoutesAPI(
       })),
       totalDistance: routesData.route?.totalDistanceMeters || routesData.totalDistance || 0,
       totalDuration: routesData.route?.totalDurationSeconds || routesData.totalDuration || 0,
+      error: null,
     };
   } catch (error: any) {
     console.error('❌ 备用方法失败:', error);
     return {
       success: false,
       error: error.message || 'Unknown error',
-      legs: []
+      legs: [],
+      totalDistance: 0,
+      totalDuration: 0,
     };
   }
 }
