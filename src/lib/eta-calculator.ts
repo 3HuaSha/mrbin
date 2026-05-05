@@ -61,6 +61,11 @@ export async function calculateDriverETAWithSamsara(
 
     // 调用 Samsara Routes API（通过 Server Function）
     // 传入车辆 ID，Samsara 会自动使用车辆的当前位置作为起点
+    console.log('🔄 调用 Samsara Routes API:', {
+      samsaraVehicleId,
+      destinations: destinations.length
+    });
+    
     const routeData = await calculateSamsaraRouteForVehicle({ 
       data: { 
         vehicleId: samsaraVehicleId,
@@ -68,7 +73,10 @@ export async function calculateDriverETAWithSamsara(
       } 
     });
 
+    console.log('📦 Samsara API 响应:', routeData);
+
     if (!routeData.success) {
+      console.error('❌ Samsara API 失败:', routeData.error);
       throw new Error(routeData.error || 'Route calculation failed');
     }
 
