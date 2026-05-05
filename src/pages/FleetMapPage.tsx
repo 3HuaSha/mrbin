@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Truck, ChevronDown, ChevronRight, MapPin, AlertTriangle, Clock, Loader2 } from "lucide-react";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
-import { calculateDriverETA, formatETA, formatETATime, type DriverETA } from "@/lib/eta-calculator";
+import { calculateDriverETAWithSamsara, formatETA, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { toast } from "sonner";
 
@@ -136,12 +136,6 @@ export function FleetMapPage() {
   const handleCalculateETA = async () => {
     setCalculatingETA(true);
     try {
-      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-      if (!apiKey) {
-        toast.error('缺少 Google Maps API 密钥');
-        return;
-      }
-
       // 获取 Samsara 车辆位置
       const samsaraResult = await fetchSamsaraVehicles();
       if (!samsaraResult.success) {
@@ -181,17 +175,48 @@ export function FleetMapPage() {
           lng: vehicle.location.longitude,
         };
 
-        const ordersForETA = orderSteps.map(s => ({
-          id: s.orders!.id,
-          address: s.orders!.address,
-        }));
+        // 准备订单数据（需要地理编码获取坐标）
+        const ordersWithCoords = await Promise.all(
+          orderSteps.map(async (s) => {
+            const order = s.orders!;
+            // 使用 Google Geocoding API 获取坐标
+            try {
+              const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+                order.address + ', Toronto, ON, Canada'
+              )}&key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}`;
+              
+              const response = await fetch(geocodeUrl);
+              const data = await response.json();
+              
+              if (data.status === 'OK' && data.results[0]) {
+                const location = data.results[0].geometry.location;
+                return {
+                  id: order.id,
+                  address: order.address,
+                  lat: location.lat,
+                  lng: location.lng,
+                };
+              }
+            } catch (error) {
+              console.error(`地理编码失败: ${order.address}`, error);
+            }
+            
+            // 如果地理编码失败，使用默认坐标（多伦多市中心）
+            return {
+              id: order.id,
+              address: order.address,
+              lat: 43.65107,
+              lng: -79.347015,
+            };
+          })
+        );
 
-        const eta = await calculateDriverETA(
+        const eta = await calculateDriverETAWithSamsara(
           driver.id,
           driver.name,
+          assignment.vehicle_id,
           currentLocation,
-          ordersForETA,
-          apiKey
+          ordersWithCoords
         );
 
         etas[driver.id] = eta;
