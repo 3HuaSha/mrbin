@@ -23,7 +23,7 @@ export interface DriverETA {
   orders: ETAResult[];
   totalDistance: number; // 总距离（米）
   totalDuration: number; // 总时长（秒）
-  lastUpdated: Date;
+  lastUpdated: string; // ISO 字符串
 }
 
 /**
@@ -48,7 +48,7 @@ export async function calculateDriverETAWithSamsara(
       orders: [],
       totalDistance: 0,
       totalDuration: 0,
-      lastUpdated: new Date(),
+      lastUpdated: new Date().toISOString(),
     };
   }
 
@@ -110,7 +110,7 @@ export async function calculateDriverETAWithSamsara(
       orders: results,
       totalDistance: routeData.totalDistance || 0,
       totalDuration: routeData.totalDuration || 0,
-      lastUpdated: new Date(),
+      lastUpdated: new Date().toISOString(),
     };
   } catch (error) {
     console.error(`计算司机 ${driverName} 的 ETA 失败:`, error);
@@ -132,7 +132,7 @@ export async function calculateDriverETAWithSamsara(
       })),
       totalDistance: 0,
       totalDuration: 0,
-      lastUpdated: new Date(),
+      lastUpdated: new Date().toISOString(),
     };
   }
 }
