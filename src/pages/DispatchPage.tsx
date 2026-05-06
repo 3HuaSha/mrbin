@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Label } from "@/components/ui/label";
 import {
-  ChevronLeft, ChevronRight, AlertTriangle, MoreVertical, Plus, MapPin,
+  ChevronLeft, ChevronRight, AlertTriangle, MoreVertical, Plus, MapPin, CheckCircle2, Camera, Image as ImageIcon,
 } from "lucide-react";
 import {
   todayISO, typeMeta, vehicleCanCarry, ORDER_STATUS_LABEL,
@@ -78,6 +78,13 @@ type JobStep = {
   bin_id: string | null;
   notes: string | null;
   status: string;
+  photo_url: string | null;
+  bin_number_reported: string | null;
+  old_bin_number_reported: string | null;
+  weigh_ticket_url: string | null;
+  weight_kg: number | null;
+  dump_site: string | null;
+  completed_at: string | null;
 };
 type CommonLocation = {
   id: string;
@@ -145,6 +152,7 @@ export function DispatchPage() {
   const [localJobSteps, setLocalJobSteps] = useState<JobStep[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [insertStepAt, setInsertStepAt] = useState<{ driverId: string; position: number } | null>(null);
+  const [viewingStep, setViewingStep] = useState<JobStep | null>(null);
 
   const { data: drivers = [] } = useQuery({
     queryKey: ["drivers-active"],
@@ -886,6 +894,7 @@ export function DispatchPage() {
                     onDeleteStep={(stepId) => deleteManualStep.mutate(stepId)}
                     insertStepAt={insertStepAt}
                     setInsertStepAt={setInsertStepAt}
+                    onViewStep={(step) => setViewingStep(step)}
                   />
                 );
               })}
@@ -906,6 +915,14 @@ export function DispatchPage() {
           </DragOverlay>
         </DndContext>
 
+        {/* 步骤详情弹窗 */}
+        {viewingStep && (
+          <StepDetailDialog
+            step={viewingStep}
+            onClose={() => setViewingStep(null)}
+          />
+        )}
+
       </div>
     </TooltipProvider>
   );
@@ -913,15 +930,19 @@ export function DispatchPage() {
 
 // ============ Order Node Display ============
 function OrderNodeDisplay({
-  assignment, vehicle, onCancel
+  assignment, vehicle, onCancel, jobStep, onClick
 }: {
   assignment: Assignment;
   vehicle: Vehicle | undefined;
   onCancel: (id: string) => void;
+  jobStep?: JobStep;
+  onClick?: () => void;
 }) {
   const order = assignment.orders;
   const tm = typeMeta(order.type);
   const conflict = vehicle ? !vehicleCanCarry(vehicle.type, order.bin_size) : false;
+  const isDone = jobStep?.status === "done";
+  const hasPhoto = !!(jobStep?.photo_url || jobStep?.weigh_ticket_url);
   
   // 桶类型中文映射
   const binTypeNames: Record<string, string> = {
@@ -934,15 +955,34 @@ function OrderNodeDisplay({
   const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '';
 
   return (
-    <div className="group relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl hover:scale-105 hover:z-10 w-[180px] shrink-0">
+    <div 
+      className={cn(
+        "group relative rounded-lg border-l-4 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl hover:scale-105 hover:z-10 w-[180px] shrink-0",
+        isDone ? "border-l-status-done" : "border-l-blue-500",
+        onClick && "cursor-pointer"
+      )}
+      onClick={onClick}
+    >
       <div className="flex flex-col gap-1.5">
-        <div className="text-xs font-semibold leading-tight">
-          {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-semibold leading-tight">
+            {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
+          </div>
+          {isDone && <CheckCircle2 className="h-4 w-4 text-status-done" />}
         </div>
         <div className="text-[10px] text-muted-foreground leading-snug break-words" title={order.address}>
           {order.address}
         </div>
         <div className="text-[10px] text-primary font-medium">{timeLabel(order)}</div>
+        {jobStep?.bin_number_reported && (
+          <div className="text-[10px] text-primary">桶号: {jobStep.bin_number_reported}</div>
+        )}
+        {hasPhoto && (
+          <div className="text-[10px] text-primary flex items-center gap-0.5">
+            <Camera className="h-3 w-3" />
+            有图片
+          </div>
+        )}
         {order.customer_notes && (
           <div className="text-[9px] text-status-progress truncate">
             📝 {order.customer_notes}
@@ -956,15 +996,23 @@ function OrderNodeDisplay({
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="absolute top-1.5 right-1.5 text-muted-foreground/50 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+          <button 
+            className="absolute top-1.5 right-1.5 text-muted-foreground/50 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}
+          >
             <MoreVertical className="h-3.5 w-3.5" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="text-xs min-w-[120px]">
-          <DropdownMenuItem onClick={() => alert(`订单号:${order.order_number}\n客户:${order.customer_name}\n地址:${order.address}`)}>
-            查看详情
+          {onClick && (
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onClick(); }}>
+              查看详情
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); alert(`订单号:${order.order_number}\n客户:${order.customer_name}\n地址:${order.address}`); }}>
+            订单信息
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onCancel(assignment.id)} className="text-destructive">
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onCancel(assignment.id); }} className="text-destructive">
             取消分配
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -975,10 +1023,11 @@ function OrderNodeDisplay({
 
 // ============ Step Node Display ============
 function StepNodeDisplay({
-  step, onDelete
+  step, onDelete, onClick
 }: {
   step: JobStep;
   onDelete: (id: string) => void;
+  onClick?: () => void;
 }) {
   const stepTypeLabels: Record<string, string> = {
     'pickup_bin': '取桶',
@@ -988,11 +1037,23 @@ function StepNodeDisplay({
     'unload_material': '卸料',
   };
   const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
+  const isDone = step.status === "done";
+  const hasPhoto = !!step.photo_url || !!step.weigh_ticket_url;
 
   return (
-    <div className="group relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[150px] shrink-0">
+    <div 
+      className={cn(
+        "group relative rounded-lg border-l-4 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[150px] shrink-0",
+        isDone ? "border-l-status-done" : "border-l-gray-400",
+        onClick && "cursor-pointer"
+      )}
+      onClick={onClick}
+    >
       <div className="flex flex-col gap-1">
-        <Badge variant="outline" className="text-[8px] w-fit">手动步骤</Badge>
+        <div className="flex items-center justify-between">
+          <Badge variant="outline" className="text-[8px] w-fit">手动步骤</Badge>
+          {isDone && <CheckCircle2 className="h-3 w-3 text-status-done" />}
+        </div>
         <div className="text-[11px] font-semibold">
           {stepLabel}
         </div>
@@ -1000,8 +1061,14 @@ function StepNodeDisplay({
           <MapPin className="h-2 w-2 inline mr-0.5" />
           {step.location}
         </div>
-        {step.bin_id && (
-          <div className="text-[9px] text-primary">桶: {step.bin_id}</div>
+        {step.bin_number_reported && (
+          <div className="text-[9px] text-primary">桶: {step.bin_number_reported}</div>
+        )}
+        {hasPhoto && (
+          <div className="text-[9px] text-primary flex items-center gap-0.5">
+            <Camera className="h-2.5 w-2.5" />
+            有图片
+          </div>
         )}
         {step.notes && (
           <div className="text-[8px] text-muted-foreground truncate">
@@ -1011,12 +1078,20 @@ function StepNodeDisplay({
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="absolute top-1 right-1 text-muted-foreground/50 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+          <button 
+            className="absolute top-1 right-1 text-muted-foreground/50 hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}
+          >
             <MoreVertical className="h-3 w-3" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="text-xs min-w-[120px]">
-          <DropdownMenuItem onClick={() => onDelete(step.id)} className="text-destructive">
+          {onClick && (
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onClick(); }}>
+              查看详情
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDelete(step.id); }} className="text-destructive">
             删除步骤
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -1287,7 +1362,7 @@ function BacklogColumn({ orders, completedOrders }: { orders: Order[], completed
 
 // ============ Driver Column ============
 function DriverColumn({
-  driver, vehicle, vehicles, onChangeVehicle, assignments, jobSteps, commonLocations, bins, onCancel, hasChanges, onSave, isSaving, onInsertStep, onDeleteStep, insertStepAt, setInsertStepAt
+  driver, vehicle, vehicles, onChangeVehicle, assignments, jobSteps, commonLocations, bins, onCancel, hasChanges, onSave, isSaving, onInsertStep, onDeleteStep, insertStepAt, setInsertStepAt, onViewStep
 }: {
   driver: Profile;
   vehicle: Vehicle | undefined;
@@ -1305,6 +1380,7 @@ function DriverColumn({
   onDeleteStep: (stepId: string) => void;
   insertStepAt: { driverId: string; position: number } | null;
   setInsertStepAt: (value: { driverId: string; position: number } | null) => void;
+  onViewStep: (step: JobStep) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: driver.id });
   const [buttonPosition, setButtonPosition] = useState<{ x: number; y: number } | null>(null);
@@ -1441,11 +1517,17 @@ function DriverColumn({
                       assignment={node.data as Assignment}
                       vehicle={vehicle}
                       onCancel={onCancel}
+                      jobStep={jobSteps.find(s => s.assignment_id === (node.data as Assignment).id)}
+                      onClick={() => {
+                        const step = jobSteps.find(s => s.assignment_id === (node.data as Assignment).id);
+                        if (step) onViewStep(step);
+                      }}
                     />
                   ) : (
                     <StepNodeDisplay
                       step={node.data as JobStep}
                       onDelete={onDeleteStep}
+                      onClick={() => onViewStep(node.data as JobStep)}
                     />
                   )}
                   
@@ -1692,5 +1774,211 @@ function AssignDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+// ============ Step Detail Dialog ============
+function StepDetailDialog({
+  step, onClose
+}: {
+  step: JobStep;
+  onClose: () => void;
+}) {
+  const stepTypeLabels: Record<string, string> = {
+    'pickup_bin': '取桶',
+    'drop_bin': '放桶',
+    'dump_waste': '倒垃圾',
+    'load_material': '装料',
+    'unload_material': '卸料',
+    'customer_delivery': '客户送桶',
+    'customer_pickup': '客户收桶',
+    'depot_pickup': '仓库取桶',
+    'dump_site': '垃圾场倒垃圾',
+  };
+  const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
+  const isDone = step.status === "done";
+
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  return (
+    <>
+      <Dialog open onOpenChange={onClose}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span>{stepLabel}</span>
+              {isDone && (
+                <Badge className="bg-status-done text-white">
+                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                  已完成
+                </Badge>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* 基本信息 */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs text-muted-foreground">步骤编号</Label>
+                <div className="text-sm font-medium mt-1">#{step.step_number}</div>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">状态</Label>
+                <div className="text-sm font-medium mt-1">
+                  {step.status === "done" ? "✅ 已完成" : 
+                   step.status === "in_progress" ? "🔄 进行中" : 
+                   step.status === "pending" ? "⏳ 待执行" : "🔒 锁定"}
+                </div>
+              </div>
+            </div>
+
+            {/* 地点 */}
+            <div>
+              <Label className="text-xs text-muted-foreground">地点</Label>
+              <div className="text-sm mt-1 flex items-start gap-2">
+                <MapPin className="h-4 w-4 text-primary mt-0.5" />
+                <span>{step.location}</span>
+              </div>
+            </div>
+
+            {/* 桶号信息 */}
+            {step.bin_number_reported && (
+              <div>
+                <Label className="text-xs text-muted-foreground">桶号</Label>
+                <div className="text-sm font-medium mt-1 text-primary">
+                  {step.bin_number_reported}
+                </div>
+              </div>
+            )}
+
+            {/* 旧桶号（换桶时） */}
+            {step.old_bin_number_reported && (
+              <div>
+                <Label className="text-xs text-muted-foreground">旧桶号（收回）</Label>
+                <div className="text-sm font-medium mt-1 text-orange-600">
+                  {step.old_bin_number_reported}
+                </div>
+              </div>
+            )}
+
+            {/* 垃圾场 */}
+            {step.dump_site && (
+              <div>
+                <Label className="text-xs text-muted-foreground">垃圾场</Label>
+                <div className="text-sm mt-1">{step.dump_site}</div>
+              </div>
+            )}
+
+            {/* 重量 */}
+            {step.weight_kg && (
+              <div>
+                <Label className="text-xs text-muted-foreground">重量</Label>
+                <div className="text-sm font-medium mt-1">
+                  ⚖️ {step.weight_kg} kg
+                </div>
+              </div>
+            )}
+
+            {/* 备注 */}
+            {step.notes && (
+              <div>
+                <Label className="text-xs text-muted-foreground">备注</Label>
+                <div className="text-sm mt-1 bg-muted p-2 rounded">
+                  {step.notes}
+                </div>
+              </div>
+            )}
+
+            {/* 完成时间 */}
+            {step.completed_at && (
+              <div>
+                <Label className="text-xs text-muted-foreground">完成时间</Label>
+                <div className="text-sm mt-1">
+                  {new Date(step.completed_at).toLocaleString('zh-CN')}
+                </div>
+              </div>
+            )}
+
+            {/* 照片 */}
+            {step.photo_url && (
+              <div>
+                <Label className="text-xs text-muted-foreground">现场照片</Label>
+                <div 
+                  className="mt-2 rounded-lg overflow-hidden border bg-muted cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => setSelectedImage(step.photo_url)}
+                >
+                  <img 
+                    src={step.photo_url} 
+                    alt="现场照片" 
+                    className="w-full h-auto max-h-[300px] object-contain"
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                  <ImageIcon className="h-3 w-3" />
+                  点击图片放大查看
+                </div>
+              </div>
+            )}
+
+            {/* 磅单照片 */}
+            {step.weigh_ticket_url && (
+              <div>
+                <Label className="text-xs text-muted-foreground">磅单照片</Label>
+                <div 
+                  className="mt-2 rounded-lg overflow-hidden border bg-muted cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => setSelectedImage(step.weigh_ticket_url)}
+                >
+                  <img 
+                    src={step.weigh_ticket_url} 
+                    alt="磅单照片" 
+                    className="w-full h-auto max-h-[300px] object-contain"
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                  <ImageIcon className="h-3 w-3" />
+                  点击图片放大查看
+                </div>
+              </div>
+            )}
+
+            {/* 如果没有图片 */}
+            {!step.photo_url && !step.weigh_ticket_url && isDone && (
+              <div className="text-sm text-muted-foreground text-center py-4 bg-muted/50 rounded">
+                此步骤没有上传图片
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button onClick={onClose}>关闭</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 图片放大查看 */}
+      {selectedImage && (
+        <Dialog open onOpenChange={() => setSelectedImage(null)}>
+          <DialogContent className="max-w-[90vw] max-h-[90vh] p-2">
+            <div className="relative">
+              <img 
+                src={selectedImage} 
+                alt="放大查看" 
+                className="w-full h-auto max-h-[85vh] object-contain"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                className="absolute top-2 right-2"
+                onClick={() => setSelectedImage(null)}
+              >
+                关闭
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }
