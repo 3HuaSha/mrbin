@@ -942,7 +942,6 @@ function OrderNodeDisplay({
   const tm = typeMeta(order.type);
   const conflict = vehicle ? !vehicleCanCarry(vehicle.type, order.bin_size) : false;
   const isDone = jobStep?.status === "done";
-  const hasPhoto = !!(jobStep?.photo_url || jobStep?.weigh_ticket_url);
   
   // 桶类型中文映射
   const binTypeNames: Record<string, string> = {
@@ -957,8 +956,10 @@ function OrderNodeDisplay({
   return (
     <div 
       className={cn(
-        "group relative rounded-lg border-l-4 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl hover:scale-105 hover:z-10 w-[180px] shrink-0",
-        isDone ? "border-l-status-done" : "border-l-blue-500",
+        "group relative rounded-lg border-l-4 shadow-md p-2.5 transition-all duration-300 hover:shadow-xl hover:scale-105 hover:z-10 w-[180px] shrink-0",
+        isDone 
+          ? "border-l-status-done bg-status-done/10" 
+          : "border-l-blue-500 bg-card",
         onClick && "cursor-pointer"
       )}
       onClick={onClick}
@@ -976,12 +977,6 @@ function OrderNodeDisplay({
         <div className="text-[10px] text-primary font-medium">{timeLabel(order)}</div>
         {jobStep?.bin_number_reported && (
           <div className="text-[10px] text-primary">桶号: {jobStep.bin_number_reported}</div>
-        )}
-        {hasPhoto && (
-          <div className="text-[10px] text-primary flex items-center gap-0.5">
-            <Camera className="h-3 w-3" />
-            有图片
-          </div>
         )}
         {order.customer_notes && (
           <div className="text-[9px] text-status-progress truncate">
@@ -1038,13 +1033,14 @@ function StepNodeDisplay({
   };
   const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
   const isDone = step.status === "done";
-  const hasPhoto = !!step.photo_url || !!step.weigh_ticket_url;
 
   return (
     <div 
       className={cn(
-        "group relative rounded-lg border-l-4 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[150px] shrink-0",
-        isDone ? "border-l-status-done" : "border-l-gray-400",
+        "group relative rounded-lg border-l-4 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[150px] shrink-0",
+        isDone 
+          ? "border-l-status-done bg-status-done/10" 
+          : "border-l-gray-400 bg-card/80",
         onClick && "cursor-pointer"
       )}
       onClick={onClick}
@@ -1063,12 +1059,6 @@ function StepNodeDisplay({
         </div>
         {step.bin_number_reported && (
           <div className="text-[9px] text-primary">桶: {step.bin_number_reported}</div>
-        )}
-        {hasPhoto && (
-          <div className="text-[9px] text-primary flex items-center gap-0.5">
-            <Camera className="h-2.5 w-2.5" />
-            有图片
-          </div>
         )}
         {step.notes && (
           <div className="text-[8px] text-muted-foreground truncate">
