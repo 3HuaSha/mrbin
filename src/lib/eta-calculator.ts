@@ -67,8 +67,10 @@ export async function calculateDriverETAWithSamsara(
     });
     
     const routeData = await calculateSamsaraRouteForVehicle({ 
-      vehicleId: samsaraVehicleId,
-      destinations 
+      data: {
+        vehicleId: samsaraVehicleId,
+        destinations 
+      }
     });
 
     console.log('📦 Samsara API 响应:', routeData);
