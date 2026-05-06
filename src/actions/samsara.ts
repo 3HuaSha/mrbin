@@ -43,10 +43,11 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
  * 传入车辆 ID，Samsara 会自动使用车辆的当前位置作为起点
  */
 export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" })
-  .handler(async (data: {
+  .validator((data: {
     vehicleId: string;
     destinations: Array<{ address: string; name: string }>;
-  }) => {
+  }) => data)
+  .handler(async ({ data }) => {
     const SAMSARA_TOKEN = (process.env.VITE_SAMSARA_TOKEN || process.env.SAMSARA_API_KEY || import.meta.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke') as string;
     
     console.log('🔄 Server Function: 计算车辆路线，车辆ID:', data.vehicleId, '目的地数量:', data.destinations.length);
