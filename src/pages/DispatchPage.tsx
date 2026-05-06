@@ -518,7 +518,7 @@ export function DispatchPage() {
     console.log('🔍 拖拽结束:', { activeIdStr, overIdStr, BACKLOG_ID });
 
     // ============ 处理手动步骤拖到待排班区域（删除步骤）============
-    if (activeIdStr.startsWith('step:') && overIdStr === BACKLOG_ID) {
+    if (activeIdStr.startsWith('step:') && (overIdStr === BACKLOG_ID || overIdStr.startsWith('o:'))) {
       const stepId = activeIdStr.slice(5);
       const step = currentJobSteps.find(s => s.id === stepId);
       
@@ -688,7 +688,13 @@ export function DispatchPage() {
         targetColumnId = BACKLOG_ID;
       }
     } else {
-      targetColumnId = overIdStr;
+      if (overIdStr.startsWith('step:')) {
+        const stepId = overIdStr.slice(5);
+        const step = currentJobSteps.find((x) => x.id === stepId);
+        if (step) targetColumnId = step.driver_id;
+      } else {
+        targetColumnId = overIdStr;
+      }
     }
 
     if (!targetColumnId) return;
@@ -708,6 +714,15 @@ export function DispatchPage() {
       if (overParsed && overParsed.kind === "assignment") {
         insertIndex = driverAsgs.findIndex(a => a.id === overParsed.id);
         if (insertIndex < 0) insertIndex = driverAsgs.length;
+      } else if (overIdStr.startsWith('step:')) {
+        // Find approximate index to insert by looking at step order
+        const stepId = overIdStr.slice(5);
+        const step = currentJobSteps.find((x) => x.id === stepId);
+        if (step) {
+          // step.step_number gives the position among all items.
+          // For simplicity, just insert at end or approximate index.
+          insertIndex = Math.min(step.step_number, driverAsgs.length);
+        }
       }
 
       const targetVehicleId = getDriverVehicle(targetDriver);
