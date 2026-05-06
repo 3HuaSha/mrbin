@@ -43,7 +43,7 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
  * 传入车辆 ID，Samsara 会自动使用车辆的当前位置作为起点
  */
 export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" })
-  .validator((data: {
+  .inputValidator((data: {
     vehicleId: string;
     destinations: Array<{ address: string; name: string }>;
   }) => data)
