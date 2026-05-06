@@ -53,19 +53,35 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
     console.log('🔄 Server Function: 计算车辆路线，车辆ID:', data.vehicleId, '目的地数量:', data.destinations.length);
     
     try {
-      // 方法1: 使用 Samsara 的 Vehicle Routes API
-      // 这个 API 会自动使用车辆的当前位置作为起点
-      const url = `https://api.samsara.com/fleet/vehicles/${data.vehicleId}/routes`;
+      // 使用 Samsara 的 Create Route API 来计算 ETA
+      // 创建一个临时路线，设置 autoCalculateSchedule=true 让 Samsara 自动计算时间
+      const url = 'https://api.samsara.com/fleet/routes';
 
-      const requestBody = {
-        destinations: data.destinations.map(dest => ({
+      // 构建路线停靠点
+      // 第一个停靠点是当前位置（使用车辆当前位置）
+      // 后续停靠点是目的地
+      const now = new Date();
+      const stops = data.destinations.map((dest, index) => ({
+        singleUseLocation: {
           address: dest.address,
           name: dest.name
-        })),
-        departureTime: new Date().toISOString(),
+        },
+        // 只需要提供一个初始时间，autoCalculateSchedule 会重新计算
+        scheduledArrivalTime: new Date(now.getTime() + (index + 1) * 30 * 60 * 1000).toISOString()
+      }));
+
+      const requestBody = {
+        name: `ETA_CALC_${Date.now()}`, // 临时路线名称
+        vehicleId: data.vehicleId,
+        autoCalculateSchedule: true, // 让 Samsara 自动计算时间表
+        stops: stops,
+        settings: {
+          routeStartingCondition: 'departFirstStop',
+          routeCompletionCondition: 'arriveLastStop'
+        }
       };
 
-      console.log('🔄 调用 Vehicle Routes API:', { url, requestBody });
+      console.log('🔄 创建临时路线以计算 ETA:', { url, requestBody });
 
       const response = await fetch(url, {
         method: 'POST',
@@ -77,137 +93,87 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         body: JSON.stringify(requestBody)
       });
 
-      console.log('📡 Vehicle Routes API 响应状态:', response.status, response.statusText);
+      console.log('📡 Create Route API 响应状态:', response.status, response.statusText);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ Samsara Vehicle Routes API 错误:', response.status, errorText);
+        console.error('❌ Samsara Create Route API 错误:', response.status, errorText);
         
-        // 如果这个 API 不可用，尝试使用通用的 Routes API
-        console.log('🔄 尝试使用通用 Routes API...');
-        return await fallbackToGeneralRoutesAPI(data, SAMSARA_TOKEN);
+        return {
+          success: false,
+          error: `Samsara API Error: ${response.status} - ${errorText}`,
+          legs: [],
+          totalDistance: 0,
+          totalDuration: 0,
+        };
       }
 
       const responseData = await response.json();
-      console.log('✅ Samsara Vehicle Routes API 成功:', responseData);
+      console.log('✅ Samsara Create Route API 成功:', responseData);
       
-      // 解析响应数据
-      const legs = responseData.route?.legs || responseData.legs || [];
+      // 提取路线 ID，稍后删除
+      const routeId = responseData.id;
+      
+      // 解析停靠点数据来计算距离和时长
+      const routeStops = responseData.stops || [];
+      const legs: Array<{ distance: number; duration: number }> = [];
+      let totalDistance = 0;
+      let totalDuration = 0;
+
+      // 计算每段路程的时长和距离
+      for (let i = 0; i < routeStops.length - 1; i++) {
+        const currentStop = routeStops[i];
+        const nextStop = routeStops[i + 1];
+        
+        const arrivalTime = new Date(currentStop.scheduledArrivalTime || currentStop.scheduledDepartureTime).getTime();
+        const nextArrivalTime = new Date(nextStop.scheduledArrivalTime).getTime();
+        
+        const duration = Math.floor((nextArrivalTime - arrivalTime) / 1000); // 转换为秒
+        
+        // Samsara 可能不直接提供距离，我们用时长估算（假设平均速度 50 km/h）
+        const distance = Math.floor(duration * 50 / 3.6); // 米
+        
+        legs.push({ distance, duration });
+        totalDistance += distance;
+        totalDuration += duration;
+      }
+
+      // 删除临时路线
+      if (routeId) {
+        try {
+          await fetch(`https://api.samsara.com/fleet/routes/${routeId}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${SAMSARA_TOKEN}`,
+              'Accept': 'application/json'
+            }
+          });
+          console.log('🗑️ 已删除临时路线:', routeId);
+        } catch (deleteError) {
+          console.warn('⚠️ 删除临时路线失败（不影响结果）:', deleteError);
+        }
+      }
 
       const result = {
         success: true,
-        legs: legs.map((leg: any) => ({
-          distance: leg.distanceMeters || leg.distance || 0,
-          duration: leg.durationSeconds || leg.duration || 0,
-        })),
-        totalDistance: responseData.route?.totalDistanceMeters || responseData.totalDistance || 0,
-        totalDuration: responseData.route?.totalDurationSeconds || responseData.totalDuration || 0,
+        legs,
+        totalDistance,
+        totalDuration,
         error: null as string | null,
       };
       
       console.log('📤 返回结果:', result);
       return result;
     } catch (error: any) {
-      console.error('❌ Samsara Vehicle Routes API 异常:', error);
+      console.error('❌ Samsara Route API 异常:', error);
       
-      // 尝试使用备用方法
-      console.log('🔄 尝试使用备用方法...');
-      return await fallbackToGeneralRoutesAPI(data, SAMSARA_TOKEN);
-    }
-  });
-
-/**
- * 备用方法：使用通用的 Routes API
- * 需要先获取车辆当前位置，然后计算路线
- */
-async function fallbackToGeneralRoutesAPI(
-  data: { vehicleId: string; destinations: Array<{ address: string; name: string }> },
-  token: string
-) {
-  try {
-    // 1. 获取车辆当前位置
-    const locationResponse = await fetch(`https://api.samsara.com/fleet/vehicles/${data.vehicleId}/locations`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json'
-      }
-    });
-
-    if (!locationResponse.ok) {
-      throw new Error('Failed to get vehicle location');
-    }
-
-    const locationData = await locationResponse.json();
-    const location = locationData.data?.[0]?.location || locationData.location;
-
-    if (!location) {
-      throw new Error('Vehicle location not found');
-    }
-
-    // 2. 使用通用 Routes API 计算路线
-    const routesUrl = 'https://api.samsara.com/fleet/routes';
-    
-    const waypoints = [
-      {
-        latitude: location.latitude,
-        longitude: location.longitude,
-        name: '当前位置'
-      },
-      ...data.destinations.map(dest => ({
-        address: dest.address,
-        name: dest.name
-      }))
-    ];
-
-    const routesResponse = await fetch(routesUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({
-        waypoints,
-        departureTime: new Date().toISOString(),
-      })
-    });
-
-    if (!routesResponse.ok) {
-      const errorText = await routesResponse.text();
-      console.error('❌ Samsara Routes API 错误:', routesResponse.status, errorText);
       return {
         success: false,
-        error: `Samsara API Error: ${routesResponse.status}`,
+        error: error.message || 'Unknown error',
         legs: [],
         totalDistance: 0,
         totalDuration: 0,
       };
     }
-
-    const routesData = await routesResponse.json();
-    console.log('✅ 备用方法成功');
-
-    const legs = routesData.route?.legs || routesData.legs || [];
-
-    return {
-      success: true,
-      legs: legs.map((leg: any) => ({
-        distance: leg.distanceMeters || leg.distance || 0,
-        duration: leg.durationSeconds || leg.duration || 0,
-      })),
-      totalDistance: routesData.route?.totalDistanceMeters || routesData.totalDistance || 0,
-      totalDuration: routesData.route?.totalDurationSeconds || routesData.totalDuration || 0,
-      error: null,
-    };
-  } catch (error: any) {
-    console.error('❌ 备用方法失败:', error);
-    return {
-      success: false,
-      error: error.message || 'Unknown error',
-      legs: [],
-      totalDistance: 0,
-      totalDuration: 0,
-    };
-  }
-}
+  });
 
