@@ -56,19 +56,14 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
         console.error("❌ 获取车辆分配失败:", error);
         throw error;
       }
-      console.log("✅ 获取到车辆分配:", data);
       return data || [];
     },
   });
   
-  // 调试：打印车辆分配数据
+  // 调试：打印车辆分配数据（仅在开发环境）
   useEffect(() => {
-    if (vehicleAssignments.length > 0) {
-      console.log("📋 车辆分配数据详情:", vehicleAssignments.map((a: any) => ({
-        driverName: a.profiles?.name,
-        vehicleName: a.vehicles?.name,
-        samsaraId: a.vehicles?.samsara_id
-      })));
+    if (vehicleAssignments.length > 0 && import.meta.env.DEV) {
+      console.log("车辆分配数据:", vehicleAssignments.length, "条");
     }
   }, [vehicleAssignments]);
   
@@ -149,25 +144,18 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     });
     
     // 渲染所有手动步骤固定地点
-    console.log('🏢 开始渲染固定地点标记，共', MANUAL_STEP_LOCATIONS.length, '个地点');
     MANUAL_STEP_LOCATIONS.forEach(location => {
-      console.log('📍 创建标记:', location.name, location.coordinates);
-      const iconUrl = createManualLocationIcon(location);
-      console.log('🎨 图标URL长度:', iconUrl.length);
-      
       const marker = new (window as any).google.maps.Marker({
         position: location.coordinates,
         map: mapInstance.current,
         icon: {
-          url: iconUrl,
-          scaledSize: new (window as any).google.maps.Size(45, 45), // 改为45x45，适中的尺寸
+          url: createManualLocationIcon(location),
+          scaledSize: new (window as any).google.maps.Size(45, 45),
           anchor: new (window as any).google.maps.Point(22.5, 45)
         },
         title: location.name,
         zIndex: 50
       });
-      
-      console.log('✅ 标记已创建:', location.name);
       
       // 将固定地点标记也存储到markersRef中，用于路线绘制
       const markerId = `manual_${location.id}`;
@@ -209,9 +197,8 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
         const result = await fetchSamsaraVehicles();
         if (active && result.success && result.data) {
           setSamsaraLocs(result.data);
-          console.log(`✅ 获取到 ${result.data.length} 辆 Samsara 车辆`);
         } else if (result.error) {
-          console.warn("⚠️ Samsara 获取失败:", result.error);
+          console.warn("Samsara获取失败:", result.error);
           console.warn("📍 地图将继续显示订单，但不显示车辆位置");
         }
       } catch (error) {
@@ -269,26 +256,6 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
       const driverName = assignment ? (assignment.profiles?.name || "已分配") : "";
       // 使用车辆的 type 字段（HINO 或 MACK），如果没有则使用提取的类型
       const vehicleTypeName = assignment?.vehicles?.type || vehicleType;
-      
-      // 调试日志
-      if (assignment) {
-        console.log(`✅ 车辆匹配成功: ${name} -> ${driverName} (${vehicleTypeName})`, {
-          truckId: truck.id,
-          vehicleSamsaraId: assignment.vehicles?.samsara_id,
-          vehicleName: assignment.vehicles?.name,
-          vehicleType: assignment.vehicles?.type
-        });
-      } else {
-        console.log(`❌ 车辆未匹配: ${name}`, {
-          truckId: truck.id,
-          availableAssignments: vehicleAssignments.map((a: any) => ({
-            vehicleName: a.vehicles?.name,
-            samsaraId: a.vehicles?.samsara_id,
-            driverName: a.profiles?.name,
-            vehicleType: a.vehicles?.type
-          }))
-        });
-      }
       
       // 创建标签文本：使用车辆 type (HINO/MACK) + 驾驶员
       const labelText = driverName ? `${vehicleTypeName} ${driverName}` : vehicleTypeName;
@@ -353,20 +320,8 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     // 绘制订单
     const geocoder = new (window as any).google.maps.Geocoder();
     
-    console.log(`📦 开始绘制订单，共 ${orders.length} 个订单`);
-    
     orders.forEach(order => {
-      console.log(`📦 处理订单: ${order.order_number || order.id}`, {
-        status: order.status,
-        completed: order.completed,
-        address: order.address,
-        type: order.type,
-        bin_size: order.bin_size,
-        time_window: order.time_window
-      });
-      
       if (order.status === 'done' || order.completed) {
-        console.log(`⏭️ 跳过已完成订单: ${order.order_number}`);
         return; // 隐藏已完成
       }
 
@@ -397,11 +352,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
       if (order.address && !newMarkers[id]) {
         newMarkers[id] = "pending"; // 占位
         
-        console.log(`🔍 正在解析订单地址: ${order.order_number} - ${order.address}`);
-        
         geocoder.geocode({ address: order.address + ", Toronto, ON, Canada" }, (results: any, status: any) => {
-          console.log(`📍 地址解析结果: ${order.order_number} - Status: ${status}`, results);
-          
           if (status === "OK" && results?.[0]) {
             const pos = results[0].geometry.location;
             
@@ -475,9 +426,8 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
             });
             
             markersRef.current[id] = marker;
-            console.log(`✅ 订单标记已创建: ${order.order_number}`);
           } else {
-            console.warn(`❌ 地址解析失败: ${order.order_number} - ${order.address} - Status: ${status}`);
+            console.warn(`地址解析失败: ${order.order_number} - ${order.address}`);
           }
         });
       }
@@ -597,11 +547,6 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
           });
           
           routeLinesRef.current.push(numberMarker);
-        });
-        
-        console.log(`🗺️ 绘制路线: ${driverETA.driverName}`, {
-          points: pathCoordinates.length,
-          color: lineColor
         });
       });
     };
