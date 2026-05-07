@@ -109,12 +109,10 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
             longitude: dest.longitude
           }
         };
-        // 只需要提供一个初始时间，autoCalculateSchedule 会重新计算
-        // 如果 routeStartingCondition 是 departFirstStop，第一站不能设置 scheduledArrivalTime，必须设置 scheduledDepartureTime
+        // 如果 routeStartingCondition 是 departFirstStop，第一站必须设置 scheduledDepartureTime
+        // 对于后续站点，我们不提供时间，让 Samsara 根据 autoCalculateSchedule: true 自动计算真正的到达时间
         if (index === 0) {
           stop.scheduledDepartureTime = now.toISOString();
-        } else {
-          stop.scheduledArrivalTime = new Date(now.getTime() + (index + 1) * 30 * 60 * 1000).toISOString();
         }
         return stop;
       });
