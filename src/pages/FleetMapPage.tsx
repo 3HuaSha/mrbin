@@ -9,6 +9,7 @@ import { Truck, ChevronDown, ChevronRight, MapPin, AlertTriangle, Clock, Loader2
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { calculateDriverETAWithSamsara, formatETA, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
+import { getFullAddress } from "@/lib/manual-step-locations";
 import { toast } from "sonner";
 
 type Driver = { id: string; name: string };
@@ -153,10 +154,30 @@ export function FleetMapPage() {
         `);
 
       const driverSteps = driverJobSteps[driverId] ?? [];
-      const orderSteps = driverSteps.filter(s => s.node_type === 'order' && s.orders);
       
-      if (orderSteps.length === 0) {
-        toast.error('该司机没有订单任务');
+      // 包含所有步骤（订单节点 + 手动步骤节点）
+      const allSteps = driverSteps.map(s => {
+        if (s.node_type === 'order' && s.orders) {
+          return {
+            id: s.orders.id,
+            address: s.orders.address,
+            type: 'order' as const,
+            stepNumber: s.step_number
+          };
+        } else if (s.node_type === 'step' && s.location) {
+          // 对于手动步骤，使用完整地址
+          return {
+            id: s.id,
+            address: getFullAddress(s.location), // 转换为完整地址
+            type: 'manual' as const,
+            stepNumber: s.step_number
+          };
+        }
+        return null;
+      }).filter(Boolean).sort((a, b) => a!.stepNumber - b!.stepNumber);
+      
+      if (allSteps.length === 0) {
+        toast.error('该司机没有任务');
         return;
       }
 
@@ -185,10 +206,10 @@ export function FleetMapPage() {
         lng: vehicle.location.longitude,
       };
 
-      // 准备订单数据
-      const ordersForETA = orderSteps.map(s => ({
-        id: s.orders!.id,
-        address: s.orders!.address,
+      // 准备所有步骤数据（包含订单和手动步骤）
+      const stepsForETA = allSteps.map(s => ({
+        id: s!.id,
+        address: s!.address,
       }));
 
       const eta = await calculateDriverETAWithSamsara(
@@ -197,15 +218,15 @@ export function FleetMapPage() {
         assignment.vehicle_id,
         samsaraVehicleId,
         currentLocation,
-        ordersForETA
+        stepsForETA
       );
 
       console.log('✅ ETA 计算结果:', {
         driverId,
         driverName,
-        ordersCount: eta.orders.length,
-        orders: eta.orders.map(o => ({
-          orderId: o.orderId,
+        stepsCount: eta.orders.length,
+        steps: eta.orders.map(o => ({
+          id: o.orderId,
           address: o.orderAddress,
           eta: o.eta,
           status: o.status
@@ -398,7 +419,12 @@ export function FleetMapPage() {
 
         {/* 右侧地图 - 移除上方白边 */}
         <div className="flex-1 overflow-hidden relative">
-           <DispatchMapWidget drivers={drivers} orders={orders} assignments={assignments} />
+           <DispatchMapWidget 
+             drivers={drivers} 
+             orders={orders} 
+             assignments={assignments}
+             driverETAs={driverETAs}
+           />
         </div>
       </div>
     </div>

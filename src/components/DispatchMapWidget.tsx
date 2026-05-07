@@ -2,14 +2,21 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { supabase } from "@/integrations/supabase/client";
+import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES } from "@/lib/manual-step-locations";
 
 const KENNEDY_DEPOT = { lat: 43.7568, lng: -79.2865, label: "Kennedy Depot" };
 
-export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { drivers: any[], orders?: any[], assignments?: any[] }) {
+export function DispatchMapWidget({ drivers, orders = [], assignments = [], driverETAs = {} }: { 
+  drivers: any[], 
+  orders?: any[], 
+  assignments?: any[],
+  driverETAs?: Record<string, any>
+}) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
   const markersRef = useRef<Record<string, any>>({});
   const infoWindowRef = useRef<any>(null);
+  const routeLinesRef = useRef<any[]>([]); // 存储路线折线
   
   const [mapLoaded, setMapLoaded] = useState(false);
   const [samsaraLocs, setSamsaraLocs] = useState<any[]>([]);
@@ -139,6 +146,47 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
         scaledSize: new (window as any).google.maps.Size(24, 24)
       },
       title: "Kennedy Depot"
+    });
+    
+    // 渲染所有手动步骤固定地点
+    MANUAL_STEP_LOCATIONS.forEach(location => {
+      const marker = new (window as any).google.maps.Marker({
+        position: location.coordinates,
+        map: mapInstance.current,
+        icon: {
+          url: createManualLocationIcon(location),
+          scaledSize: new (window as any).google.maps.Size(60, 60),
+          anchor: new (window as any).google.maps.Point(30, 60)
+        },
+        title: location.name,
+        zIndex: 50
+      });
+      
+      // 添加点击事件
+      marker.addListener('click', () => {
+        if (!infoWindowRef.current) return;
+        const typeName = LOCATION_TYPE_NAMES[location.type] || location.type;
+        infoWindowRef.current.setContent(`
+          <div style="padding:10px;font-size:13px;color:black;min-width:200px;">
+            <div style="font-weight:bold;font-size:15px;margin-bottom:8px;color:#333;">
+              ${location.icon} ${location.name}
+            </div>
+            <div style="margin-bottom:4px;">
+              <span style="font-weight:bold;color:#666;">类型:</span> 
+              <span style="color:#2196F3;margin-left:4px;">${typeName}</span>
+            </div>
+            <div style="margin-bottom:4px;">
+              <span style="font-weight:bold;color:#666;">简称:</span> 
+              <span style="color:#4CAF50;margin-left:4px;">${location.shortName}</span>
+            </div>
+            <div style="margin-bottom:4px;">
+              <span style="font-weight:bold;color:#666;">地址:</span> 
+              <div style="color:#333;margin-top:2px;font-size:12px;">${location.fullAddress}</div>
+            </div>
+          </div>
+        `);
+        infoWindowRef.current.open(mapInstance.current, marker);
+      });
     });
   }, [mapLoaded]);
 
@@ -313,11 +361,22 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
 
       const id = "order_" + order.id;
       
+      // 查找该订单的ETA信息
+      let orderETA = null;
+      for (const driverId in driverETAs) {
+        const eta = driverETAs[driverId];
+        const found = eta?.orders?.find((o: any) => o.orderId === order.id);
+        if (found) {
+          orderETA = found;
+          break;
+        }
+      }
+      
       // 已有 marker
       if (markersRef.current[id]) {
         const marker = markersRef.current[id];
         if (marker !== "pending") {
-           updateOrderIcon(marker, order, assignments, drivers);
+           updateOrderIcon(marker, order, assignments, drivers, orderETA);
         }
         newMarkers[id] = marker;
         return;
@@ -342,7 +401,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
               zIndex: 500,
             });
             
-            updateOrderIcon(marker, order, assignments, drivers);
+            updateOrderIcon(marker, order, assignments, drivers, orderETA);
             
             marker.addListener('click', () => {
               if (!infoWindowRef.current) return;
@@ -362,6 +421,14 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
                 'asphalt': '沥青桶'
               };
               const binTypeName = binTypeNames[order.bin_type] || '—';
+              
+              // ETA信息
+              const etaInfo = orderETA && orderETA.status === 'OK' 
+                ? `<div style="margin-bottom:4px;">
+                     <span style="font-weight:bold;color:#666;">预计到达:</span> 
+                     <span style="color:#2196F3;margin-left:4px;">${new Date(orderETA.eta).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                   </div>`
+                : '';
                 
               infoWindowRef.current.setContent(`
                 <div style="padding:8px;font-size:12px;color:black;min-width:180px;">
@@ -382,6 +449,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
                     <span style="font-weight:bold;color:#666;">时段:</span> 
                     <span style="color:#9C27B0;margin-left:4px;">${timeDisplay}</span>
                   </div>
+                  ${etaInfo}
                   <div style="margin-bottom:6px;">
                     <span style="font-weight:bold;color:#666;">地址:</span> 
                     <div style="color:#333;margin-top:2px;font-size:11px;">${order.address}</div>
@@ -418,7 +486,71 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [] }: { 
       }
     });
 
-  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments]);
+  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments, driverETAs]);
+
+  // 5. 绘制ETA路线
+  useEffect(() => {
+    if (!mapInstance.current || !(window as any).google || !driverETAs) return;
+    
+    // 清除旧的路线
+    routeLinesRef.current.forEach(line => line.setMap(null));
+    routeLinesRef.current = [];
+    
+    // 延迟绘制，确保标记已经创建
+    const drawRoutes = () => {
+      // 为每个有ETA数据的司机绘制路线
+      Object.values(driverETAs).forEach((driverETA: any) => {
+        if (!driverETA || !driverETA.currentLocation || !driverETA.orders || driverETA.orders.length === 0) {
+          return;
+        }
+        
+        // 构建路径点：车辆当前位置 -> 各个任务点
+        const pathCoordinates = [
+          { lat: driverETA.currentLocation.lat, lng: driverETA.currentLocation.lng }
+        ];
+        
+        // 为每个任务点添加坐标（需要从markersRef中获取）
+        driverETA.orders.forEach((orderETA: any) => {
+          const markerId = `order_${orderETA.orderId}`;
+          const marker = markersRef.current[markerId];
+          if (marker && marker !== "pending" && marker.getPosition) {
+            const pos = marker.getPosition();
+            pathCoordinates.push({ lat: pos.lat(), lng: pos.lng() });
+          }
+        });
+        
+        if (pathCoordinates.length < 2) return;
+        
+        // 为不同司机使用不同颜色
+        const colors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#00BCD4'];
+        const colorIndex = Object.keys(driverETAs).indexOf(driverETA.driverId) % colors.length;
+        const lineColor = colors[colorIndex];
+        
+        // 绘制路线折线
+        const routeLine = new (window as any).google.maps.Polyline({
+          path: pathCoordinates,
+          geodesic: true,
+          strokeColor: lineColor,
+          strokeOpacity: 0.8,
+          strokeWeight: 4,
+          map: mapInstance.current,
+          zIndex: 100
+        });
+        
+        routeLinesRef.current.push(routeLine);
+        
+        console.log(`🗺️ 绘制路线: ${driverETA.driverName}`, {
+          points: pathCoordinates.length,
+          color: lineColor
+        });
+      });
+    };
+    
+    // 延迟500ms绘制，确保所有标记都已创建
+    const timeoutId = setTimeout(drawRoutes, 500);
+    
+    return () => clearTimeout(timeoutId);
+  }, [driverETAs, mapLoaded]);
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   if (!apiKey) {
@@ -524,7 +656,7 @@ function createVehicleIconWithLabel(vehicleType: string, driverName: string): st
 }
 
 // 辅助函数: 创建带标签的订单图标
-function createOrderIconWithLabel(order: any): string {
+function createOrderIconWithLabel(order: any, orderETA?: any): string {
   // 为每种订单类型定义配色方案 - 使用更显眼的颜色（深色文字+亮色背景）
   const colorSchemes: Record<string, { bg: string; text: string; pin: string }> = {
     'delivery': { bg: '#2196F3', text: '#FFFFFF', pin: '#1976D2' },  // 亮蓝底白字
@@ -577,17 +709,28 @@ function createOrderIconWithLabel(order: any): string {
   const line1 = `${typeName}${binSize}${binTypeName} ${timeDisplay}`.trim();
   const line2 = extractAddressShort(order.address);
   
-  const lines = [line1, line2].filter(line => line);
+  // 如果有ETA，添加ETA行
+  const lines = [line1, line2];
+  if (orderETA && orderETA.status === 'OK') {
+    const etaTime = new Date(orderETA.eta).toLocaleTimeString('zh-CN', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: false 
+    });
+    lines.push(`ETA: ${etaTime}`);
+  }
+  
+  const filteredLines = lines.filter(line => line);
   
   // 计算卡片尺寸 - 缩小尺寸
-  const maxLineWidth = Math.max(...lines.map(line => {
+  const maxLineWidth = Math.max(...filteredLines.map(line => {
     return line.split('').reduce((width, char) => {
       return width + (/[\u4e00-\u9fa5]/.test(char) ? 11 : 7); // 恢复正常字符宽度
     }, 0);
   }));
   
   const cardWidth = Math.max(maxLineWidth + 16, 90); // 减小padding
-  const cardHeight = 10 + lines.length * 16; // 减小行高到16px
+  const cardHeight = 10 + filteredLines.length * 16; // 减小行高到16px
   const svgWidth = Math.max(cardWidth + 10, 110);
   const svgHeight = cardHeight + 38;
   
@@ -596,9 +739,13 @@ function createOrderIconWithLabel(order: any): string {
   
   // 生成文本行 - 字体12px，白色文字加描边
   let textElements = '';
-  lines.forEach((line, index) => {
+  filteredLines.forEach((line, index) => {
     const y = 14 + index * 16; // 调整y位置
-    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='12' font-weight='${index === 0 ? 'bold' : '600'}' fill='${scheme.text}' font-family='Arial, sans-serif' stroke='${scheme.pin}' stroke-width='0.3'>${line}</text>`;
+    // ETA行使用特殊样式
+    const isETALine = line.startsWith('ETA:');
+    const fontWeight = index === 0 ? 'bold' : (isETALine ? 'bold' : '600');
+    const fill = isETALine ? '#FFD700' : scheme.text; // ETA用金色
+    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='12' font-weight='${fontWeight}' fill='${fill}' font-family='Arial, sans-serif' stroke='${scheme.pin}' stroke-width='0.3'>${line}</text>`;
   });
   
   // 创建SVG
@@ -624,8 +771,8 @@ function createOrderIconWithLabel(order: any): string {
 }
 
 // 辅助函数: 更新订单的图标
-function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: any[]) {
-  const iconUrl = createOrderIconWithLabel(order);
+function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: any[], orderETA?: any) {
+  const iconUrl = createOrderIconWithLabel(order, orderETA);
   
   // 提取街道号和城市名
   const extractAddressShort = (addr: string): string => {
@@ -664,6 +811,16 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
   const line2 = extractAddressShort(order.address);
   const lines = [line1, line2].filter(line => line);
   
+  // 如果有ETA，添加ETA行
+  if (orderETA && orderETA.status === 'OK') {
+    const etaTime = new Date(orderETA.eta).toLocaleTimeString('zh-CN', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: false 
+    });
+    lines.push(`ETA: ${etaTime}`);
+  }
+  
   const baseHeight = 10 + lines.length * 16 + 38;
   const scaleFactor = 1.0; // 恢复到1.0倍
   const width = 110 * scaleFactor;
@@ -674,4 +831,37 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
     scaledSize: new (window as any).google.maps.Size(width, height),
     anchor: new (window as any).google.maps.Point(width / 2, height),
   });
+}
+
+// 辅助函数: 创建手动地点图标
+function createManualLocationIcon(location: any): string {
+  // 根据地点类型选择颜色
+  const colorSchemes: Record<string, { bg: string; text: string; border: string }> = {
+    'depot': { bg: '#607D8B', text: '#FFFFFF', border: '#455A64' },           // 灰色 - 仓库
+    'transfer_station': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C' }, // 绿色 - 转运站
+    'dump_site': { bg: '#FF5722', text: '#FFFFFF', border: '#D84315' },       // 红色 - 倾倒点
+    'material_site': { bg: '#FF9800', text: '#FFFFFF', border: '#F57C00' }    // 橙色 - 物料站
+  };
+  
+  const scheme = colorSchemes[location.type] || { bg: '#9E9E9E', text: '#FFFFFF', border: '#757575' };
+  
+  // SVG图标：圆形背景 + emoji + 名称
+  const svg = `
+    <svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'>
+      <!-- 圆形背景 -->
+      <circle cx='30' cy='25' r='20' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='2' opacity='0.95'/>
+      
+      <!-- Emoji图标 -->
+      <text x='30' y='32' text-anchor='middle' font-size='18' fill='${scheme.text}'>${location.icon}</text>
+      
+      <!-- 名称标签 -->
+      <rect x='5' y='48' width='50' height='10' rx='2' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1' opacity='0.9'/>
+      <text x='30' y='56' text-anchor='middle' font-size='8' font-weight='bold' fill='${scheme.text}' font-family='Arial, sans-serif'>${location.shortName}</text>
+      
+      <!-- 指向线 -->
+      <line x1='30' y1='45' x2='30' y2='48' stroke='${scheme.border}' stroke-width='2'/>
+    </svg>
+  `.trim();
+  
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }

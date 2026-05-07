@@ -516,6 +516,15 @@ function AssignVehicleDialog({
         throw new Error("该车辆已分配给此司机");
       }
 
+      // 先删除该司机的所有旧分配（确保一个司机只有一辆车）
+      const { error: deleteError } = await supabase
+        .from("driver_vehicle_assignments")
+        .delete()
+        .eq("driver_id", driver.id);
+      
+      if (deleteError) throw deleteError;
+
+      // 再插入新的分配
       const { error } = await supabase.from("driver_vehicle_assignments").insert({
         driver_id: driver.id,
         vehicle_id: selectedVehicleId,

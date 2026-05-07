@@ -1118,30 +1118,67 @@ function InsertStepButton({
   commonLocations: CommonLocation[];
   bins: Bin[];
 }) {
-  const [location, setLocation] = useState("");
-  const [customLocation, setCustomLocation] = useState("");
   const [stepType, setStepType] = useState("");
-  const [binId, setBinId] = useState("");
+  const [location, setLocation] = useState("");
+  const [binSize, setBinSize] = useState("");
   const [notes, setNotes] = useState("");
-  const [showCustomLocation, setShowCustomLocation] = useState(false);
+
+  // 根据动作类型获取可用地点
+  const getLocationOptions = () => {
+    if (stepType === "pickup_bin" || stepType === "drop_bin") {
+      return [
+        { value: "3445", label: "3445 Kennedy" },
+        { value: "12441", label: "12441 Woodbine" }
+      ];
+    } else if (stepType === "dump_waste") {
+      return [
+        { value: "york1 300", label: "YORK1 Nugget (300)" },
+        { value: "63A", label: "63A Medulla" },
+        { value: "draglam", label: "Draglam Vaughan" },
+        { value: "draglam brampton", label: "Draglam Brampton" },
+        { value: "maple waste", label: "Maple Transfer" },
+        { value: "york1 whitby", label: "YORK1 Whitby" },
+        { value: "york1 brampton", label: "YORK1 Brampton" }
+      ];
+    }
+    return [];
+  };
 
   const handleInsert = () => {
-    const finalLocation = showCustomLocation ? customLocation : location;
-    if (!finalLocation || !stepType) {
-      toast.error("请填写地点和动作");
+    if (!stepType) {
+      toast.error("请选择动作");
       return;
     }
-    onInsert({ driverId, position, location: finalLocation, stepType, binId, notes });
+    if (!location) {
+      toast.error("请选择地点");
+      return;
+    }
+    if (!binSize) {
+      toast.error("请选择桶大小");
+      return;
+    }
+    
+    // 将桶大小添加到备注中
+    const finalNotes = notes ? `${binSize}yd - ${notes}` : `${binSize}yd`;
+    
+    onInsert({ driverId, position, location, stepType, notes: finalNotes });
+    
     // 重置表单
-    setLocation("");
-    setCustomLocation("");
     setStepType("");
-    setBinId("");
+    setLocation("");
+    setBinSize("");
     setNotes("");
-    setShowCustomLocation(false);
+  };
+
+  // 当动作改变时，重置地点
+  const handleStepTypeChange = (value: string) => {
+    setStepType(value);
+    setLocation(""); // 重置地点选择
   };
 
   if (!isActive) return null;
+
+  const locationOptions = getLocationOptions();
 
   return (
     <div className="w-[200px] p-2.5 border-2 border-primary rounded-lg bg-card shadow-2xl space-y-2">
@@ -1152,91 +1189,57 @@ function InsertStepButton({
         </button>
       </div>
       
-      {!showCustomLocation ? (
-        <div>
-          <Label className="text-[10px] font-medium">地点</Label>
-          <Select value={location} onValueChange={(v) => {
-            if (v === "custom") {
-              setShowCustomLocation(true);
-              setLocation("");
-            } else {
-              setLocation(v);
-            }
-          }}>
-            <SelectTrigger className="mt-0.5 h-7 text-[10px]">
-              <SelectValue placeholder="选择地点" />
-            </SelectTrigger>
-            <SelectContent className="z-[110]">
-              {commonLocations.map((loc) => (
-                <SelectItem key={loc.id} value={loc.address} className="text-[10px]">
-                  {loc.name}
-                </SelectItem>
-              ))}
-              <SelectItem value="custom" className="text-[10px] text-primary font-medium">
-                + 自定义
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      ) : (
-        <div>
-          <Label className="text-[10px] font-medium">自定义地址</Label>
-          <div className="flex gap-1 mt-0.5">
-            <input
-              type="text"
-              value={customLocation}
-              onChange={(e) => setCustomLocation(e.target.value)}
-              placeholder="输入地址"
-              className="flex-1 h-7 px-1.5 rounded-md border bg-background text-[10px]"
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setShowCustomLocation(false);
-                setCustomLocation("");
-              }}
-              className="h-7 px-1.5 text-[10px]"
-            >
-              ✕
-            </Button>
-          </div>
-        </div>
-      )}
-      
+      {/* 第一行：动作 */}
       <div>
         <Label className="text-[10px] font-medium">动作</Label>
-        <Select value={stepType} onValueChange={setStepType}>
+        <Select value={stepType} onValueChange={handleStepTypeChange}>
           <SelectTrigger className="mt-0.5 h-7 text-[10px]">
             <SelectValue placeholder="选择动作" />
           </SelectTrigger>
           <SelectContent className="z-[110]">
-            <SelectItem value="pickup_bin" className="text-[10px]">取桶</SelectItem>
-            <SelectItem value="drop_bin" className="text-[10px]">放桶</SelectItem>
+            <SelectItem value="drop_bin" className="text-[10px]">放下桶</SelectItem>
+            <SelectItem value="pickup_bin" className="text-[10px]">取走桶</SelectItem>
             <SelectItem value="dump_waste" className="text-[10px]">倒垃圾</SelectItem>
-            <SelectItem value="load_material" className="text-[10px]">装料</SelectItem>
-            <SelectItem value="unload_material" className="text-[10px]">卸料</SelectItem>
           </SelectContent>
         </Select>
       </div>
       
+      {/* 第二行：地点（根据动作显示不同选项）*/}
+      {stepType && (
+        <div>
+          <Label className="text-[10px] font-medium">地点</Label>
+          <Select value={location} onValueChange={setLocation}>
+            <SelectTrigger className="mt-0.5 h-7 text-[10px]">
+              <SelectValue placeholder="选择地点" />
+            </SelectTrigger>
+            <SelectContent className="z-[110]">
+              {locationOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="text-[10px]">
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      
+      {/* 第三行：桶大小 */}
       <div>
-        <Label className="text-[10px] font-medium">桶号 (可选)</Label>
-        <Select value={binId || "none"} onValueChange={(v) => setBinId(v === "none" ? "" : v)}>
+        <Label className="text-[10px] font-medium">桶大小</Label>
+        <Select value={binSize} onValueChange={setBinSize}>
           <SelectTrigger className="mt-0.5 h-7 text-[10px]">
-            <SelectValue placeholder="不指定" />
+            <SelectValue placeholder="选择桶大小" />
           </SelectTrigger>
           <SelectContent className="z-[110]">
-            <SelectItem value="none" className="text-[10px]">不指定</SelectItem>
-            {bins.map((bin) => (
-              <SelectItem key={bin.id} value={bin.id} className="text-[10px]">
-                {bin.bin_number} ({bin.size}yd)
-              </SelectItem>
-            ))}
+            <SelectItem value="14" className="text-[10px]">14 yd</SelectItem>
+            <SelectItem value="20" className="text-[10px]">20 yd</SelectItem>
+            <SelectItem value="30" className="text-[10px]">30 yd</SelectItem>
+            <SelectItem value="40" className="text-[10px]">40 yd</SelectItem>
           </SelectContent>
         </Select>
       </div>
       
+      {/* 第四行：备注 */}
       <div>
         <Label className="text-[10px] font-medium">备注 (可选)</Label>
         <input
