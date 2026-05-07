@@ -87,11 +87,25 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
 
       // 构建路线停靠点
       const now = new Date();
+      
+      // 检查是否有任何一个地址无法解析经纬度
+      const failedDests = data.destinations.filter(d => !d.latitude || !d.longitude);
+      if (failedDests.length > 0) {
+        return {
+          success: false,
+          error: `无法计算 ETA: 以下地址无法通过 Google Maps 找到经纬度坐标 (${failedDests.map(d => d.address).join(' | ')})`,
+          legs: [],
+          totalDistance: 0,
+          totalDuration: 0,
+        };
+      }
+
       const stops = data.destinations.map((dest, index) => ({
         singleUseLocation: {
           address: dest.address,
           name: dest.name,
-          ...(dest.latitude && dest.longitude ? { latitude: dest.latitude, longitude: dest.longitude } : {})
+          latitude: dest.latitude,
+          longitude: dest.longitude
         },
         // 只需要提供一个初始时间，autoCalculateSchedule 会重新计算
         scheduledArrivalTime: new Date(now.getTime() + (index + 1) * 30 * 60 * 1000).toISOString()
