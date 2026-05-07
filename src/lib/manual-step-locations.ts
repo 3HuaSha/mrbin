@@ -42,7 +42,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     fullAddress: 'YORK1 Nugget Transfer Station, 300 Nugget Ave, Scarborough, ON M1S 4A4',
     coordinates: { lat: 43.7891, lng: -79.2456 },
     type: 'transfer_station',
-    icon: '♻️'
+    icon: '♻'
   },
   {
     id: 'york1_whitby',
@@ -51,7 +51,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     fullAddress: 'YORK1 Warren Transfer Station, 113 Warren Rd, Whitby, ON L1N 2C4',
     coordinates: { lat: 43.8765, lng: -78.9234 },
     type: 'transfer_station',
-    icon: '♻️'
+    icon: '♻'
   },
   {
     id: 'maple_waste',
@@ -60,7 +60,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     fullAddress: 'Maple Transfer & Recycling Inc., 10525 Keele St, Maple, ON L6A 3Y9',
     coordinates: { lat: 43.8567, lng: -79.5234 },
     type: 'transfer_station',
-    icon: '♻️'
+    icon: '♻'
   },
   {
     id: '63a',
@@ -69,7 +69,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     fullAddress: '63A Medulla Ave, Etobicoke, ON M8Z 5L6',
     coordinates: { lat: 43.6234, lng: -79.5123 },
     type: 'dump_site',
-    icon: '♻️'
+    icon: '♻'
   },
   {
     id: 'draglam',
@@ -78,7 +78,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     fullAddress: 'Draglam Salt, 401 Bowes Rd, Vaughan, ON L4K 1J5',
     coordinates: { lat: 43.7912, lng: -79.4567 },
     type: 'material_site',
-    icon: '♻️'
+    icon: '♻'
   },
   {
     id: 'draglam_brampton',
@@ -87,7 +87,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     fullAddress: 'Draglam Salt, 19 Delta Park Blvd, Brampton, ON L6T 5E7',
     coordinates: { lat: 43.7123, lng: -79.7345 },
     type: 'material_site',
-    icon: '♻️'
+    icon: '♻'
   }
 ];
 

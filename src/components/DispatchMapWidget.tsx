@@ -895,32 +895,25 @@ function createManualLocationIcon(location: any): string {
   // 根据地点类型选择颜色 - 仓库和垃圾场统一图标
   const colorSchemes: Record<string, { bg: string; text: string; border: string; icon: string }> = {
     'depot': { bg: '#607D8B', text: '#FFFFFF', border: '#455A64', icon: '🏢' },           // 灰色 - 仓库
-    'transfer_station': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻️' }, // 绿色 - 转运站
-    'dump_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻️' },       // 绿色 - 倾倒点（统一为垃圾场）
-    'material_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻️' }    // 绿色 - 物料站（统一为垃圾场）
+    'transfer_station': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻' }, // 绿色 - 转运站
+    'dump_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻' },       // 绿色 - 倾倒点（统一为垃圾场）
+    'material_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻' }    // 绿色 - 物料站（统一为垃圾场）
   };
   
   const scheme = colorSchemes[location.type] || { bg: '#9E9E9E', text: '#FFFFFF', border: '#757575', icon: '📍' };
   
-  // SVG图标：圆形背景 + emoji + 名称（缩小尺寸）
+  // 简化的SVG图标
   const svg = `
     <svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'>
-      <!-- 圆形背景 -->
       <circle cx='20' cy='16' r='12' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5' opacity='0.95'/>
-      
-      <!-- Emoji图标 -->
-      <text x='20' y='21' text-anchor='middle' font-size='12' fill='${scheme.text}'>${scheme.icon}</text>
-      
-      <!-- 名称标签 -->
+      <text x='20' y='21' text-anchor='middle' font-size='12'>${scheme.icon}</text>
       <rect x='3' y='30' width='34' height='8' rx='1.5' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1' opacity='0.9'/>
-      <text x='20' y='36' text-anchor='middle' font-size='6' font-weight='bold' fill='${scheme.text}' font-family='Arial, sans-serif'>${location.shortName}</text>
-      
-      <!-- 指向线 -->
+      <text x='20' y='36' text-anchor='middle' font-size='6' font-weight='bold' fill='${scheme.text}' font-family='Arial'>${location.shortName}</text>
       <line x1='20' y1='28' x2='20' y2='30' stroke='${scheme.border}' stroke-width='1.5'/>
     </svg>
   `.trim();
   
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 // 辅助函数: 创建序号图标
