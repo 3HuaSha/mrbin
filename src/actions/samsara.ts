@@ -64,111 +64,32 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
     console.log('🔄 Server Function: 计算车辆路线，车辆ID:', data.vehicleId, '目的地数量:', data.destinations.length);
 
     try {
-      // 自动解析缺失的经纬度（带缓存）
-      for (const dest of data.destinations) {
-        if (!dest.latitude || !dest.longitude) {
-          if (geocodeCache.has(dest.address)) {
-            const cached = geocodeCache.get(dest.address)!;
-            dest.latitude = cached.lat;
-            dest.longitude = cached.lng;
-            console.log(`📍 使用缓存的地址解析: ${dest.address}`);
-            continue;
-          }
-          if (!GOOGLE_MAPS_API_KEY) {
-            console.warn(`⚠️ 缺少 Google Maps API Key，无法解析地址: ${dest.address}`);
-            continue;
-          }
-          try {
-            const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(dest.address)}&key=${GOOGLE_MAPS_API_KEY}`;
-            const geoRes = await fetch(geoUrl);
-            const geoData = await geoRes.json();
-            if (geoData.status === 'OK' && geoData.results.length > 0) {
-              dest.latitude = geoData.results[0].geometry.location.lat;
-              dest.longitude = geoData.results[0].geometry.location.lng;
-              // 存入缓存
-              geocodeCache.set(dest.address, { lat: dest.latitude, lng: dest.longitude });
-              console.log(`📍 地址解析成功: ${dest.address} -> ${dest.latitude}, ${dest.longitude}`);
-            } else {
-              console.warn(`⚠️ 无法解析地址经纬度: ${dest.address}, 状态: ${geoData.status}`);
-            }
-          } catch (geoErr) {
-            console.error(`❌ 解析地址经纬度异常: ${dest.address}`, geoErr);
-          }
-        }
-      }
-
-      // 使用 Samsara 的 Create Route API 来计算 ETA
-      // 创建一个临时路线，设置 autoCalculateSchedule=true 让 Samsara 自动计算时间
-      const url = 'https://api.samsara.com/fleet/routes';
-
-      // 构建路线停靠点
-      const now = new Date();
-      
-      // 检查是否有任何一个地址无法解析经纬度
-      const failedDests = data.destinations.filter(d => !d.latitude || !d.longitude);
-      if (failedDests.length > 0) {
-        return {
-          success: false,
-          error: `无法计算 ETA: 以下地址无法通过 Google Maps 找到经纬度坐标 (${failedDests.map(d => d.address).join(' | ')})`,
-          legs: [],
-          totalDistance: 0,
-          totalDuration: 0,
-        };
-      }
-
-      const stops = data.destinations.map((dest, index) => {
-        const stop: any = {
-          singleUseLocation: {
-            address: dest.address,
-            name: dest.name,
-            latitude: dest.latitude,
-            longitude: dest.longitude
-          }
-        };
-        // 只需要提供一个初始时间，Samsara 强制要求每一站都有时间
-        // 如果 routeStartingCondition 是 departFirstStop，第一站必须设置 scheduledDepartureTime
-        if (index === 0) {
-          stop.scheduledDepartureTime = now.toISOString();
-        } else {
-          stop.scheduledArrivalTime = new Date(now.getTime() + (index + 1) * 30 * 60 * 1000).toISOString();
-        }
-        return stop;
-      });
-
       // ==========================================
       // 使用最新的 Google Maps Routes API (V2) 进行 ETA 计算
-      // 这是 Google 官方最新推荐的接口，支持更高级的交通模型和车辆配置
       // ==========================================
       if (!GOOGLE_MAPS_API_KEY) {
          throw new Error('缺少 Google Maps API Key，无法计算真实 ETA。');
       }
 
-      const origin = {
-        location: {
-          latLng: {
-            latitude: stops[0].singleUseLocation.latitude,
-            longitude: stops[0].singleUseLocation.longitude
-          }
+      // 组装 Waypoint 对象（如果是坐标则使用 latLng，如果是地址则直接使用 address）
+      const createWaypoint = (dest: any) => {
+        if (dest.latitude && dest.longitude) {
+          return {
+            location: {
+              latLng: {
+                latitude: dest.latitude,
+                longitude: dest.longitude
+              }
+            }
+          };
+        } else {
+          return { address: dest.address };
         }
       };
 
-      const destination = {
-        location: {
-          latLng: {
-            latitude: stops[stops.length - 1].singleUseLocation.latitude,
-            longitude: stops[stops.length - 1].singleUseLocation.longitude
-          }
-        }
-      };
-      
-      const intermediates = stops.slice(1, stops.length - 1).map(s => ({
-        location: {
-          latLng: {
-            latitude: s.singleUseLocation.latitude,
-            longitude: s.singleUseLocation.longitude
-          }
-        }
-      }));
+      const origin = createWaypoint(data.destinations[0]);
+      const destination = createWaypoint(data.destinations[data.destinations.length - 1]);
+      const intermediates = data.destinations.slice(1, data.destinations.length - 1).map(createWaypoint);
 
       const requestBody = {
         origin,
