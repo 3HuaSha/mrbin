@@ -100,16 +100,22 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         };
       }
 
-      const stops = data.destinations.map((dest, index) => ({
-        singleUseLocation: {
-          address: dest.address,
-          name: dest.name,
-          latitude: dest.latitude,
-          longitude: dest.longitude
-        },
+      const stops = data.destinations.map((dest, index) => {
+        const stop: any = {
+          singleUseLocation: {
+            address: dest.address,
+            name: dest.name,
+            latitude: dest.latitude,
+            longitude: dest.longitude
+          }
+        };
         // 只需要提供一个初始时间，autoCalculateSchedule 会重新计算
-        scheduledArrivalTime: new Date(now.getTime() + (index + 1) * 30 * 60 * 1000).toISOString()
-      }));
+        // 如果 routeStartingCondition 是 departFirstStop，第一站不能设置 scheduledArrivalTime
+        if (index > 0) {
+          stop.scheduledArrivalTime = new Date(now.getTime() + (index + 1) * 30 * 60 * 1000).toISOString();
+        }
+        return stop;
+      });
 
       const requestBody = {
         name: `ETA_CALC_${Date.now()}`, // 临时路线名称
