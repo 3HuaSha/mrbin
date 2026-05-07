@@ -119,108 +119,52 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         return stop;
       });
 
-      const requestBody = {
-        name: `ETA_CALC_${Date.now()}`, // 临时路线名称
-        vehicleId: data.vehicleId,
-        autoCalculateSchedule: true, // 让 Samsara 自动计算时间表
-        stops: stops,
-        settings: {
-          routeStartingCondition: 'departFirstStop',
-          routeCompletionCondition: 'arriveLastStop'
-        }
-      };
+      // ==========================================
+      // 使用 Google Maps Directions API 进行精准、同步的 ETA 计算
+      // ==========================================
+      if (!GOOGLE_MAPS_API_KEY) {
+         throw new Error('缺少 Google Maps API Key，无法计算真实 ETA。');
+      }
 
-      console.log('🔄 创建临时路线以计算 ETA:', { url, stops: stops.length });
+      const origin = `${stops[0].singleUseLocation.latitude},${stops[0].singleUseLocation.longitude}`;
+      const destination = `${stops[stops.length - 1].singleUseLocation.latitude},${stops[stops.length - 1].singleUseLocation.longitude}`;
+      
+      const waypoints = stops.slice(1, stops.length - 1).map(s => 
+        `${s.singleUseLocation.latitude},${s.singleUseLocation.longitude}`
+      );
+      
+      let directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&key=${GOOGLE_MAPS_API_KEY}`;
+      if (waypoints.length > 0) {
+        directionsUrl += `&waypoints=${waypoints.join('|')}`;
+      }
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${SAMSARA_TOKEN}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      });
+      console.log('🔄 调用 Google Maps Directions API 计算 ETA...');
+      const response = await fetch(directionsUrl);
+      const responseData = await response.json();
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Samsara Create Route API 错误:', response.status, errorText);
+      if (responseData.status !== 'OK') {
+        console.error('❌ Google Maps Directions API 错误:', responseData.status, responseData.error_message);
         return {
           success: false,
-          error: `Samsara API Error: ${response.status} - ${errorText}`,
+          error: `Google Maps 路线计算失败: ${responseData.status}`,
           legs: [],
           totalDistance: 0,
           totalDuration: 0,
         };
       }
 
-      const responseData = await response.json();
-      const routeData = responseData.data || responseData;
-      const routeId = routeData.id;
-
-      console.log('✅ 路线创建成功，ID:', routeId, '等待 Samsara 后台计算 ETA...');
-
-      // 强制等待 3 秒，让 Samsara 后台有时间计算真实的 ETA
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      // 去 GET /fleet/routes/{id} 拉取带有真实 ETA 的数据
-      const getResponse = await fetch(`https://api.samsara.com/fleet/routes/${routeId}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${SAMSARA_TOKEN}`,
-          'Accept': 'application/json'
-        }
-      });
-
-      let routeStops = routeData.stops || [];
-      if (getResponse.ok) {
-        const getResponseData = await getResponse.json();
-        const getRouteData = getResponseData.data || getResponseData;
-        if (getRouteData.stops && getRouteData.stops.length > 0) {
-           console.log('✅ 成功拉取到更新后的路线数据');
-           routeStops = getRouteData.stops;
-        }
-      } else {
-        console.warn('⚠️ 无法拉取更新后的路线，将使用默认返回时间');
-      }
-
-      // 删除临时路线，保持系统干净
-      if (routeId) {
-        try {
-          await fetch(`https://api.samsara.com/fleet/routes/${routeId}`, {
-            method: 'DELETE',
-            headers: {
-              'Authorization': `Bearer ${SAMSARA_TOKEN}`,
-              'Accept': 'application/json'
-            }
-          });
-          console.log('🗑️ 已清理临时路线:', routeId);
-        } catch (deleteError) {
-          console.warn('⚠️ 删除临时路线失败:', deleteError);
-        }
-      }
+      console.log('✅ Google Maps 路线计算成功');
 
       const legs: Array<{ distance: number; duration: number }> = [];
       let totalDistance = 0;
       let totalDuration = 0;
 
-      // 计算每段路程的时长和距离
-      for (let i = 0; i < routeStops.length - 1; i++) {
-        const currentStop = routeStops[i];
-        const nextStop = routeStops[i + 1];
-
-        // 优先使用 estimatedArrivalTime，如果没有则回退到 scheduled
-        const currentArrival = currentStop.eta?.estimatedArrivalTime || currentStop.estimatedArrivalTime || currentStop.scheduledArrivalTime || currentStop.scheduledDepartureTime;
-        const nextArrival = nextStop.eta?.estimatedArrivalTime || nextStop.estimatedArrivalTime || nextStop.scheduledArrivalTime || nextStop.scheduledDepartureTime;
-
-        const arrivalTime = new Date(currentArrival).getTime();
-        const nextArrivalTime = new Date(nextArrival).getTime();
-
-        const duration = Math.floor((nextArrivalTime - arrivalTime) / 1000); // 转换为秒
-
-        // Samsara 不直接提供这段路程的精确米数，只能通过时长估算 (按50km/h算)
-        const distance = Math.floor(duration * 50 / 3.6); 
-
+      // Google 返回的 legs 刚好对应我们停靠点之间的每一段路程
+      const route = responseData.routes[0];
+      for (const leg of route.legs) {
+        const distance = leg.distance.value; // 米
+        const duration = leg.duration.value; // 秒
+        
         legs.push({ distance, duration });
         totalDistance += distance;
         totalDuration += duration;
@@ -234,7 +178,7 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         error: null as string | null,
       };
 
-      console.log('📤 最终返回结果:', { legsCount: legs.length, totalDistance, totalDuration });
+      console.log('📤 返回结果:', { legsCount: legs.length, totalDistance, totalDuration });
       return result;
 
     } catch (error: any) {
