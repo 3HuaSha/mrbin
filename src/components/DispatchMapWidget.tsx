@@ -160,8 +160,8 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
         map: mapInstance.current,
         icon: {
           url: iconUrl,
-          scaledSize: new (window as any).google.maps.Size(40, 40), // 缩小到40x40
-          anchor: new (window as any).google.maps.Point(20, 40)
+          scaledSize: new (window as any).google.maps.Size(60, 60), // 恢复到60x60
+          anchor: new (window as any).google.maps.Point(30, 60)
         },
         title: location.name,
         zIndex: 50
@@ -902,14 +902,14 @@ function createManualLocationIcon(location: any): string {
   
   const scheme = colorSchemes[location.type] || { bg: '#9E9E9E', text: '#FFFFFF', border: '#757575', icon: '📍' };
   
-  // 简化的SVG图标
+  // SVG图标 - 恢复到原来的尺寸
   const svg = `
-    <svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'>
-      <circle cx='20' cy='16' r='12' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5' opacity='0.95'/>
-      <text x='20' y='21' text-anchor='middle' font-size='12'>${scheme.icon}</text>
-      <rect x='3' y='30' width='34' height='8' rx='1.5' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1' opacity='0.9'/>
-      <text x='20' y='36' text-anchor='middle' font-size='6' font-weight='bold' fill='${scheme.text}' font-family='Arial'>${location.shortName}</text>
-      <line x1='20' y1='28' x2='20' y2='30' stroke='${scheme.border}' stroke-width='1.5'/>
+    <svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'>
+      <circle cx='30' cy='25' r='20' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='2' opacity='0.95'/>
+      <text x='30' y='32' text-anchor='middle' font-size='18'>${scheme.icon}</text>
+      <rect x='5' y='48' width='50' height='10' rx='2' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1' opacity='0.9'/>
+      <text x='30' y='56' text-anchor='middle' font-size='8' font-weight='bold' fill='${scheme.text}' font-family='Arial'>${location.shortName}</text>
+      <line x1='30' y1='45' x2='30' y2='48' stroke='${scheme.border}' stroke-width='2'/>
     </svg>
   `.trim();
   
