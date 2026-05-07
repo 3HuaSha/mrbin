@@ -57,6 +57,7 @@ export function FleetMapPage() {
   const [expandedDrivers, setExpandedDrivers] = useState<Set<string>>(new Set());
   const [calculatingDriverId, setCalculatingDriverId] = useState<string | null>(null);
   const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>({});
+  const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set()); // 跟踪哪些司机显示ETA
 
   // 自动刷新
   useEffect(() => {
@@ -134,6 +135,23 @@ export function FleetMapPage() {
 
   // 计算单个司机的 ETA
   const handleCalculateDriverETA = async (driverId: string, driverName: string) => {
+    // 如果已经显示ETA，则隐藏
+    if (showingETADrivers.has(driverId)) {
+      setShowingETADrivers(prev => {
+        const next = new Set(prev);
+        next.delete(driverId);
+        return next;
+      });
+      // 从driverETAs中移除
+      setDriverETAs(prev => {
+        const next = { ...prev };
+        delete next[driverId];
+        return next;
+      });
+      toast.success(`已隐藏 ${driverName} 的路线`);
+      return;
+    }
+    
     setCalculatingDriverId(driverId);
     try {
       // 获取 Samsara 车辆位置
@@ -234,6 +252,7 @@ export function FleetMapPage() {
       });
 
       setDriverETAs(prev => ({ ...prev, [driverId]: eta }));
+      setShowingETADrivers(prev => new Set(prev).add(driverId)); // 标记为显示
       toast.success(`${driverName} 的 ETA 计算完成`);
     } catch (error) {
       console.error('计算 ETA 失败:', error);
@@ -282,14 +301,14 @@ export function FleetMapPage() {
                       <Badge variant="secondary" className="text-xs">{steps.length}</Badge>
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant={showingETADrivers.has(d.id) ? "default" : "ghost"}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleCalculateDriverETA(d.id, d.name);
                         }}
                         disabled={calculatingDriverId === d.id}
                         className="h-6 w-6 p-0"
-                        title="计算 ETA"
+                        title={showingETADrivers.has(d.id) ? "隐藏路线" : "计算 ETA"}
                       >
                         {calculatingDriverId === d.id ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
