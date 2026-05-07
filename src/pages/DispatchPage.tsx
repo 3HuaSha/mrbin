@@ -1137,8 +1137,7 @@ function InsertStepButton({
         { value: "draglam", label: "Draglam Vaughan" },
         { value: "draglam brampton", label: "Draglam Brampton" },
         { value: "maple waste", label: "Maple Transfer" },
-        { value: "york1 whitby", label: "YORK1 Whitby" },
-        { value: "york1 brampton", label: "YORK1 Brampton" }
+        { value: "york1 whitby", label: "YORK1 Whitby" }
       ];
     }
     return [];

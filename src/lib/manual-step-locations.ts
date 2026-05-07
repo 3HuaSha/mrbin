@@ -54,15 +54,6 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     icon: '♻️'
   },
   {
-    id: 'york1_brampton',
-    name: 'YORK1 Brampton Transfer Station',
-    shortName: 'york1 brampton',
-    fullAddress: 'YORK1 Brampton Transfer Station, Brampton, ON',
-    coordinates: { lat: 43.7315, lng: -79.7624 },
-    type: 'transfer_station',
-    icon: '♻️'
-  },
-  {
     id: 'maple_waste',
     name: 'Maple Transfer & Recycling',
     shortName: 'maple waste',
@@ -78,7 +69,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     fullAddress: '63A Medulla Ave, Etobicoke, ON M8Z 5L6',
     coordinates: { lat: 43.6234, lng: -79.5123 },
     type: 'dump_site',
-    icon: '🗑️'
+    icon: '♻️'
   },
   {
     id: 'draglam',
@@ -87,7 +78,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     fullAddress: 'Draglam Salt, 401 Bowes Rd, Vaughan, ON L4K 1J5',
     coordinates: { lat: 43.7912, lng: -79.4567 },
     type: 'material_site',
-    icon: '🧂'
+    icon: '♻️'
   },
   {
     id: 'draglam_brampton',
@@ -96,7 +87,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     fullAddress: 'Draglam Salt, 19 Delta Park Blvd, Brampton, ON L6T 5E7',
     coordinates: { lat: 43.7123, lng: -79.7345 },
     type: 'material_site',
-    icon: '🧂'
+    icon: '♻️'
   }
 ];
 

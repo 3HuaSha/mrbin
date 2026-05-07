@@ -155,12 +155,16 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
         map: mapInstance.current,
         icon: {
           url: createManualLocationIcon(location),
-          scaledSize: new (window as any).google.maps.Size(60, 60),
-          anchor: new (window as any).google.maps.Point(30, 60)
+          scaledSize: new (window as any).google.maps.Size(40, 40), // 缩小到40x40
+          anchor: new (window as any).google.maps.Point(20, 40)
         },
         title: location.name,
         zIndex: 50
       });
+      
+      // 将固定地点标记也存储到markersRef中，用于路线绘制
+      const markerId = `manual_${location.id}`;
+      markersRef.current[markerId] = marker;
       
       // 添加点击事件
       marker.addListener('click', () => {
@@ -509,10 +513,26 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
           { lat: driverETA.currentLocation.lat, lng: driverETA.currentLocation.lng }
         ];
         
-        // 为每个任务点添加坐标（需要从markersRef中获取）
+        // 为每个任务点添加坐标
         driverETA.orders.forEach((orderETA: any) => {
-          const markerId = `order_${orderETA.orderId}`;
-          const marker = markersRef.current[markerId];
+          // 先尝试从订单标记中获取
+          let markerId = `order_${orderETA.orderId}`;
+          let marker = markersRef.current[markerId];
+          
+          // 如果不是订单标记，尝试从手动步骤固定地点中获取
+          if (!marker || marker === "pending") {
+            // 查找匹配的固定地点
+            const location = MANUAL_STEP_LOCATIONS.find(loc => 
+              orderETA.orderAddress.toLowerCase().includes(loc.shortName.toLowerCase()) ||
+              orderETA.orderAddress.toLowerCase().includes(loc.fullAddress.toLowerCase())
+            );
+            
+            if (location) {
+              markerId = `manual_${location.id}`;
+              marker = markersRef.current[markerId];
+            }
+          }
+          
           if (marker && marker !== "pending" && marker.getPosition) {
             const pos = marker.getPosition();
             pathCoordinates.push({ lat: pos.lat(), lng: pos.lng() });
@@ -534,10 +554,40 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
           strokeOpacity: 0.8,
           strokeWeight: 4,
           map: mapInstance.current,
-          zIndex: 100
+          zIndex: 100,
+          icons: [{
+            icon: {
+              path: (window as any).google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+              scale: 3,
+              strokeColor: lineColor,
+              strokeWeight: 2,
+              fillColor: lineColor,
+              fillOpacity: 1
+            },
+            offset: '100%',
+            repeat: '150px' // 每150像素显示一个箭头
+          }]
         });
         
         routeLinesRef.current.push(routeLine);
+        
+        // 在每个任务点添加序号标记
+        pathCoordinates.forEach((coord, index) => {
+          if (index === 0) return; // 跳过起点（车辆位置）
+          
+          const numberMarker = new (window as any).google.maps.Marker({
+            position: coord,
+            map: mapInstance.current,
+            icon: {
+              url: createNumberIcon(index, lineColor),
+              scaledSize: new (window as any).google.maps.Size(24, 24),
+              anchor: new (window as any).google.maps.Point(12, 12)
+            },
+            zIndex: 1000
+          });
+          
+          routeLinesRef.current.push(numberMarker);
+        });
         
         console.log(`🗺️ 绘制路线: ${driverETA.driverName}`, {
           points: pathCoordinates.length,
@@ -835,31 +885,43 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
 
 // 辅助函数: 创建手动地点图标
 function createManualLocationIcon(location: any): string {
-  // 根据地点类型选择颜色
-  const colorSchemes: Record<string, { bg: string; text: string; border: string }> = {
-    'depot': { bg: '#607D8B', text: '#FFFFFF', border: '#455A64' },           // 灰色 - 仓库
-    'transfer_station': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C' }, // 绿色 - 转运站
-    'dump_site': { bg: '#FF5722', text: '#FFFFFF', border: '#D84315' },       // 红色 - 倾倒点
-    'material_site': { bg: '#FF9800', text: '#FFFFFF', border: '#F57C00' }    // 橙色 - 物料站
+  // 根据地点类型选择颜色 - 仓库和垃圾场统一图标
+  const colorSchemes: Record<string, { bg: string; text: string; border: string; icon: string }> = {
+    'depot': { bg: '#607D8B', text: '#FFFFFF', border: '#455A64', icon: '🏢' },           // 灰色 - 仓库
+    'transfer_station': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻️' }, // 绿色 - 转运站
+    'dump_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻️' },       // 绿色 - 倾倒点（统一为垃圾场）
+    'material_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻️' }    // 绿色 - 物料站（统一为垃圾场）
   };
   
-  const scheme = colorSchemes[location.type] || { bg: '#9E9E9E', text: '#FFFFFF', border: '#757575' };
+  const scheme = colorSchemes[location.type] || { bg: '#9E9E9E', text: '#FFFFFF', border: '#757575', icon: '📍' };
   
-  // SVG图标：圆形背景 + emoji + 名称
+  // SVG图标：圆形背景 + emoji + 名称（缩小尺寸）
   const svg = `
-    <svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'>
+    <svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'>
       <!-- 圆形背景 -->
-      <circle cx='30' cy='25' r='20' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='2' opacity='0.95'/>
+      <circle cx='20' cy='16' r='12' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5' opacity='0.95'/>
       
       <!-- Emoji图标 -->
-      <text x='30' y='32' text-anchor='middle' font-size='18' fill='${scheme.text}'>${location.icon}</text>
+      <text x='20' y='21' text-anchor='middle' font-size='12' fill='${scheme.text}'>${scheme.icon}</text>
       
       <!-- 名称标签 -->
-      <rect x='5' y='48' width='50' height='10' rx='2' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1' opacity='0.9'/>
-      <text x='30' y='56' text-anchor='middle' font-size='8' font-weight='bold' fill='${scheme.text}' font-family='Arial, sans-serif'>${location.shortName}</text>
+      <rect x='3' y='30' width='34' height='8' rx='1.5' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1' opacity='0.9'/>
+      <text x='20' y='36' text-anchor='middle' font-size='6' font-weight='bold' fill='${scheme.text}' font-family='Arial, sans-serif'>${location.shortName}</text>
       
       <!-- 指向线 -->
-      <line x1='30' y1='45' x2='30' y2='48' stroke='${scheme.border}' stroke-width='2'/>
+      <line x1='20' y1='28' x2='20' y2='30' stroke='${scheme.border}' stroke-width='1.5'/>
+    </svg>
+  `.trim();
+  
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+// 辅助函数: 创建序号图标
+function createNumberIcon(number: number, color: string): string {
+  const svg = `
+    <svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>
+      <circle cx='12' cy='12' r='11' fill='${color}' stroke='white' stroke-width='2' opacity='0.9'/>
+      <text x='12' y='17' text-anchor='middle' font-size='12' font-weight='bold' fill='white' font-family='Arial, sans-serif'>${number}</text>
     </svg>
   `.trim();
   
