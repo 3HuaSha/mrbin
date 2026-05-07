@@ -160,8 +160,8 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
         map: mapInstance.current,
         icon: {
           url: iconUrl,
-          scaledSize: new (window as any).google.maps.Size(60, 60), // 恢复到60x60
-          anchor: new (window as any).google.maps.Point(30, 60)
+          scaledSize: new (window as any).google.maps.Size(45, 45), // 改为45x45，适中的尺寸
+          anchor: new (window as any).google.maps.Point(22.5, 45)
         },
         title: location.name,
         zIndex: 50
@@ -483,8 +483,11 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
       }
     });
 
-    // 清理不再显示的 markers
+    // 清理不再显示的 markers（但保留固定地点标记）
     Object.keys(markersRef.current).forEach(key => {
+      // 跳过固定地点标记（以manual_开头）
+      if (key.startsWith('manual_')) return;
+      
       if (markersRef.current[key] && markersRef.current[key] !== "pending" && !newMarkers[key]) {
         markersRef.current[key].setMap(null);
       }
