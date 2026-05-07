@@ -149,18 +149,25 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     });
     
     // 渲染所有手动步骤固定地点
+    console.log('🏢 开始渲染固定地点标记，共', MANUAL_STEP_LOCATIONS.length, '个地点');
     MANUAL_STEP_LOCATIONS.forEach(location => {
+      console.log('📍 创建标记:', location.name, location.coordinates);
+      const iconUrl = createManualLocationIcon(location);
+      console.log('🎨 图标URL长度:', iconUrl.length);
+      
       const marker = new (window as any).google.maps.Marker({
         position: location.coordinates,
         map: mapInstance.current,
         icon: {
-          url: createManualLocationIcon(location),
+          url: iconUrl,
           scaledSize: new (window as any).google.maps.Size(40, 40), // 缩小到40x40
           anchor: new (window as any).google.maps.Point(20, 40)
         },
         title: location.name,
         zIndex: 50
       });
+      
+      console.log('✅ 标记已创建:', location.name);
       
       // 将固定地点标记也存储到markersRef中，用于路线绘制
       const markerId = `manual_${location.id}`;
