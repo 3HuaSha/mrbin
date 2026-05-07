@@ -99,9 +99,9 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         routingPreference: 'TRAFFIC_UNAWARE', // 修改为 TRAFFIC_UNAWARE 避免高级版收费
       };
 
-      // 生成缓存 Key（只精确到小数点后3位，约100米，避免车辆微小移动导致缓存失效）
-      const cacheKey = data.vehicleId + '_' + stops.map(s => 
-        `${Math.round(s.singleUseLocation.latitude! * 1000)},${Math.round(s.singleUseLocation.longitude! * 1000)}`
+      // 生成缓存 Key（对经纬度精确到小数点后3位，约100米，对地址直接使用字符串）
+      const cacheKey = data.vehicleId + '_' + data.destinations.map(d => 
+        d.latitude ? `${Math.round(d.latitude * 1000)},${Math.round(d.longitude! * 1000)}` : d.address
       ).join('|');
 
       const nowTime = Date.now();
