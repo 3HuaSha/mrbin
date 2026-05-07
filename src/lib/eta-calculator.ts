@@ -53,14 +53,22 @@ export async function calculateDriverETAWithSamsara(
   }
 
   try {
-    // 构建目的地列表（只需要地址，Samsara 会自动使用车辆当前位置）
-    const destinations = orders.map(order => ({
-      address: order.address + ', Toronto, ON, Canada',
-      name: order.address
-    }));
+    // 构建目的地列表，第一站必须是车辆当前位置
+    const destinations = [
+      {
+        address: 'Current Location',
+        name: '车辆当前位置',
+        latitude: currentLocation.lat,
+        longitude: currentLocation.lng
+      },
+      ...orders.map(order => ({
+        address: order.address + ', Toronto, ON, Canada',
+        name: order.address
+      }))
+    ];
 
     // 调用 Samsara Routes API（通过 Server Function）
-    // 传入车辆 ID，Samsara 会自动使用车辆的当前位置作为起点
+    // 我们已经把车辆当前位置作为第一站，Samsara 会从这里开始计算
     console.log('🔄 调用 Samsara Routes API:', {
       samsaraVehicleId,
       destinations: destinations.length

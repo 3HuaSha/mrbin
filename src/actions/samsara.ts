@@ -171,11 +171,14 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
       const responseData = await response.json();
       console.log('✅ Samsara Create Route API 成功');
 
+      // Samsara API 返回通常包裹在 data 字段中
+      const routeData = responseData.data || responseData;
+
       // 提取路线 ID，稍后删除
-      const routeId = responseData.id;
+      const routeId = routeData.id;
 
       // 解析停靠点数据来计算距离和时长
-      const routeStops = responseData.stops || [];
+      const routeStops = routeData.stops || [];
       const legs: Array<{ distance: number; duration: number }> = [];
       let totalDistance = 0;
       let totalDuration = 0;
