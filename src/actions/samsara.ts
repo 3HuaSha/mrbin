@@ -39,6 +39,13 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
     }
   });
 
+// ==========================================
+// 简单的内存缓存机制（节省 Google Maps API 费用）
+// ==========================================
+const geocodeCache = new Map<string, { lat: number; lng: number }>();
+const routesCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5分钟缓存过期时间
+
 /**
  * 使用 Samsara Routes API 计算路线和 ETA
  * 需要 API Token 具有 Routes write permissions
@@ -57,9 +64,16 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
     console.log('🔄 Server Function: 计算车辆路线，车辆ID:', data.vehicleId, '目的地数量:', data.destinations.length);
 
     try {
-      // 自动解析缺失的经纬度
+      // 自动解析缺失的经纬度（带缓存）
       for (const dest of data.destinations) {
         if (!dest.latitude || !dest.longitude) {
+          if (geocodeCache.has(dest.address)) {
+            const cached = geocodeCache.get(dest.address)!;
+            dest.latitude = cached.lat;
+            dest.longitude = cached.lng;
+            console.log(`📍 使用缓存的地址解析: ${dest.address}`);
+            continue;
+          }
           if (!GOOGLE_MAPS_API_KEY) {
             console.warn(`⚠️ 缺少 Google Maps API Key，无法解析地址: ${dest.address}`);
             continue;
@@ -71,6 +85,8 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
             if (geoData.status === 'OK' && geoData.results.length > 0) {
               dest.latitude = geoData.results[0].geometry.location.lat;
               dest.longitude = geoData.results[0].geometry.location.lng;
+              // 存入缓存
+              geocodeCache.set(dest.address, { lat: dest.latitude, lng: dest.longitude });
               console.log(`📍 地址解析成功: ${dest.address} -> ${dest.latitude}, ${dest.longitude}`);
             } else {
               console.warn(`⚠️ 无法解析地址经纬度: ${dest.address}, 状态: ${geoData.status}`);
@@ -159,8 +175,24 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         destination,
         intermediates,
         travelMode: 'DRIVE',
-        routingPreference: 'TRAFFIC_AWARE', // 考虑实时交通状况
+        routingPreference: 'TRAFFIC_UNAWARE', // 修改为 TRAFFIC_UNAWARE 避免高级版收费
       };
+
+      // 生成缓存 Key（只精确到小数点后3位，约100米，避免车辆微小移动导致缓存失效）
+      const cacheKey = data.vehicleId + '_' + stops.map(s => 
+        `${Math.round(s.singleUseLocation.latitude! * 1000)},${Math.round(s.singleUseLocation.longitude! * 1000)}`
+      ).join('|');
+
+      const nowTime = Date.now();
+      if (routesCache.has(cacheKey)) {
+        const cached = routesCache.get(cacheKey)!;
+        if (nowTime - cached.timestamp < CACHE_TTL_MS) {
+          console.log('⚡ 使用缓存的 ETA 路线数据');
+          return cached.data;
+        } else {
+          routesCache.delete(cacheKey);
+        }
+      }
 
       console.log('🔄 调用最新 Google Maps Routes API (v2) 计算 ETA...');
       const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
@@ -213,6 +245,9 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
         totalDuration,
         error: null as string | null,
       };
+
+      // 存入缓存
+      routesCache.set(cacheKey, { data: result, timestamp: nowTime });
 
       console.log('📤 返回结果:', { legsCount: legs.length, totalDistance, totalDuration });
       return result;
