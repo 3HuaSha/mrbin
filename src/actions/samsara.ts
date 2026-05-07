@@ -120,54 +120,90 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
       });
 
       // ==========================================
-      // 使用 Google Maps Directions API 进行精准、同步的 ETA 计算
+      // 使用最新的 Google Maps Routes API (V2) 进行 ETA 计算
+      // 这是 Google 官方最新推荐的接口，支持更高级的交通模型和车辆配置
       // ==========================================
       if (!GOOGLE_MAPS_API_KEY) {
          throw new Error('缺少 Google Maps API Key，无法计算真实 ETA。');
       }
 
-      const origin = `${stops[0].singleUseLocation.latitude},${stops[0].singleUseLocation.longitude}`;
-      const destination = `${stops[stops.length - 1].singleUseLocation.latitude},${stops[stops.length - 1].singleUseLocation.longitude}`;
-      
-      const waypoints = stops.slice(1, stops.length - 1).map(s => 
-        `${s.singleUseLocation.latitude},${s.singleUseLocation.longitude}`
-      );
-      
-      let directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&key=${GOOGLE_MAPS_API_KEY}`;
-      if (waypoints.length > 0) {
-        directionsUrl += `&waypoints=${waypoints.join('|')}`;
-      }
+      const origin = {
+        location: {
+          latLng: {
+            latitude: stops[0].singleUseLocation.latitude,
+            longitude: stops[0].singleUseLocation.longitude
+          }
+        }
+      };
 
-      console.log('🔄 调用 Google Maps Directions API 计算 ETA...');
-      const response = await fetch(directionsUrl);
+      const destination = {
+        location: {
+          latLng: {
+            latitude: stops[stops.length - 1].singleUseLocation.latitude,
+            longitude: stops[stops.length - 1].singleUseLocation.longitude
+          }
+        }
+      };
+      
+      const intermediates = stops.slice(1, stops.length - 1).map(s => ({
+        location: {
+          latLng: {
+            latitude: s.singleUseLocation.latitude,
+            longitude: s.singleUseLocation.longitude
+          }
+        }
+      }));
+
+      const requestBody = {
+        origin,
+        destination,
+        intermediates,
+        travelMode: 'DRIVE',
+        routingPreference: 'TRAFFIC_AWARE', // 考虑实时交通状况
+      };
+
+      console.log('🔄 调用最新 Google Maps Routes API (v2) 计算 ETA...');
+      const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+          // 指定我们只需要返回距离和时长字段，以节省流量和提高速度
+          'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.legs.distanceMeters,routes.legs.duration'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
       const responseData = await response.json();
 
-      if (responseData.status !== 'OK') {
-        console.error('❌ Google Maps Directions API 错误:', responseData.status, responseData.error_message);
+      if (!response.ok || responseData.error) {
+        console.error('❌ Google Maps Routes API 错误:', responseData.error || responseData);
         return {
           success: false,
-          error: `Google Maps 路线计算失败: ${responseData.status}`,
+          error: `Google Maps Routes 计算失败: ${responseData.error?.message || response.status}`,
           legs: [],
           totalDistance: 0,
           totalDuration: 0,
         };
       }
 
-      console.log('✅ Google Maps 路线计算成功');
+      console.log('✅ Google Maps Routes 计算成功');
 
       const legs: Array<{ distance: number; duration: number }> = [];
       let totalDistance = 0;
       let totalDuration = 0;
 
-      // Google 返回的 legs 刚好对应我们停靠点之间的每一段路程
-      const route = responseData.routes[0];
-      for (const leg of route.legs) {
-        const distance = leg.distance.value; // 米
-        const duration = leg.duration.value; // 秒
-        
-        legs.push({ distance, duration });
-        totalDistance += distance;
-        totalDuration += duration;
+      const route = responseData.routes?.[0];
+      if (route && route.legs) {
+        for (const leg of route.legs) {
+          const distance = leg.distanceMeters || 0; 
+          // duration 返回格式如 "1845s"，需要去掉 's' 并转为数字
+          const duration = parseInt((leg.duration || '0s').replace('s', ''), 10); 
+          
+          legs.push({ distance, duration });
+          totalDistance += distance;
+          totalDuration += duration;
+        }
       }
 
       const result = {
