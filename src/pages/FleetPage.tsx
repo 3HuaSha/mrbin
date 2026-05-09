@@ -26,6 +26,10 @@ export function FleetPage() {
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<string>("ALL");
   const [driverFilter, setDriverFilter] = useState<"ALL" | "ASSIGNED">("ASSIGNED");
   const [assigningDriver, setAssigningDriver] = useState<Driver | null>(null);
+  const [syncAnalysis, setSyncAnalysis] = useState<{
+    totalDrivers: number;
+    driversWithRefs: Array<{ name: string; ref: string; source: string; matched: boolean }>;
+  } | null>(null);
 
   const { data: drivers = [] } = useQuery({
     queryKey: ["drivers-all"],
@@ -157,53 +161,44 @@ export function FleetPage() {
       // 3. 匹配关联 (寻找当前“正在开车”的司机)
       const pending = new Map<string, string>(); // dId -> vId
       const clean = (s: string) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-      const matchedNames: string[] = [];
+      const analysisData: Array<{ name: string; ref: string; source: string; matched: boolean }> = [];
 
       console.group('🎯 自动关联逻辑');
-      
-      // A. 优先级 1: 实时分配接口 (最权威)
-      sAssigns.forEach((sa: any) => {
-        const dId = dSamsaraIdToInternal.get(sa.driver?.id) || dNameToInternal.get(clean(sa.driver?.name));
-        const vehicle = allVehicles.find(v => (sa.vehicle?.id && v.samsara_id === sa.vehicle.id) || (sa.vehicle?.name && clean(v.name) === clean(sa.vehicle.name)));
-        if (dId && vehicle) {
-          console.log(`✅ [分配接口] 匹配: ${sa.driver.name} -> ${vehicle.name}`);
-          pending.set(dId, vehicle.id);
-          matchedNames.push(`${sa.driver.name} (${vehicle.name})`);
-        }
-      });
-
-      // B. 优先级 2: OBD 实时驾驶员 (兜底实时状态)
-      sStats.forEach((stat: any) => {
-        const dName = stat.obdDriver?.driver?.name;
-        if (dName) {
-          const dId = dNameToInternal.get(clean(dName));
-          const vehicle = allVehicles.find(v => v.samsara_id === stat.id || clean(v.name) === clean(stat.name));
-          if (dId && vehicle && !pending.has(dId)) {
-            console.log(`✅ [OBD状态] 匹配: ${dName} -> ${vehicle.name}`);
-            pending.set(dId, vehicle.id);
-            matchedNames.push(`${dName} (${vehicle.name})`);
-          }
-        }
-      });
-
-      // C. 优先级 3: 司机档案静态关联 (长期稳定关联)
       sDrivers.forEach((sd: any) => {
         const dId = dSamsaraIdToInternal.get(sd.id) || dNameToInternal.get(clean(sd.name));
-        if (dId && !pending.has(dId)) {
-          const vRef = sd.currentVehicle || sd.staticAssignedVehicle;
-          if (vRef) {
-            const vehicle = allVehicles.find(v => (vRef.id && v.samsara_id === vRef.id) || (vRef.name && clean(v.name) === clean(vRef.name)));
-            if (vehicle) {
-              console.log(`✅ [档案关联] 匹配: ${sd.name} -> ${vehicle.name}`);
-              pending.set(dId, vehicle.id);
-              matchedNames.push(`${sd.name} (${vehicle.name})`);
-            }
-          }
+        if (!dId) return;
+
+        let vRef = null;
+        let source = '';
+        const assign = sAssigns.find((a: any) => a.driver?.id === sd.id || clean(a.driver?.name) === clean(sd.name));
+        if (assign) { vRef = assign.vehicle; source = 'Samsara分配接口'; }
+
+        if (!vRef?.id) {
+          const stat = sStats.find((s: any) => clean(s.obdDriver?.driver?.name) === clean(sd.name));
+          if (stat) { vRef = { id: stat.id, name: stat.name }; source = '车辆OBD实时状态'; }
+        }
+
+        if (!vRef?.id) {
+          const profileRef = sd.currentVehicle || sd.staticAssignedVehicle;
+          if (profileRef) { vRef = profileRef; source = 'Samsara司机档案关联'; }
+        }
+
+        if (vRef) {
+          const vehicle = allVehicles.find(v => (vRef.id && v.samsara_id === vRef.id) || (vRef.name && clean(v.name) === clean(vRef.name)));
+          const matched = !!vehicle;
+          if (matched) pending.set(dId, vehicle.id);
+          analysisData.push({ name: sd.name, ref: vRef.name || vRef.id, source, matched });
         }
       });
       console.groupEnd();
 
       const finalInserts = Array.from(pending.entries()).map(([dId, vId]) => ({ driver_id: dId, vehicle_id: vId }));
+      if (finalInserts.length > 0) {
+        await supabase.from("driver_vehicle_assignments").insert(finalInserts);
+      }
+
+      console.groupEnd();
+      setSyncAnalysis({ totalDrivers: sDrivers.length, driversWithRefs: analysisData });
       if (finalInserts.length > 0) {
         await supabase.from("driver_vehicle_assignments").insert(finalInserts);
       }
@@ -361,7 +356,73 @@ export function FleetPage() {
           onClose={() => setAssigningDriver(null)} 
         />
       )}
+      {syncAnalysis && (
+        <SyncAnalysisDialog 
+          analysis={syncAnalysis} 
+          onClose={() => setSyncAnalysis(null)} 
+        />
+      )}
     </div>
+  );
+}
+
+function SyncAnalysisDialog({ analysis, onClose }: { analysis: any; onClose: () => void }) {
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>同步关联分析 (找到 {analysis.driversWithRefs.length} 条关联引用)</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="text-sm text-muted-foreground">
+            系统从 Samsara 抓取了 {analysis.totalDrivers} 名司机，并尝试通过以下来源寻找车辆分配。
+          </div>
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted text-muted-foreground font-medium">
+                <tr>
+                  <th className="p-2 text-left">司机</th>
+                  <th className="p-2 text-left">Samsara车辆引用</th>
+                  <th className="p-2 text-left">数据来源</th>
+                  <th className="p-2 text-left">状态</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {analysis.driversWithRefs.map((item: any, i: number) => (
+                  <tr key={i} className={cn(!item.matched && "bg-destructive/5")}>
+                    <td className="p-2 font-medium">{item.name}</td>
+                    <td className="p-2 font-mono text-xs">{item.ref}</td>
+                    <td className="p-2 text-xs text-muted-foreground">{item.source}</td>
+                    <td className="p-2">
+                      {item.matched ? (
+                        <Badge variant="default" className="bg-green-500 hover:bg-green-600">已自动关联</Badge>
+                      ) : (
+                        <Badge variant="destructive">未匹配本地车辆</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {analysis.driversWithRefs.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-muted-foreground">
+                      未在 Samsara 中发现任何活跃的驾驶员-车辆关联记录。
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {!analysis.driversWithRefs.some((it: any) => it.matched) && analysis.driversWithRefs.length > 0 && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded text-amber-800 text-xs">
+              <strong>提示：</strong> 找到了关联引用但匹配失败，通常是因为 Samsara 中的车辆名称或 ID 与本地数据库中的不一致。请检查右侧车辆列表中的 <strong>Samsara ID</strong> 是否已正确同步。
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
