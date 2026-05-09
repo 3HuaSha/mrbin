@@ -100,7 +100,7 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       // 获取当前所有司机-车辆分配关系
       let allAssignments: any[] = [];
       try {
-        // 使用过去 24 小时的时间范围来获取当前活跃的分配关系
+        // 1. 获取显式分配关系 (过去 24 小时)
         const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         const url = `https://api.samsara.com/fleet/driver-vehicle-assignments?startTime=${yesterday}&filterBy=drivers`;
         const response = await fetch(url, {
@@ -108,7 +108,26 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         });
         if (response.ok) {
           const result = await response.json();
-          allAssignments = result.data || [];
+          allAssignments = [...(result.data || [])];
+        }
+
+        // 2. 获取车辆实时状态 (包含当前 OBD 司机)
+        const statsResponse = await fetch(`https://api.samsara.com/fleet/vehicles/stats?types=obdDriver`, {
+          headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
+        });
+        if (statsResponse.ok) {
+          const statsResult = await statsResponse.json();
+          const vehicleStats = statsResult.data || [];
+          
+          vehicleStats.forEach((stat: any) => {
+            if (stat.obdDriver?.driver?.id) {
+              // 模拟分配记录格式
+              allAssignments.push({
+                driver: { id: stat.obdDriver.driver.id, name: stat.obdDriver.driver.name },
+                vehicle: { id: stat.id, name: stat.name }
+              });
+            }
+          });
         }
       } catch (err) {
         console.error('❌ 获取分配关系失败:', err);

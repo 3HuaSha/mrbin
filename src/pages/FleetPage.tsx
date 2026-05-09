@@ -24,7 +24,7 @@ export function FleetPage() {
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<string>("ALL");
-  const [driverFilter, setDriverFilter] = useState<"ALL" | "ASSIGNED">("ALL");
+  const [driverFilter, setDriverFilter] = useState<"ALL" | "ASSIGNED">("ASSIGNED");
   const [assigningDriver, setAssigningDriver] = useState<Driver | null>(null);
 
   const { data: drivers = [] } = useQuery({
@@ -67,28 +67,22 @@ export function FleetPage() {
     return true;
   });
 
-  // 提取车辆类型前缀（支持多种分隔符，如 \"BIN#1\", \"FLAT-2\", \"FLAT 3\" 等）
+  // 提取车辆类型前缀
   const extractVehiclePrefix = (name: string): string => {
     if (!name) return "OTHER";
     const upperName = name.toUpperCase();
-    
-    // 优先匹配已知的前缀
     if (upperName.startsWith("BIN")) return "BIN";
     if (upperName.startsWith("FLAT")) return "FLAT";
     if (upperName.startsWith("DUMP")) return "DUMP";
     if (upperName.startsWith("HINO")) return "HINO";
     if (upperName.startsWith("MACK")) return "MACK";
     if (upperName.startsWith("PROALL")) return "PROALL";
-    
-    // 通用正则匹配：开头的一组大写字母，后面跟着分隔符或结束
     const match = upperName.match(/^([A-Z]+)[#\s\-_0-9]/) || upperName.match(/^([A-Z]+)$/);
     return match ? match[1] : "OTHER";
   };
 
-  // 获取所有唯一的车辆类型
   const vehicleTypes = ["ALL", ...Array.from(new Set(vehicles.map(v => extractVehiclePrefix(v.name)))).sort()];
 
-  // 根据筛选条件过滤车辆
   const filteredVehicles = vehicleTypeFilter === "ALL" 
     ? vehicles 
     : vehicles.filter(v => extractVehiclePrefix(v.name) === vehicleTypeFilter);
@@ -121,14 +115,10 @@ export function FleetPage() {
       const samsaraAssignments = (result as any).samsaraAssignments || [];
       
       // 1. 同步车辆
-      // 深度清理受约束的数据（这里保持原有逻辑，清除旧的车辆数据）
       await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
-      
       const { error: deleteError } = await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
-      if (deleteError) {
-        throw new Error(`清除旧数据失败: ${deleteError.message}`);
-      }
+      if (deleteError) throw new Error(`清除旧数据失败: ${deleteError.message}`);
 
       const uniqueInsertsMap = new Map();
       samsaraVehicles.forEach((v: any) => {
@@ -138,23 +128,10 @@ export function FleetPage() {
           const upperName = v.name.toUpperCase();
           let vehicleType: "HINO" | "MACK" = "MACK";
           let maxBinSize = "40";
+          if (upperName.includes("HINO") || upperName.startsWith("BIN")) { vehicleType = "HINO"; maxBinSize = "20"; }
+          else if (upperName.includes("FLAT") || upperName.includes("DUMP") || upperName.includes("MACK")) { vehicleType = "MACK"; maxBinSize = "40"; }
           
-          if (upperName.includes("HINO") || upperName.startsWith("BIN")) {
-            vehicleType = "HINO";
-            maxBinSize = "20";
-          } else if (upperName.includes("FLAT") || upperName.includes("DUMP") || upperName.includes("MACK")) {
-            vehicleType = "MACK";
-            maxBinSize = "40";
-          }
-          
-          uniqueInsertsMap.set(plate, {
-            name: v.name,
-            type: vehicleType,
-            plate: plate,
-            samsara_id: v.id,
-            max_bin_size: maxBinSize,
-            is_active: true
-          });
+          uniqueInsertsMap.set(plate, { name: v.name, type: vehicleType, plate, samsara_id: v.id, max_bin_size: maxBinSize, is_active: true });
         }
       });
       
@@ -169,110 +146,67 @@ export function FleetPage() {
       // 2. 同步司机
       const driverSyncResults = { added: 0, updated: 0, assigned: 0 };
       const driverSamsaraIdToInternalId = new Map<string, string>();
+      const driverNameToInternalId = new Map<string, string>();
       
       for (const sd of samsaraDrivers) {
         if (!sd.name) continue;
-        
-        // 查找或更新司机信息 (根据姓名匹配)
-        const { data: existingProfiles } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("name", sd.name)
-          .eq("role", "driver");
+        const { data: existingProfiles } = await supabase.from("profiles").select("id").eq("name", sd.name).eq("role", "driver");
           
         let driverId = '';
-        
         if (existingProfiles && existingProfiles.length > 0) {
           driverId = existingProfiles[0].id;
-          // 更新已有司机
-          await supabase.from("profiles").update({
-            phone: sd.phone || null,
-            email: sd.email || null,
-            is_active: true
-          }).eq("id", driverId);
+          await supabase.from("profiles").update({ phone: sd.phone || null, email: sd.email || null, is_active: true }).eq("id", driverId);
           driverSyncResults.updated++;
         } else {
-          // 创建新司机
-          const { data: newProfile, error: pError } = await supabase.from("profiles").insert({
-            name: sd.name,
-            phone: sd.phone || null,
-            email: sd.email || null,
-            role: "driver",
-            is_active: true
-          }).select().single();
-          
-          if (pError) {
-            console.error(`创建司机 ${sd.name} 失败:`, pError);
-            continue;
-          }
+          const { data: newProfile, error: pError } = await supabase.from("profiles").insert({ name: sd.name, phone: sd.phone || null, email: sd.email || null, role: "driver", is_active: true }).select().single();
+          if (pError) continue;
           driverId = newProfile.id;
           driverSyncResults.added++;
         }
         
         driverSamsaraIdToInternalId.set(sd.id, driverId);
+        driverNameToInternalId.set(sd.name.toUpperCase(), driverId);
 
-        // 3. 自动分配车辆 (优先使用 staticAssignedVehicle)
+        // 自动分配车辆 (Static/Current)
         const assignedVehicle = sd.staticAssignedVehicle || sd.currentVehicle;
         if (assignedVehicle && assignedVehicle.id) {
           const vehicle = insertedVehicles.find(v => v.samsara_id === assignedVehicle.id);
           if (vehicle) {
             await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", driverId);
-            const { error: assignError } = await supabase.from("driver_vehicle_assignments").insert({
-              driver_id: driverId,
-              vehicle_id: vehicle.id
-            });
-            if (!assignError) driverSyncResults.assigned++;
+            const { error } = await supabase.from("driver_vehicle_assignments").insert({ driver_id: driverId, vehicle_id: vehicle.id });
+            if (!error) driverSyncResults.assigned++;
           }
         }
       }
 
-      // 4. 使用专门的分配接口补充动态分配
-      // 首先获取数据库中所有最新的车辆，以防 insertedVehicles 不完整
+      // 3. 专门分配接口 + Fallback 匹配
       const { data: allCurrentVehicles } = await supabase.from("vehicles").select("id, name, samsara_id, plate");
       const vehiclesForMatching = allCurrentVehicles || insertedVehicles;
 
       for (const sa of samsaraAssignments) {
-        const internalDriverId = driverSamsaraIdToInternalId.get(sa.driver?.id);
+        // 优先通过 ID 找司机，找不到通过名字找
+        let internalDriverId = driverSamsaraIdToInternalId.get(sa.driver?.id);
+        if (!internalDriverId && sa.driver?.name) {
+          internalDriverId = driverNameToInternalId.get(sa.driver.name.toUpperCase());
+        }
+        
         if (!internalDriverId) continue;
 
         let internalVehicle = vehiclesForMatching.find(v => v.samsara_id === sa.vehicle?.id);
-        
-        // 如果 ID 匹配失败，尝试名称匹配 (Fallback)
         if (!internalVehicle && sa.vehicle?.name) {
           const samsaraVName = sa.vehicle.name.toUpperCase().replace(/[^A-Z0-9]/g, '');
-          internalVehicle = vehiclesForMatching.find(v => {
-            const vName = v.name.toUpperCase().replace(/[^A-Z0-9]/g, '');
-            const vPlate = v.plate.toUpperCase().replace(/[^A-Z0-9]/g, '');
-            return vName === samsaraVName || vPlate === samsaraVName;
-          });
+          internalVehicle = vehiclesForMatching.find(v => (v.name.toUpperCase().replace(/[^A-Z0-9]/g, '') === samsaraVName) || (v.plate.toUpperCase().replace(/[^A-Z0-9]/g, '') === samsaraVName));
         }
         
         if (internalVehicle) {
-          // 清除该司机的旧分配
           await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", internalDriverId);
-          
-          // 插入新分配
-          const { error: assignError } = await supabase.from("driver_vehicle_assignments").insert({
-            driver_id: internalDriverId,
-            vehicle_id: internalVehicle.id
-          });
-          
-          if (!assignError) {
-            driverSyncResults.assigned++;
-          }
+          const { error } = await supabase.from("driver_vehicle_assignments").insert({ driver_id: internalDriverId, vehicle_id: internalVehicle.id });
+          if (!error) driverSyncResults.assigned++;
         }
       }
       
-      // 去重统计：因为同一个司机可能有多个历史分配记录被抓取，我们只统计最终成功的唯一分配
       const { data: finalAssignments } = await supabase.from("driver_vehicle_assignments").select("id");
-      
-      return { 
-        totalVehicles: samsaraVehicles.length, 
-        addedVehicles: inserts.length,
-        driversAdded: driverSyncResults.added,
-        driversUpdated: driverSyncResults.updated,
-        autoAssigned: finalAssignments?.length || 0
-      };
+      return { totalVehicles: samsaraVehicles.length, addedVehicles: inserts.length, driversAdded: driverSyncResults.added, driversUpdated: driverSyncResults.updated, autoAssigned: finalAssignments?.length || 0 };
     },
     onSuccess: (res) => {
       toast.success(`同步成功！车辆: +${res.addedVehicles}, 司机: +${res.driversAdded}/~${res.driversUpdated}, 当前总分配: ${res.autoAssigned}`);
