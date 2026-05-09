@@ -52,9 +52,21 @@ export function FleetPage() {
     },
   });
 
-  // 提取车辆类型前缀（例如 "BIN#1" -> "BIN", "FLAT#2" -> "FLAT"）
+  // 提取车辆类型前缀（支持多种分隔符，如 \"BIN#1\", \"FLAT-2\", \"FLAT 3\" 等）
   const extractVehiclePrefix = (name: string): string => {
-    const match = name.match(/^([A-Z]+)#/);
+    if (!name) return "OTHER";
+    const upperName = name.toUpperCase();
+    
+    // 优先匹配已知的前缀
+    if (upperName.startsWith("BIN")) return "BIN";
+    if (upperName.startsWith("FLAT")) return "FLAT";
+    if (upperName.startsWith("DUMP")) return "DUMP";
+    if (upperName.startsWith("HINO")) return "HINO";
+    if (upperName.startsWith("MACK")) return "MACK";
+    if (upperName.startsWith("PROALL")) return "PROALL";
+    
+    // 通用正则匹配：开头的一组大写字母，后面跟着分隔符或结束
+    const match = upperName.match(/^([A-Z]+)[#\s\-_0-9]/) || upperName.match(/^([A-Z]+)$/);
     return match ? match[1] : "OTHER";
   };
 

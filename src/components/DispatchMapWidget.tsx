@@ -69,7 +69,17 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
   
   // 提取车辆类型
   const extractVehicleType = (name: string): string => {
-    const match = name.match(/^([A-Z]+)#/);
+    if (!name) return "OTHER";
+    const upperName = name.toUpperCase();
+    
+    if (upperName.startsWith("BIN")) return "BIN";
+    if (upperName.startsWith("FLAT")) return "FLAT";
+    if (upperName.startsWith("DUMP")) return "DUMP";
+    if (upperName.startsWith("HINO")) return "HINO";
+    if (upperName.startsWith("MACK")) return "MACK";
+    if (upperName.startsWith("PROALL")) return "PROALL";
+    
+    const match = upperName.match(/^([A-Z]+)[#\s\-_0-9]/) || upperName.match(/^([A-Z]+)$/);
     return match ? match[1] : "OTHER";
   };
   
