@@ -463,6 +463,7 @@ export function FleetMapPage() {
              orders={orders} 
              assignments={assignments}
              driverETAs={driverETAs}
+             businessType={businessType}
            />
         </div>
       </div>

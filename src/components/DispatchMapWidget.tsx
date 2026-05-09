@@ -6,11 +6,12 @@ import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES } from "@/lib/manual-step-lo
 
 const KENNEDY_DEPOT = { lat: 43.7568, lng: -79.2865, label: "Kennedy Depot" };
 
-export function DispatchMapWidget({ drivers, orders = [], assignments = [], driverETAs = {} }: { 
+export function DispatchMapWidget({ drivers, orders = [], assignments = [], driverETAs = {}, businessType = 'garbage' }: { 
   drivers: any[], 
   orders?: any[], 
   assignments?: any[],
-  driverETAs?: Record<string, any>
+  driverETAs?: Record<string, any>,
+  businessType?: 'garbage' | 'brick'
 }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
@@ -20,25 +21,6 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
   
   const [mapLoaded, setMapLoaded] = useState(false);
   const [samsaraLocs, setSamsaraLocs] = useState<any[]>([]);
-  
-  // 从 localStorage 加载筛选状态
-  const [vehicleTypeFilter, setVehicleTypeFilter] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem('vehicleTypeFilter');
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch {
-      return new Set();
-    }
-  });
-  
-  // 保存筛选状态到 localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('vehicleTypeFilter', JSON.stringify(Array.from(vehicleTypeFilter)));
-    } catch (e) {
-      console.error('Failed to save filter state:', e);
-    }
-  }, [vehicleTypeFilter]);
   
   // 获取车辆分配信息（包含车辆的 type 字段）
   const { data: vehicleAssignments = [] } = useQuery({
@@ -83,29 +65,22 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     return match ? match[1] : "OTHER";
   };
   
-  // 获取所有唯一的车辆类型
-  const vehicleTypes = Array.from(new Set(samsaraLocs.map(truck => extractVehicleType(truck.name || "")))).sort();
-  
-  // 切换车辆类型筛选 - 优化性能
-  const toggleVehicleType = (type: string) => {
-    setVehicleTypeFilter(prev => {
-      const newFilter = new Set(prev);
-      if (newFilter.has(type)) {
-        newFilter.delete(type);
-      } else {
-        newFilter.add(type);
-      }
-      return newFilter;
-    });
-  };
-  
-  // 过滤车辆 - 使用 useMemo 优化性能
+  // 根据业务类型自动筛选车辆
   const filteredVehicles = useMemo(() => {
-    if (vehicleTypeFilter.size === 0) {
-      return samsaraLocs;
-    }
-    return samsaraLocs.filter(truck => vehicleTypeFilter.has(extractVehicleType(truck.name || "")));
-  }, [samsaraLocs, vehicleTypeFilter]);
+    return samsaraLocs.filter(truck => {
+      const vehicleType = extractVehicleType(truck.name || "");
+      
+      if (businessType === 'garbage') {
+        // 垃圾桶业务：显示 BIN 开头的车辆
+        return vehicleType === 'BIN';
+      } else if (businessType === 'brick') {
+        // 砖块业务：显示 FLAT 开头的车辆
+        return vehicleType === 'FLAT';
+      }
+      
+      return false;
+    });
+  }, [samsaraLocs, businessType]);
 
   // 1. 加载 Google Maps JS 脚本 (原生方式最稳)
   useEffect(() => {
@@ -579,33 +554,6 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
 
   return (
     <div className="w-full h-full relative rounded-lg border overflow-hidden">
-      {/* 车辆类型筛选器 */}
-      {vehicleTypes.length > 0 && (
-        <div className="absolute top-2 left-2 z-10 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg p-2 flex flex-wrap gap-1 max-w-md">
-          <div className="text-xs font-semibold text-gray-700 w-full mb-1">车辆筛选:</div>
-          {vehicleTypes.map(type => (
-            <button
-              key={type}
-              onClick={() => toggleVehicleType(type)}
-              className={`px-2 py-1 text-xs rounded transition-colors ${
-                vehicleTypeFilter.has(type) || vehicleTypeFilter.size === 0
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-200 text-gray-600'
-              }`}
-            >
-              {type} ({samsaraLocs.filter(v => extractVehicleType(v.name || "") === type).length})
-            </button>
-          ))}
-          {vehicleTypeFilter.size > 0 && (
-            <button
-              onClick={() => setVehicleTypeFilter(new Set())}
-              className="px-2 py-1 text-xs rounded bg-red-500 text-white"
-            >
-              清除筛选
-            </button>
-          )}
-        </div>
-      )}
       <div id="map" ref={mapRef} className="w-full h-full bg-muted/10 min-h-[300px]"></div>
     </div>
   );
