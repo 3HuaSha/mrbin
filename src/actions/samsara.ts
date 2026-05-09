@@ -102,7 +102,8 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       try {
         // 使用过去 24 小时的时间范围来获取当前活跃的分配关系
         const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const response = await fetch(`https://api.samsara.com/fleet/driver-vehicle-assignments?startTime=${yesterday}`, {
+        const url = `https://api.samsara.com/fleet/driver-vehicle-assignments?startTime=${yesterday}&filterBy=drivers`;
+        const response = await fetch(url, {
           headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
         });
         if (response.ok) {
