@@ -6,7 +6,9 @@ import { createServerFn } from "@tanstack/react-start";
 export const fetchSamsaraData = createServerFn({ method: "GET" })
   .handler(async () => {
     const SAMSARA_TOKEN = (process.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke') as string;
+
     try {
+      // 1. 获取车辆
       let vehicles: any[] = [];
       const vRes = await fetch('https://api.samsara.com/fleet/vehicles?limit=512', {
         headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
@@ -15,6 +17,8 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         const result = await vRes.json();
         vehicles = result.data || [];
       }
+
+      // 2. 获取司机
       let drivers: any[] = [];
       const dRes = await fetch('https://api.samsara.com/fleet/drivers?limit=512&includeDeactivated=true', {
         headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
@@ -23,6 +27,18 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         const result = await dRes.json();
         drivers = result.data || [];
       }
+
+      // 3. 获取实时分配接口数据 (非常重要)
+      let assignments: any[] = [];
+      const aRes = await fetch('https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=drivers', {
+        headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
+      });
+      if (aRes.ok) {
+        const result = await aRes.json();
+        assignments = (result.data || []).filter((a: any) => !a.endTime);
+      }
+
+      // 4. 获取车辆实时状态 (OBD)
       let vehicleStats: any[] = [];
       const sRes = await fetch('https://api.samsara.com/fleet/vehicles/stats?types=obdDriver', {
         headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
@@ -31,7 +47,15 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         const result = await sRes.json();
         vehicleStats = result.data || [];
       }
-      return { success: true, vehicles, drivers, vehicleStats, timestamp: new Date().toISOString() };
+
+      return {
+        success: true,
+        vehicles,
+        drivers,
+        assignments,
+        vehicleStats,
+        timestamp: new Date().toISOString()
+      };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -70,7 +94,6 @@ export const calculateSamsaraRouteForVehicle = createServerFn({ method: "POST" }
       });
       return { success: true, legs, totalDistance: totalDist, totalDuration: totalDur, error: null };
     } catch (error: any) {
-      console.error('❌ ETA 计算异常:', error);
       return { success: false, error: error.message || 'Unknown error', legs: [], totalDistance: 0, totalDuration: 0 };
     }
   });

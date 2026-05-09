@@ -53,13 +53,11 @@ export function FleetPage() {
     },
   });
 
-  // 获取司机已分配的车辆
   const getDriverVehicles = (driverId: string) => {
     const driverAssignments = assignments.filter(a => a.driver_id === driverId);
     return vehicles.filter(v => driverAssignments.some(a => a.vehicle_id === v.id));
   };
 
-  // 根据筛选条件过滤司机
   const filteredDrivers = drivers.filter(d => {
     if (driverFilter === "ASSIGNED") {
       return getDriverVehicles(d.id).length > 0;
@@ -103,24 +101,27 @@ export function FleetPage() {
 
   const syncSamsara = useMutation({
     mutationFn: async () => {
+      console.log('🚀 开始 Samsara 同步...');
       const result = await fetchSamsaraData();
       if (!result.success) throw new Error(result.error || '获取数据失败');
       
       const samsaraVehicles = (result as any).vehicles || [];
       const samsaraDrivers = (result as any).drivers || [];
+      const samsaraAssignments = (result as any).assignments || [];
       const vehicleStats = (result as any).vehicleStats || [];
+
+      console.log(`📊 抓取统计: 车辆(${samsaraVehicles.length}), 司机(${samsaraDrivers.length}), 分配记录(${samsaraAssignments.length}), 实时状态(${vehicleStats.length})`);
 
       // 1. 同步车辆
       await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
-      const { error: deleteError } = await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
-      if (deleteError) throw new Error(`清除旧数据失败: ${deleteError.message}`);
+      await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
 
       const vehicleInserts: any[] = [];
       const uniquePlates = new Set();
       samsaraVehicles.forEach((v: any) => {
         if (!v.name) return;
-        const plate = v.name.toUpperCase();
+        const plate = v.name.toUpperCase().trim();
         if (uniquePlates.has(plate)) return;
         uniquePlates.add(plate);
         let type: "HINO" | "MACK" = "MACK";
@@ -137,9 +138,10 @@ export function FleetPage() {
       await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       const pendingAssignments = new Map<string, string>(); // driverInternalId -> vehicleInternalId
 
-      // 3. 同步司机并收集分配
-      let addedCount = 0;
-      let updatedCount = 0;
+      // 3. 同步司机
+      const driverSamsaraIdToInternalId = new Map<string, string>();
+      const driverNameToInternalId = new Map<string, string>();
+      let added = 0, updated = 0;
 
       for (const sd of samsaraDrivers) {
         if (!sd.name) continue;
@@ -148,37 +150,56 @@ export function FleetPage() {
         if (existing && existing.length > 0) {
           dId = existing[0].id;
           await supabase.from("profiles").update({ phone: sd.phone || null, email: sd.email || null, is_active: true }).eq("id", dId);
-          updatedCount++;
+          updated++;
         } else {
           const { data: nw, error: nE } = await supabase.from("profiles").insert({ name: sd.name, phone: sd.phone || null, email: sd.email || null, role: "driver", is_active: true }).select().single();
           if (nE) continue;
           dId = nw.id;
-          addedCount++;
+          added++;
         }
+        driverSamsaraIdToInternalId.set(sd.id, dId);
+        driverNameToInternalId.set(sd.name.toUpperCase().trim(), dId);
+      }
+
+      // 4. 建立关联 (优先级: 实时接口 > OBD > 司机档案)
+      const clean = (s: string) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+      // A. 司机档案里的静态/当前车辆
+      for (const sd of samsaraDrivers) {
+        const dId = driverSamsaraIdToInternalId.get(sd.id);
         const vRef = sd.currentVehicle || sd.staticAssignedVehicle;
         if (dId && vRef?.id) {
-          const v = allVehicles.find(veh => veh.samsara_id === vRef.id || veh.name.toUpperCase() === vRef.name.toUpperCase());
+          const v = allVehicles.find(veh => veh.samsara_id === vRef.id || clean(veh.name) === clean(vRef.name));
           if (v) pendingAssignments.set(dId, v.id);
         }
       }
 
-      // 4. 补充 OBD 实时状态 (根据姓名)
-      const { data: freshDrivers } = await supabase.from("profiles").select("id, name").eq("role", "driver");
-      const driverNameToId = new Map(freshDrivers?.map(d => [d.name.toUpperCase(), d.id]));
-
+      // B. OBD 实时状态
       vehicleStats.forEach((stat: any) => {
         const dName = stat.obdDriver?.driver?.name;
         if (dName) {
-          const dId = driverNameToId.get(dName.toUpperCase());
-          const v = allVehicles.find(veh => veh.samsara_id === stat.id || veh.name.toUpperCase() === stat.name.toUpperCase());
+          const dId = driverNameToInternalId.get(dName.toUpperCase().trim());
+          const v = allVehicles.find(veh => veh.samsara_id === stat.id || clean(veh.name) === clean(stat.name));
           if (dId && v) pendingAssignments.set(dId, v.id);
         }
       });
 
-      const finalInserts = Array.from(pendingAssignments.entries()).map(([dId, vId]) => ({ driver_id: dId, vehicle_id: vId }));
-      if (finalInserts.length > 0) await supabase.from("driver_vehicle_assignments").insert(finalInserts);
+      // C. 显式分配接口 (最高优先级)
+      for (const sa of samsaraAssignments) {
+        let dId = driverSamsaraIdToInternalId.get(sa.driver?.id);
+        if (!dId && sa.driver?.name) dId = driverNameToInternalId.get(sa.driver.name.toUpperCase().trim());
+        if (!dId) continue;
 
-      return { vehicles: allVehicles.length, added: addedCount, updated: updatedCount, assignments: finalInserts.length };
+        const v = allVehicles.find(veh => veh.samsara_id === sa.vehicle?.id || (sa.vehicle?.name && clean(veh.name) === clean(sa.vehicle.name)));
+        if (v) pendingAssignments.set(dId, v.id);
+      }
+
+      const finalInserts = Array.from(pendingAssignments.entries()).map(([dId, vId]) => ({ driver_id: dId, vehicle_id: vId }));
+      if (finalInserts.length > 0) {
+        await supabase.from("driver_vehicle_assignments").insert(finalInserts);
+      }
+
+      return { vehicles: allVehicles.length, added, updated, assignments: finalInserts.length };
     },
     onSuccess: (res) => {
       toast.success(`同步成功！车辆: ${res.vehicles}, 活跃分配: ${res.assignments}`);
