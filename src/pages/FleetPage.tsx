@@ -24,6 +24,7 @@ export function FleetPage() {
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<string>("ALL");
+  const [driverFilter, setDriverFilter] = useState<"ALL" | "ASSIGNED">("ALL");
   const [assigningDriver, setAssigningDriver] = useState<Driver | null>(null);
 
   const { data: drivers = [] } = useQuery({
@@ -52,6 +53,20 @@ export function FleetPage() {
     },
   });
 
+  // 获取司机已分配的车辆
+  const getDriverVehicles = (driverId: string) => {
+    const driverAssignments = assignments.filter(a => a.driver_id === driverId);
+    return vehicles.filter(v => driverAssignments.some(a => a.vehicle_id === v.id));
+  };
+
+  // 根据筛选条件过滤司机
+  const filteredDrivers = drivers.filter(d => {
+    if (driverFilter === "ASSIGNED") {
+      return getDriverVehicles(d.id).length > 0;
+    }
+    return true;
+  });
+
   // 提取车辆类型前缀（支持多种分隔符，如 \"BIN#1\", \"FLAT-2\", \"FLAT 3\" 等）
   const extractVehiclePrefix = (name: string): string => {
     if (!name) return "OTHER";
@@ -78,12 +93,6 @@ export function FleetPage() {
     ? vehicles 
     : vehicles.filter(v => extractVehiclePrefix(v.name) === vehicleTypeFilter);
 
-  // 获取司机已分配的车辆
-  const getDriverVehicles = (driverId: string) => {
-    const driverAssignments = assignments.filter(a => a.driver_id === driverId);
-    return vehicles.filter(v => driverAssignments.some(a => a.vehicle_id === v.id));
-  };
-
   const toggleDriver = useMutation({
     mutationFn: async (d: Driver) => {
       const { error } = await supabase.from("profiles").update({ is_active: !d.is_active }).eq("id", d.id);
@@ -109,6 +118,7 @@ export function FleetPage() {
       
       const samsaraVehicles = result.data || [];
       const samsaraDrivers = (result as any).drivers || [];
+      const samsaraAssignments = (result as any).samsaraAssignments || [];
       
       // 1. 同步车辆
       // 深度清理受约束的数据（这里保持原有逻辑，清除旧的车辆数据）
@@ -158,6 +168,7 @@ export function FleetPage() {
 
       // 2. 同步司机
       const driverSyncResults = { added: 0, updated: 0, assigned: 0 };
+      const driverSamsaraIdToInternalId = new Map<string, string>();
       
       for (const sd of samsaraDrivers) {
         if (!sd.name) continue;
@@ -197,26 +208,37 @@ export function FleetPage() {
           driverId = newProfile.id;
           driverSyncResults.added++;
         }
+        
+        driverSamsaraIdToInternalId.set(sd.id, driverId);
 
-        // 3. 自动分配车辆
+        // 3. 自动分配车辆 (优先使用 staticAssignedVehicle)
         const assignedVehicle = sd.staticAssignedVehicle || sd.currentVehicle;
         if (assignedVehicle && assignedVehicle.id) {
-          // 查找该车辆在系统中的内部 ID
           const vehicle = insertedVehicles.find(v => v.samsara_id === assignedVehicle.id);
           if (vehicle) {
-            // 清除旧分配
             await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", driverId);
-            
-            // 插入新分配
             const { error: assignError } = await supabase.from("driver_vehicle_assignments").insert({
               driver_id: driverId,
               vehicle_id: vehicle.id
             });
-            
-            if (!assignError) {
-              driverSyncResults.assigned++;
-            }
+            if (!assignError) driverSyncResults.assigned++;
           }
+        }
+      }
+
+      // 4. 使用专门的分配接口补充动态分配
+      for (const sa of samsaraAssignments) {
+        const internalDriverId = driverSamsaraIdToInternalId.get(sa.driver?.id);
+        const internalVehicle = insertedVehicles.find(v => v.samsara_id === sa.vehicle?.id);
+        
+        if (internalDriverId && internalVehicle) {
+          // 如果还没有分配，或者需要覆盖旧分配
+          await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", internalDriverId);
+          const { error: assignError } = await supabase.from("driver_vehicle_assignments").insert({
+            driver_id: internalDriverId,
+            vehicle_id: internalVehicle.id
+          });
+          if (!assignError) driverSyncResults.assigned++;
         }
       }
       
@@ -261,11 +283,20 @@ export function FleetPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">司机 ({drivers.length})</h2>
-            <Button size="sm" onClick={() => setAddingDriver(true)}><Plus className="h-4 w-4 mr-1" /> 添加司机</Button>
+            <h2 className="font-semibold">司机 ({filteredDrivers.length}/{drivers.length})</h2>
+            <div className="flex gap-2">
+              <Button 
+                size="sm" 
+                variant={driverFilter === "ASSIGNED" ? "default" : "outline"}
+                onClick={() => setDriverFilter(driverFilter === "ALL" ? "ASSIGNED" : "ALL")}
+              >
+                {driverFilter === "ASSIGNED" ? "已分配车辆" : "全部司机"}
+              </Button>
+              <Button size="sm" onClick={() => setAddingDriver(true)}><Plus className="h-4 w-4 mr-1" /> 添加司机</Button>
+            </div>
           </div>
           <div className="space-y-2">
-            {drivers.map((d) => (
+            {filteredDrivers.map((d) => (
               <div key={d.id} className={cn("bg-card border rounded-lg p-3", !d.is_active && "opacity-50")}>
                 <div className="flex items-center gap-3 mb-2">
                   <div className="h-10 w-10 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center">

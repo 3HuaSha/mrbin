@@ -97,6 +97,20 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         console.error('❌ 获取司机失败:', err);
       }
 
+      // 获取当前所有司机-车辆分配关系
+      let allAssignments: any[] = [];
+      try {
+        const response = await fetch(`https://api.samsara.com/fleet/driver-vehicle-assignments?startTime=${new Date().toISOString()}`, {
+          headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
+        });
+        if (response.ok) {
+          const result = await response.json();
+          allAssignments = result.data || [];
+        }
+      } catch (err) {
+        console.error('❌ 获取分配关系失败:', err);
+      }
+
       // 合并数据并去重
       const uniqueUnitsMap = new Map();
       allUnits.forEach(u => {
@@ -131,12 +145,13 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         success: true,
         data: mergedData,
         drivers: allDrivers,
+        samsaraAssignments: allAssignments,
         summary: { ...counts, drivers: allDrivers.length },
         timestamp: new Date().toISOString()
       };
     } catch (error: any) {
       console.error('❌ Samsara API 异常:', error);
-      return { success: false, error: error.message || 'Unknown error', data: [], drivers: [] };
+      return { success: false, error: error.message || 'Unknown error', data: [], drivers: [], samsaraAssignments: [] };
     }
   });
 
