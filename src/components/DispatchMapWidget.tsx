@@ -276,8 +276,8 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
         map: mapInstance.current,
         icon: {
             url: iconUrl,
-            scaledSize: new (window as any).google.maps.Size(90, 55),
-            anchor: new (window as any).google.maps.Point(45, 50) // 锚点在底部中心
+            scaledSize: new (window as any).google.maps.Size(110, 60),
+            anchor: new (window as any).google.maps.Point(55, 55) // 锚点在底部中心
         },
         zIndex: 1000
       });
@@ -289,8 +289,8 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
       if (marker.getIcon()?.url !== newIconUrl) {
         marker.setIcon({
           url: newIconUrl,
-          scaledSize: new (window as any).google.maps.Size(90, 55),
-          anchor: new (window as any).google.maps.Point(45, 50)
+          scaledSize: new (window as any).google.maps.Size(110, 60),
+          anchor: new (window as any).google.maps.Point(55, 55)
         });
       }
       
@@ -599,42 +599,44 @@ function createVehicleIconWithLabel(vehicleType: string, driverName: string): st
   const scheme = colorSchemes[vehicleType] || { bg: '#795548', text: '#FFFFFF', truck: '#795548' };
   
   // 创建标签文本
-  const labelText = driverName ? `${vehicleType} ${driverName}` : vehicleType;
+  const labelText = driverName ? `${vehicleType}(${driverName})` : vehicleType;
   
-  // 估算文本宽度（每个字符约7像素，中文字符约11像素）
-  const textWidth = labelText.split('').reduce((width, char) => {
-    return width + (/[\u4e00-\u9fa5]/.test(char) ? 11 : 7);
-  }, 0);
-  const cardWidth = Math.max(textWidth + 12, 50);
-  const svgWidth = Math.max(cardWidth + 8, 90);
+  // 固定宽度，确保所有车辆图标大小一致
+  const cardWidth = 100;
+  const svgWidth = 110;
   
-  // SVG 总高度：标签卡片(18) + 间距(2) + 卡车图标(24) = 44，缩小整体尺寸
-  const svgHeight = 55;
+  // SVG 总高度：标签卡片(22) + 间距(2) + 卡车图标(28) = 52
+  const svgHeight = 60;
   const cardX = (svgWidth - cardWidth) / 2;
-  const truckX = (svgWidth - 24) / 2;
+  const truckX = (svgWidth - 28) / 2;
   
   // 创建SVG，包含顶部标签卡片和底部卡车图标
   const svg = `
     <svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
-      <!-- 顶部标签卡片 - 有色背景 + 对比色文字 -->
-      <rect x='${cardX}' y='0' width='${cardWidth}' height='18' rx='3' fill='${scheme.bg}' stroke='#333' stroke-width='1' opacity='0.95'/>
-      <text x='${svgWidth/2}' y='12' text-anchor='middle' font-size='10' font-weight='bold' fill='${scheme.text}' font-family='Arial, sans-serif'>${labelText}</text>
+      <!-- 顶部标签卡片 - 有色背景 + 对比色文字 + 阴影 -->
+      <defs>
+        <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.3"/>
+        </filter>
+      </defs>
+      <rect x='${cardX}' y='0' width='${cardWidth}' height='22' rx='4' fill='${scheme.bg}' stroke='#333' stroke-width='1.5' opacity='0.98' filter="url(#shadow)"/>
+      <text x='${svgWidth/2}' y='15' text-anchor='middle' font-size='12' font-weight='bold' fill='${scheme.text}' font-family='Arial, sans-serif'>${labelText}</text>
       
-      <!-- 连接线 - 缩短距离 -->
-      <line x1='${svgWidth/2}' y1='18' x2='${svgWidth/2}' y2='20' stroke='${scheme.bg}' stroke-width='1.5'/>
+      <!-- 连接线 -->
+      <line x1='${svgWidth/2}' y1='22' x2='${svgWidth/2}' y2='24' stroke='${scheme.bg}' stroke-width='2'/>
       
-      <!-- 底部卡车图标 - 缩小尺寸 -->
-      <g transform='translate(${truckX}, 20)'>
+      <!-- 底部卡车图标 - 稍大一些 -->
+      <g transform='translate(${truckX}, 24)'>
         <!-- 车身 -->
-        <rect x='3' y='9' width='18' height='9' rx='1.5' fill='${scheme.truck}' stroke='#000' stroke-width='1.2'/>
+        <rect x='3' y='10' width='22' height='11' rx='2' fill='${scheme.truck}' stroke='#000' stroke-width='1.5'/>
         <!-- 车轮 -->
-        <circle cx='7.5' cy='18' r='2.2' fill='#222' stroke='#000' stroke-width='0.8'/>
-        <circle cx='16.5' cy='18' r='2.2' fill='#222' stroke='#000' stroke-width='0.8'/>
+        <circle cx='8' cy='21' r='2.5' fill='#222' stroke='#000' stroke-width='1'/>
+        <circle cx='20' cy='21' r='2.5' fill='#222' stroke='#000' stroke-width='1'/>
         <!-- 驾驶室 -->
-        <rect x='4.5' y='4.5' width='15' height='4.5' rx='0.8' fill='${scheme.truck}' stroke='#000' stroke-width='1.2'/>
+        <rect x='5' y='5' width='18' height='5' rx='1' fill='${scheme.truck}' stroke='#000' stroke-width='1.5'/>
         <!-- 车窗 -->
-        <rect x='6' y='5.5' width='4.5' height='2.5' rx='0.4' fill='#87CEEB' opacity='0.7'/>
-        <rect x='13.5' y='5.5' width='4.5' height='2.5' rx='0.4' fill='#87CEEB' opacity='0.7'/>
+        <rect x='7' y='6' width='5' height='3' rx='0.5' fill='#87CEEB' opacity='0.7'/>
+        <rect x='16' y='6' width='5' height='3' rx='0.5' fill='#87CEEB' opacity='0.7'/>
       </g>
     </svg>
   `.trim();
@@ -709,41 +711,41 @@ function createOrderIconWithLabel(order: any, orderETA?: any): string {
   
   const filteredLines = lines.filter(line => line);
   
-  // 计算卡片尺寸 - 缩小尺寸
-  const maxLineWidth = Math.max(...filteredLines.map(line => {
-    return line.split('').reduce((width, char) => {
-      return width + (/[\u4e00-\u9fa5]/.test(char) ? 11 : 7); // 恢复正常字符宽度
-    }, 0);
-  }));
-  
-  const cardWidth = Math.max(maxLineWidth + 16, 90); // 减小padding
-  const cardHeight = 10 + filteredLines.length * 16; // 减小行高到16px
-  const svgWidth = Math.max(cardWidth + 10, 110);
-  const svgHeight = cardHeight + 38;
+  // 计算卡片尺寸 - 增大尺寸，使用固定宽度
+  const cardWidth = 140; // 固定宽度，更显眼
+  const cardHeight = 14 + filteredLines.length * 20; // 增大行高到20px
+  const svgWidth = 150;
+  const svgHeight = cardHeight + 42;
   
   const cardX = (svgWidth - cardWidth) / 2;
   const pinX = svgWidth / 2;
   
-  // 生成文本行 - 字体12px，白色文字加描边
+  // 生成文本行 - 字体14px，白色文字加黑色描边
   let textElements = '';
   filteredLines.forEach((line, index) => {
-    const y = 14 + index * 16; // 调整y位置
+    const y = 18 + index * 20; // 调整y位置
     // ETA行使用特殊样式
     const isETALine = line.startsWith('ETA:');
     const fontWeight = index === 0 ? 'bold' : (isETALine ? 'bold' : '600');
     const fill = isETALine ? '#FFD700' : scheme.text; // ETA用金色
-    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='12' font-weight='${fontWeight}' fill='${fill}' font-family='Arial, sans-serif' stroke='${scheme.pin}' stroke-width='0.3'>${line}</text>`;
+    const fontSize = index === 0 ? '14' : '13'; // 第一行稍大
+    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='${fontSize}' font-weight='${fontWeight}' fill='${fill}' font-family='Arial, sans-serif' stroke='#000' stroke-width='0.8'>${line}</text>`;
   });
   
   // 创建SVG
   const svg = `
     <svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
-      <!-- 顶部信息卡片 - 更显眼的颜色 -->
-      <rect x='${cardX}' y='0' width='${cardWidth}' height='${cardHeight}' rx='4' fill='${scheme.bg}' stroke='${scheme.pin}' stroke-width='2' opacity='0.98'/>
+      <defs>
+        <filter id="cardShadow" x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="3" stdDeviation="3" flood-opacity="0.4"/>
+        </filter>
+      </defs>
+      <!-- 顶部信息卡片 - 更显眼的颜色和阴影 -->
+      <rect x='${cardX}' y='0' width='${cardWidth}' height='${cardHeight}' rx='5' fill='${scheme.bg}' stroke='${scheme.pin}' stroke-width='3' opacity='0.98' filter="url(#cardShadow)"/>
       ${textElements}
       
       <!-- 连接线 -->
-      <line x1='${pinX}' y1='${cardHeight}' x2='${pinX}' y2='${cardHeight + 3}' stroke='${scheme.pin}' stroke-width='2'/>
+      <line x1='${pinX}' y1='${cardHeight}' x2='${pinX}' y2='${cardHeight + 3}' stroke='${scheme.pin}' stroke-width='3'/>
       
       <!-- 底部图钉 -->
       <g transform='translate(${pinX - 12}, ${cardHeight + 3})'>
@@ -808,9 +810,9 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
     lines.push(`ETA: ${etaTime}`);
   }
   
-  const baseHeight = 10 + lines.length * 16 + 38;
-  const scaleFactor = 1.0; // 恢复到1.0倍
-  const width = 110 * scaleFactor;
+  const baseHeight = 14 + lines.length * 20 + 42;
+  const scaleFactor = 1.0;
+  const width = 150 * scaleFactor;
   const height = baseHeight * scaleFactor;
   
   marker.setIcon({
