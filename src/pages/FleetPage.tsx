@@ -109,17 +109,23 @@ export function FleetPage() {
       (window as any).__SAMSARA_DEBUG__ = { sVehicles, sDrivers, sAssigns, sStats };
       
       console.log('📦 原始数据已存入 window.__SAMSARA_DEBUG__');
-      console.log(`📊 统计: 车辆(${sVehicles.length}), 司机(${sDrivers.length}), 分配(${sAssigns.length}), Stats(${sStats.length})`);
+      console.log(`📊 统计: 车辆/资产(${sVehicles.length}), 司机(${sDrivers.length}), 分配(${sAssigns.length}), Stats(${sStats.length})`);
 
-      // 1. 同步车辆
+      // 1. 同步车辆与资产
       await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
 
       const vehicleInserts = sVehicles.filter((v: any) => v.name).map((v: any) => {
         const plate = v.name.toUpperCase().trim();
-        let type: "HINO" | "MACK" = (plate.includes("HINO") || plate.startsWith("BIN")) ? "HINO" : "MACK";
-        return { name: v.name, type, plate, samsara_id: v.id, max_bin_size: type === "HINO" ? "20" : "40", is_active: true };
+        // 根据名称判断类型
+        let type: "HINO" | "MACK" = "MACK";
+        let size = "40";
+        if (plate.includes("HINO") || plate.startsWith("BIN") || plate.startsWith("FLAT")) {
+          type = "HINO";
+          size = "20";
+        }
+        return { name: v.name, type, plate, samsara_id: v.id, max_bin_size: size, is_active: true };
       });
 
       const { data: insertedVehicles, error: vError } = await supabase.from("vehicles").insert(vehicleInserts).select();
@@ -152,33 +158,32 @@ export function FleetPage() {
       const pending = new Map<string, string>(); // dId -> vId
       const clean = (s: string) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-      console.group('🎯 匹配过程');
+      console.group('🎯 匹配详情记录');
       sDrivers.forEach((sd: any) => {
         const dId = dSamsaraIdToInternal.get(sd.id);
         if (!dId) return;
 
-        // 寻找车辆引用 (司机属性 > 分配记录 > OBD)
+        // 寻找车辆引用
         let vRef = sd.currentVehicle || sd.staticAssignedVehicle;
+        let source = 'Profile';
         
-        // 如果司机属性里没车，看分配记录
         if (!vRef?.id) {
           const assign = sAssigns.find((a: any) => a.driver?.id === sd.id || a.driver?.name === sd.name);
-          if (assign) vRef = assign.vehicle;
+          if (assign) { vRef = assign.vehicle; source = 'Assignments API'; }
         }
 
-        // 如果还没车，看 OBD
         if (!vRef?.id) {
           const stat = sStats.find((s: any) => s.obdDriver?.driver?.id === sd.id || s.obdDriver?.driver?.name === sd.name);
-          if (stat) vRef = { id: stat.id, name: stat.name };
+          if (stat) { vRef = { id: stat.id, name: stat.name }; source = 'OBD Stats'; }
         }
 
         if (vRef?.id || vRef?.name) {
           const vehicle = allVehicles.find(v => (vRef.id && v.samsara_id === vRef.id) || (vRef.name && clean(v.name) === clean(vRef.name)));
           if (vehicle) {
-            console.log(`✅ 匹配成功: 司机(${sd.name}) -> 车辆(${vehicle.name})`);
+            console.log(`✅ [${source}] 匹配成功: ${sd.name} -> ${vehicle.name}`);
             pending.set(dId, vehicle.id);
           } else {
-            console.warn(`⚠️ 找到引用但未匹配到本地车辆: 司机(${sd.name}) 引用车辆(${vRef.name || vRef.id})`);
+            console.warn(`❌ [${source}] 引用车辆无法匹配: 司机(${sd.name}), 引用(${vRef.name || '无名'}, ID: ${vRef.id || '无ID'})`);
           }
         }
       });
@@ -190,10 +195,10 @@ export function FleetPage() {
       }
 
       console.groupEnd();
-      return { vehicles: allVehicles.length, assignments: finalInserts.length };
+      return { vehicles: allVehicles.length, assignments: finalInserts.length, drivers: sDrivers.length };
     },
     onSuccess: (res) => {
-      toast.success(`同步完成！车辆: ${res.vehicles}, 活跃分配: ${res.assignments}`);
+      toast.success(`同步完成！车辆: ${res.vehicles}, 司机: ${res.drivers}, 活跃分配: ${res.assignments}`);
       qc.invalidateQueries({ queryKey: ["vehicles-all"] });
       qc.invalidateQueries({ queryKey: ["drivers-all"] });
       qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] });

@@ -8,7 +8,7 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
     const SAMSARA_TOKEN = (process.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke') as string;
 
     try {
-      // 1. 获取车辆
+      // 1. 获取常规车辆
       let vehicles: any[] = [];
       const vRes = await fetch('https://api.samsara.com/fleet/vehicles?limit=512', {
         headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
@@ -18,7 +18,20 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         vehicles = result.data || [];
       }
 
-      // 2. 获取司机
+      // 2. 获取资产 (包含 FLAT 等类型的设备)
+      let assets: any[] = [];
+      const assetRes = await fetch('https://api.samsara.com/fleet/assets?limit=512', {
+        headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
+      });
+      if (assetRes.ok) {
+        const result = await assetRes.json();
+        assets = result.data || [];
+      }
+
+      // 合并车辆和资产
+      const allVehicles = [...vehicles, ...assets];
+
+      // 3. 获取司机
       let drivers: any[] = [];
       const dRes = await fetch('https://api.samsara.com/fleet/drivers?limit=512&includeDeactivated=true', {
         headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
@@ -28,7 +41,7 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         drivers = result.data || [];
       }
 
-      // 3. 获取实时分配接口数据 (非常重要)
+      // 4. 获取实时分配接口数据
       let assignments: any[] = [];
       const aRes = await fetch('https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=drivers', {
         headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
@@ -38,7 +51,7 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         assignments = (result.data || []).filter((a: any) => !a.endTime);
       }
 
-      // 4. 获取车辆实时状态 (OBD)
+      // 5. 获取车辆实时状态 (OBD)
       let vehicleStats: any[] = [];
       const sRes = await fetch('https://api.samsara.com/fleet/vehicles/stats?types=obdDriver', {
         headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
@@ -50,7 +63,7 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
 
       return {
         success: true,
-        vehicles,
+        vehicles: allVehicles,
         drivers,
         assignments,
         vehicleStats,
