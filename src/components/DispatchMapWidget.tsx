@@ -24,7 +24,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
   
   // 获取车辆分配信息（包含车辆的 type 字段）
   const { data: vehicleAssignments = [] } = useQuery({
-    queryKey: ["vehicle-assignments-map"],
+    queryKey: ["driver-vehicle-assignments"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("driver_vehicle_assignments")
