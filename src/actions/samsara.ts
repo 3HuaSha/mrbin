@@ -6,70 +6,61 @@ import { createServerFn } from "@tanstack/react-start";
 export const fetchSamsaraData = createServerFn({ method: "GET" })
   .handler(async () => {
     const SAMSARA_TOKEN = (process.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke') as string;
+    const headers = { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' };
 
     try {
-      // 1. 获取常规车辆
-      let vehicles: any[] = [];
-      const vRes = await fetch('https://api.samsara.com/fleet/vehicles?limit=512', {
-        headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-      });
-      if (vRes.ok) {
-        const result = await vRes.json();
-        vehicles = result.data || [];
-      }
+      console.log('🚀 开始从 Samsara 抓取全量数据...');
+      
+      // 1. 获取车辆
+      const vRes = await fetch('https://api.samsara.com/fleet/vehicles?limit=512', { headers });
+      const vehicles = vRes.ok ? (await vRes.json()).data : [];
+      console.log(`[Vehicles] Status: ${vRes.status}, Count: ${vehicles.length}`);
 
-      // 2. 获取资产 (包含 FLAT 等类型的设备)
-      let assets: any[] = [];
-      const assetRes = await fetch('https://api.samsara.com/fleet/assets?limit=512', {
-        headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-      });
-      if (assetRes.ok) {
-        const result = await assetRes.json();
-        assets = result.data || [];
-      }
-
-      // 合并车辆和资产
-      const allVehicles = [...vehicles, ...assets];
+      // 2. 获取资产
+      const assetRes = await fetch('https://api.samsara.com/fleet/assets?limit=512', { headers });
+      const assets = assetRes.ok ? (await assetRes.json()).data : [];
+      console.log(`[Assets] Status: ${assetRes.status}, Count: ${assets.length}`);
 
       // 3. 获取司机
-      let drivers: any[] = [];
-      const dRes = await fetch('https://api.samsara.com/fleet/drivers?limit=512&includeDeactivated=true', {
-        headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-      });
-      if (dRes.ok) {
-        const result = await dRes.json();
-        drivers = result.data || [];
-      }
+      const dRes = await fetch('https://api.samsara.com/fleet/drivers?limit=512&includeDeactivated=true', { headers });
+      const drivers = dRes.ok ? (await dRes.json()).data : [];
+      console.log(`[Drivers] Status: ${dRes.status}, Count: ${drivers.length}`);
 
-      // 4. 获取实时分配接口数据
-      let assignments: any[] = [];
-      const aRes = await fetch('https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=drivers', {
-        headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-      });
+      // 4. 获取实时分配 (尝试不加 filterBy)
+      const aRes = await fetch('https://api.samsara.com/fleet/driver-vehicle-assignments', { headers });
+      let assignments = [];
       if (aRes.ok) {
         const result = await aRes.json();
         assignments = (result.data || []).filter((a: any) => !a.endTime);
       }
+      console.log(`[Assignments] Status: ${aRes.status}, Count: ${assignments.length}`);
 
-      // 5. 获取车辆实时状态 (OBD)
-      let vehicleStats: any[] = [];
-      const sRes = await fetch('https://api.samsara.com/fleet/vehicles/stats?types=obdDriver', {
-        headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-      });
-      if (sRes.ok) {
-        const result = await sRes.json();
-        vehicleStats = result.data || [];
-      }
+      // 5. 获取车辆实时状态 (OBD + Location)
+      const sRes = await fetch('https://api.samsara.com/fleet/vehicles/stats?types=obdDriver', { headers });
+      const vehicleStats = sRes.ok ? (await sRes.json()).data : [];
+      console.log(`[Stats] Status: ${sRes.status}, Count: ${vehicleStats.length}`);
+
+      // 6. 获取位置信息 (有时包含 driver info)
+      const lRes = await fetch('https://api.samsara.com/fleet/vehicles/locations', { headers });
+      const locations = lRes.ok ? (await lRes.json()).data : [];
+      console.log(`[Locations] Status: ${lRes.status}, Count: ${locations.length}`);
 
       return {
         success: true,
-        vehicles: allVehicles,
+        vehicles: [...vehicles, ...assets],
         drivers,
         assignments,
         vehicleStats,
-        timestamp: new Date().toISOString()
+        locations,
+        debug: {
+          vStatus: vRes.status,
+          aStatus: aRes.status,
+          sStatus: sRes.status,
+          lStatus: lRes.status
+        }
       };
     } catch (error: any) {
+      console.error('❌ Samsara 抓取失败:', error);
       return { success: false, error: error.message };
     }
   });

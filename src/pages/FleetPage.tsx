@@ -109,8 +109,8 @@ export function FleetPage() {
       const result = await fetchSamsaraData();
       if (!result.success) throw new Error(result.error || '获取数据失败');
       
-      const { vehicles: sVehicles = [], drivers: sDrivers = [], assignments: sAssigns = [], vehicleStats: sStats = [] } = result as any;
-      (window as any).__SAMSARA_DEBUG__ = { sVehicles, sDrivers, sAssigns, sStats };
+      const { vehicles: sVehicles = [], drivers: sDrivers = [], assignments: sAssigns = [], vehicleStats: sStats = [], locations: sLocs = [], debug } = result as any;
+      (window as any).__SAMSARA_DEBUG__ = { sVehicles, sDrivers, sAssigns, sStats, sLocs };
       
       console.log('📦 原始数据已存入 window.__SAMSARA_DEBUG__');
       console.log(`📊 统计: 车辆/资产(${sVehicles.length}), 司机(${sDrivers.length}), 分配(${sAssigns.length}), Stats(${sStats.length})`);
@@ -175,12 +175,17 @@ export function FleetPage() {
 
         if (!vRef?.id) {
           const stat = sStats.find((s: any) => clean(s.obdDriver?.driver?.name) === clean(sd.name));
-          if (stat) { vRef = { id: stat.id, name: stat.name }; source = '车辆OBD实时状态'; }
+          if (stat) { vRef = { id: stat.id, name: stat.name }; source = '车辆OBD状态'; }
+        }
+
+        if (!vRef?.id) {
+          const loc = sLocs.find((l: any) => clean(l.obdDriver?.driver?.name) === clean(sd.name));
+          if (loc) { vRef = { id: loc.id, name: loc.name }; source = '车辆实时位置'; }
         }
 
         if (!vRef?.id) {
           const profileRef = sd.currentVehicle || sd.staticAssignedVehicle;
-          if (profileRef) { vRef = profileRef; source = 'Samsara司机档案关联'; }
+          if (profileRef) { vRef = profileRef; source = 'Samsara司机档案'; }
         }
 
         if (vRef) {
@@ -198,12 +203,12 @@ export function FleetPage() {
       }
 
       console.groupEnd();
-      setSyncAnalysis({ totalDrivers: sDrivers.length, driversWithRefs: analysisData });
-      if (finalInserts.length > 0) {
-        await supabase.from("driver_vehicle_assignments").insert(finalInserts);
-      }
+      setSyncAnalysis({ 
+        totalDrivers: sDrivers.length, 
+        driversWithRefs: analysisData,
+        debugStatuses: debug
+      } as any);
 
-      console.groupEnd();
       return { vehicles: allVehicles.length, assignments: finalInserts.length, drivers: sDrivers.length };
     },
     onSuccess: (res) => {
@@ -374,6 +379,11 @@ function SyncAnalysisDialog({ analysis, onClose }: { analysis: any; onClose: () 
           <DialogTitle>同步关联分析 (找到 {analysis.driversWithRefs.length} 条关联引用)</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-4">
+          <div className="flex gap-2 text-[10px]">
+            {analysis.debugStatuses && Object.entries(analysis.debugStatuses).map(([k, v]: any) => (
+              <Badge key={k} variant={v === 200 ? "outline" : "destructive"}>{k}: {v}</Badge>
+            ))}
+          </div>
           <div className="text-sm text-muted-foreground">
             系统从 Samsara 抓取了 {analysis.totalDrivers} 名司机，并尝试通过以下来源寻找车辆分配。
           </div>
