@@ -38,11 +38,20 @@ export async function fetchSamsaraVehicles(): Promise<SamsaraResponse> {
     
     if (result.success) {
       console.log('✅ Server Function 获取成功');
+      // 关键修复：DispatchMapWidget 期望数据在 data 字段中，且包含位置信息
+      return {
+        success: true,
+        data: (result as any).locations || [],
+        timestamp: new Date().toISOString()
+      };
     } else {
       console.error('❌ Server Function 返回错误:', result.error);
+      return {
+        success: false,
+        data: [],
+        error: (result as any).error
+      };
     }
-    
-    return result as SamsaraResponse;
   } catch (error) {
     console.error('❌ Server Function 调用异常:', error);
     return {
