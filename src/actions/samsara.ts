@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 
-export const fetchSamsaraData = createServerFn({ method: "POST" })
+export const fetchSamsaraData = createServerFn({ method: "GET" })
   .handler(async () => {
     const SAMSARA_TOKEN = (process.env.VITE_SAMSARA_TOKEN || process.env.SAMSARA_API_KEY || import.meta.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke') as string;
     
