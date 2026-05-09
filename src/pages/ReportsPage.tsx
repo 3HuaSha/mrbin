@@ -20,6 +20,9 @@ import {
 } from "lucide-react";
 import { ORDER_TYPES, todayISO, typeMeta } from "@/lib/business";
 import { cn } from "@/lib/utils";
+import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
+import { useBusinessType } from "@/lib/business-type-storage";
+import type { BusinessType } from "@/lib/business";
 
 // 模拟价目表(没接 NetSuite,先用固定价计算营收估算)
 const PRICE_BY_TYPE: Record<string, Record<string, number>> = {
@@ -79,16 +82,18 @@ function priceOf(type: string, size: string | null): number {
 
 export function ReportsPage() {
   const [period, setPeriod] = useState<"day" | "week" | "month">("week");
+  const [businessType, setBusinessType] = useBusinessType();
   const start = rangeStart(period);
   const startISO = start.toISOString().slice(0, 10);
   const todayStr = todayISO();
 
   const { data: orders = [] } = useQuery({
-    queryKey: ["report-orders", startISO, todayStr],
+    queryKey: ["report-orders", startISO, todayStr, businessType],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("orders")
         .select("*")
+        .eq("business_type", businessType)
         .gte("service_date", startISO)
         .lte("service_date", todayStr);
       if (error) throw error;
@@ -250,16 +255,19 @@ export function ReportsPage() {
             营收、效率、桶周转、垃圾场吨数 (价目为内部估算)
           </p>
         </div>
-        <Select value={period} onValueChange={(v: "day" | "week" | "month") => setPeriod(v)}>
-          <SelectTrigger className="w-32">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="day">今天</SelectItem>
-            <SelectItem value="week">最近7天</SelectItem>
-            <SelectItem value="month">最近30天</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-3">
+          <BusinessTypeSelector value={businessType} onChange={setBusinessType} />
+          <Select value={period} onValueChange={(v: "day" | "week" | "month") => setPeriod(v)}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="day">今天</SelectItem>
+              <SelectItem value="week">最近7天</SelectItem>
+              <SelectItem value="month">最近30天</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </header>
 
       {/* 概览 */}

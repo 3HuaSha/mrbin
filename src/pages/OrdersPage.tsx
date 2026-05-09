@@ -13,11 +13,19 @@ import { useNavigate } from "@tanstack/react-router";
 import { ORDER_STATUS_CLASS, ORDER_STATUS_LABEL, ORDER_TYPES, todayISO, typeMeta, formatPhone } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
+import { useBusinessType } from "@/lib/business-type-storage";
+import type { BusinessType } from "@/lib/business";
 
 type Order = {
   id: string;
   order_number: string;
   type: string;
+  business_type?: BusinessType;
+  brick_order_type?: string;
+  origin_factory_id?: string;
+  origin_yard_id?: string;
+  destination_yard_id?: string;
   bin_size: string | null;
   bin_type: string | null;
   service_date: string;
@@ -34,6 +42,7 @@ type Order = {
 export function OrdersPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
+  const [businessType, setBusinessType] = useBusinessType();
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(() => {
     const d = new Date();
@@ -47,13 +56,14 @@ export function OrdersPage() {
   const [editing, setEditing] = useState<Order | null>(null);
 
   const { data: orders = [], isLoading } = useQuery({
-    queryKey: ["orders", from, to, statusFilter, typeFilter],
+    queryKey: ["orders", from, to, statusFilter, typeFilter, businessType],
     queryFn: async () => {
       let q = supabase
         .from("orders")
         .select("*")
         .gte("service_date", from)
         .lte("service_date", to)
+        .eq("business_type", businessType)
         .order("service_date", { ascending: true })
         .order("created_at", { ascending: false });
       if (statusFilter !== "all") q = q.eq("status", statusFilter as any);
@@ -91,7 +101,10 @@ export function OrdersPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
         <h1 className="text-2xl font-bold">订单管理</h1>
-        <Button onClick={() => nav({ to: "/" })}>+ 新建订单</Button>
+        <div className="flex items-center gap-3">
+          <BusinessTypeSelector value={businessType} onChange={setBusinessType} />
+          <Button onClick={() => nav({ to: "/" })}>+ 新建订单</Button>
+        </div>
       </div>
 
       <div className="bg-card border rounded-lg p-4 mb-4 flex flex-wrap gap-3 items-end">
@@ -147,9 +160,20 @@ export function OrdersPage() {
             <tr className="text-xs uppercase tracking-wide text-muted-foreground">
               <th className="px-3 py-2 w-8"></th>
               <th className="px-3 py-2">订单号</th>
-              <th className="px-3 py-2">类型</th>
-              <th className="px-3 py-2">桶类型</th>
-              <th className="px-3 py-2">尺寸</th>
+              {businessType === 'garbage' && (
+                <>
+                  <th className="px-3 py-2">类型</th>
+                  <th className="px-3 py-2">桶类型</th>
+                  <th className="px-3 py-2">尺寸</th>
+                </>
+              )}
+              {businessType === 'brick' && (
+                <>
+                  <th className="px-3 py-2">订单类型</th>
+                  <th className="px-3 py-2">起点</th>
+                  <th className="px-3 py-2">终点</th>
+                </>
+              )}
               <th className="px-3 py-2">日期</th>
               <th className="px-3 py-2">时段</th>
               <th className="px-3 py-2">地址</th>
@@ -173,6 +197,7 @@ export function OrdersPage() {
                 <FragmentRow
                   key={o.id}
                   order={o}
+                  businessType={businessType}
                   open={isOpen}
                   onToggle={() => setExpanded(isOpen ? null : o.id)}
                   onEdit={() => setEditing(o)}
@@ -194,9 +219,9 @@ export function OrdersPage() {
 }
 
 function FragmentRow({
-  order, open, onToggle, onEdit, onCancel, typeBadgeClass, typeLabel,
+  order, businessType, open, onToggle, onEdit, onCancel, typeBadgeClass, typeLabel,
 }: {
-  order: Order; open: boolean; onToggle: () => void; onEdit: () => void; onCancel: () => void;
+  order: Order; businessType: BusinessType; open: boolean; onToggle: () => void; onEdit: () => void; onCancel: () => void;
   typeBadgeClass: string; typeLabel: string;
 }) {
   // 桶类型中文映射
@@ -209,6 +234,13 @@ function FragmentRow({
   };
   const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '—';
   
+  // 砖块订单类型标签
+  const brickOrderTypeLabels: Record<string, string> = {
+    'pickup_from_factory': '🏭 从砖厂取砖',
+    'delivery_to_customer': '🚚 送砖给客户'
+  };
+  const brickOrderTypeLabel = order.brick_order_type ? brickOrderTypeLabels[order.brick_order_type] || order.brick_order_type : '—';
+  
   return (
     <>
       <tr className="border-t hover:bg-accent/40 cursor-pointer" onClick={onToggle}>
@@ -216,11 +248,28 @@ function FragmentRow({
           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </td>
         <td className="px-3 py-2 font-mono text-xs">{order.order_number}</td>
-        <td className="px-3 py-2">
-          <Badge className={cn("text-xs font-semibold", typeBadgeClass)}>{typeLabel}</Badge>
-        </td>
-        <td className="px-3 py-2">{binTypeName}</td>
-        <td className="px-3 py-2">{order.bin_size ? `${order.bin_size}yd` : "—"}</td>
+        {businessType === 'garbage' && (
+          <>
+            <td className="px-3 py-2">
+              <Badge className={cn("text-xs font-semibold", typeBadgeClass)}>{typeLabel}</Badge>
+            </td>
+            <td className="px-3 py-2">{binTypeName}</td>
+            <td className="px-3 py-2">{order.bin_size ? `${order.bin_size}yd` : "—"}</td>
+          </>
+        )}
+        {businessType === 'brick' && (
+          <>
+            <td className="px-3 py-2">
+              <Badge className="text-xs">{brickOrderTypeLabel}</Badge>
+            </td>
+            <td className="px-3 py-2 text-xs text-muted-foreground">
+              {order.brick_order_type === 'pickup_from_factory' ? '砖厂' : '场地'}
+            </td>
+            <td className="px-3 py-2 text-xs text-muted-foreground">
+              {order.brick_order_type === 'pickup_from_factory' ? '场地' : '客户'}
+            </td>
+          </>
+        )}
         <td className="px-3 py-2">{order.service_date}</td>
         <td className="px-3 py-2">{order.time_window === "custom" ? order.time_window_custom : order.time_window}</td>
         <td className="px-3 py-2 max-w-[240px] truncate">{order.address}</td>

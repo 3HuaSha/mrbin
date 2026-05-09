@@ -35,6 +35,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useAudit } from "@/hooks/use-audit";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
+import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
+import { useBusinessType } from "@/lib/business-type-storage";
+import type { BusinessType } from "@/lib/business";
 
 type Order = {
   id: string;
@@ -148,6 +151,7 @@ export function DispatchPage() {
   const qc = useQueryClient();
   const audit = useAudit();
   const [date, setDate] = useState(todayISO());
+  const [businessType, setBusinessType] = useBusinessType();
   const [localAssignments, setLocalAssignments] = useState<Assignment[] | null>(null);
   const [localJobSteps, setLocalJobSteps] = useState<JobStep[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -182,22 +186,30 @@ export function DispatchPage() {
     },
   });
   const { data: orders = [] } = useQuery({
-    queryKey: ["dispatch-orders", date],
+    queryKey: ["dispatch-orders", date, businessType],
     queryFn: async () => {
       const { data, error } = await supabase.from("orders").select("*")
-        .eq("service_date", date).neq("status", "cancelled").order("created_at");
+        .eq("service_date", date)
+        .eq("business_type", businessType)
+        .neq("status", "cancelled").order("created_at");
       if (error) throw error;
       return (data ?? []) as Order[];
     },
   });
   const { data: assignments = [] } = useQuery({
-    queryKey: ["dispatch-assignments", date],
+    queryKey: ["dispatch-assignments", date, businessType],
     queryFn: async () => {
       const { data, error } = await supabase.from("dispatch_assignments")
         .select("*, orders(*), vehicles(*), bins(*)")
         .eq("scheduled_date", date).order("sequence");
       if (error) throw error;
-      return (data ?? []) as unknown as Assignment[];
+      
+      // 过滤出匹配业务类型的 assignments
+      const filtered = (data ?? []).filter(a => 
+        (a.orders as any)?.business_type === businessType
+      );
+      
+      return filtered as unknown as Assignment[];
     },
   });
 
@@ -829,6 +841,7 @@ export function DispatchPage() {
         <div className="flex items-center justify-between mb-4 gap-4">
           <h1 className="text-2xl font-bold">排班看板</h1>
           <div className="flex items-center gap-3">
+            <BusinessTypeSelector value={businessType} onChange={setBusinessType} />
             <Button variant="outline" size="sm" onClick={() => {
               const d = new Date(date); d.setDate(d.getDate() - 1);
               setDate(d.toISOString().slice(0, 10));

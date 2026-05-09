@@ -11,6 +11,9 @@ import { calculateDriverETAWithSamsara, formatETA, formatETATime, type DriverETA
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { getFullAddress } from "@/lib/manual-step-locations";
 import { toast } from "sonner";
+import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
+import { useBusinessType } from "@/lib/business-type-storage";
+import type { BusinessType } from "@/lib/business";
 
 type Driver = { id: string; name: string };
 
@@ -58,6 +61,7 @@ export function FleetMapPage() {
   const [calculatingDriverId, setCalculatingDriverId] = useState<string | null>(null);
   const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>({});
   const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set()); // 跟踪哪些司机显示ETA
+  const [businessType, setBusinessType] = useBusinessType();
 
   // 自动刷新
   useEffect(() => {
@@ -88,7 +92,7 @@ export function FleetMapPage() {
 
   // 获取所有任务步骤（包含订单节点和手动步骤节点）
   const { data: jobSteps = [] } = useQuery({
-    queryKey: ["map-job-steps", date],
+    queryKey: ["map-job-steps", date, businessType],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("job_steps")
@@ -96,7 +100,17 @@ export function FleetMapPage() {
         .eq("scheduled_date", date)
         .order("step_number");
       if (error) throw error;
-      return (data ?? []) as unknown as JobStep[];
+      
+      // 过滤订单节点，只保留匹配业务类型的
+      const filtered = (data ?? []).filter(step => {
+        if (step.node_type === 'order' && step.orders) {
+          return (step.orders as any).business_type === businessType;
+        }
+        // 手动步骤节点保留（它们不属于特定业务类型）
+        return true;
+      });
+      
+      return filtered as unknown as JobStep[];
     },
   });
   
@@ -264,6 +278,12 @@ export function FleetMapPage() {
 
   return (
     <div className="p-0 h-screen flex flex-col">
+      {/* 顶部工具栏 */}
+      <div className="flex items-center justify-between px-4 py-3 border-b bg-background">
+        <h1 className="text-xl font-bold">车队地图</h1>
+        <BusinessTypeSelector value={businessType} onChange={setBusinessType} />
+      </div>
+      
       <div className="flex-1 flex min-h-0">
         {/* 左侧司机任务列表 - 缩小宽度 */}
         <Card className="w-64 flex flex-col overflow-hidden shrink-0 shadow-sm rounded-none border-r border-t-0 border-l-0 border-b-0">
