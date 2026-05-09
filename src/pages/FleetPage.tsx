@@ -101,13 +101,22 @@ export function FleetPage() {
 
   const syncSamsara = useMutation({
     mutationFn: async () => {
+      console.log('🔄 前端: 开始调用 Samsara 同步...');
       const result = await fetchSamsaraVehicles();
+      
+      console.log('📦 前端: 收到 Samsara 响应:', result);
       
       if (!result.success) {
         throw new Error(result.error || 'API 返回失败');
       }
       
       const samsaraVehicles = result.data || [];
+      console.log(`📊 前端: 收到 ${samsaraVehicles.length} 辆车的数据`);
+      
+      // 打印所有车辆名称
+      samsaraVehicles.forEach((v: any, idx: number) => {
+        console.log(`  ${idx + 1}. ${v.name} (ID: ${v.id?.substring(0, 8)}...)`);
+      });
       
       // 1. 深度清理：按顺序删除受约束的数据
       console.log("🔄 正在清理旧的派遣数据...");
@@ -132,7 +141,10 @@ export function FleetPage() {
       const uniqueInsertsMap = new Map();
       
       samsaraVehicles.forEach((v: any) => {
-        if (!v.name) return;
+        if (!v.name) {
+          console.log(`⚠️ 跳过无名称的车辆: ID=${v.id?.substring(0, 8)}...`);
+          return;
+        }
         const plate = v.name.toUpperCase();
         if (!uniqueInsertsMap.has(plate)) {
           // 根据车辆名称智能判断车型
@@ -151,6 +163,8 @@ export function FleetPage() {
             maxBinSize = "40";
           }
           
+          console.log(`  ➕ 准备插入: ${v.name} → 类型=${vehicleType}, 容量=${maxBinSize}yd`);
+          
           uniqueInsertsMap.set(plate, {
             name: v.name,
             type: vehicleType,
@@ -159,24 +173,35 @@ export function FleetPage() {
             max_bin_size: maxBinSize,
             is_active: true
           });
+        } else {
+          console.log(`  ⏭️  跳过重复车牌: ${v.name}`);
         }
       });
       
       const inserts = Array.from(uniqueInsertsMap.values());
+      console.log(`📊 准备插入 ${inserts.length} 辆车到数据库`);
       
       // 3. 插入所有同步到的车辆
       if (inserts.length > 0) {
         const { error: insertError } = await supabase.from("vehicles").insert(inserts);
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.error("❌ 插入车辆失败:", insertError);
+          throw insertError;
+        }
+        console.log("✅ 车辆插入成功");
       }
       
       return { total: samsaraVehicles.length, added: inserts.length };
     },
     onSuccess: (result) => {
       toast.success(`同步成功！共 ${result.total} 辆车，新增 ${result.added} 辆`);
+      console.log('✅ 前端: 同步完成，刷新车辆列表');
       qc.invalidateQueries({ queryKey: ["vehicles-all"] });
     },
-    onError: (e: Error) => toast.error(`同步失败: ${e.message}`),
+    onError: (e: Error) => {
+      console.error('❌ 前端: 同步失败:', e);
+      toast.error(`同步失败: ${e.message}`);
+    },
   });
 
   const deleteDriver = useMutation({

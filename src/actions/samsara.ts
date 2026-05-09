@@ -23,18 +23,36 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       for (const ep of endpoints) {
         let hasNextPage = true;
         let after = '';
+        let pageNum = 0;
+        console.log(`\n🔍 开始获取 [${ep.name}] 数据...`);
+        
         while (hasNextPage) {
+          pageNum++;
           const url = `${ep.url}${after ? (ep.url.includes('?') ? `&after=${after}` : `?after=${after}`) : ''}`;
+          console.log(`  📄 [${ep.name}] 第 ${pageNum} 页: ${url}`);
+          
           try {
             const response = await fetch(url, {
               headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
             });
+            
             if (!response.ok) {
+              const errorText = await response.text();
               console.warn(`⚠️ Samsara API [${ep.name}] 响应异常: ${response.status} ${response.statusText}`);
+              console.warn(`  错误详情: ${errorText}`);
               break;
             }
+            
             const result = await response.json();
             const data = result.data || [];
+            
+            // 详细记录每个单位的名称
+            console.log(`  ✅ [${ep.name}] 第 ${pageNum} 页获取到 ${data.length} 个单位:`);
+            data.forEach((unit: any, idx: number) => {
+              const name = unit.name || unit.trailerName || unit.machineName || unit.externalIds?.vin || `Unit-${unit.id?.substring(0, 5)}`;
+              console.log(`    ${idx + 1}. ${name} (ID: ${unit.id?.substring(0, 8)}...)`);
+            });
+            
             allUnits = [...allUnits, ...data];
             
             // 更新统计
@@ -44,8 +62,14 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
 
             hasNextPage = result.pagination?.hasNextPage || false;
             after = result.pagination?.endCursor || '';
+            
+            console.log(`  📊 [${ep.name}] 分页信息: hasNextPage=${hasNextPage}, endCursor=${after ? after.substring(0, 20) + '...' : 'null'}`);
+            
+            if (!hasNextPage) {
+              console.log(`  ✅ [${ep.name}] 数据获取完成，共 ${pageNum} 页\n`);
+            }
           } catch (err) {
-            console.error(`❌ 获取 [${ep.name}] 失败:`, err);
+            console.error(`❌ 获取 [${ep.name}] 第 ${pageNum} 页失败:`, err);
             break;
           }
         }
@@ -77,15 +101,27 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       }
 
       // -- 6. 合并数据并去重 --
+      console.log(`\n📊 开始合并和去重数据...`);
+      console.log(`  原始单位总数: ${allUnits.length}`);
+      
       const uniqueUnitsMap = new Map();
       allUnits.forEach(u => {
         if (u && u.id) {
+          const name = u.name || u.trailerName || u.machineName || u.externalIds?.vin || `Unit-${u.id.substring(0, 5)}`;
           // 如果已存在且没有名称，则尝试用新的覆盖（以防某些接口返回的信息不全）
-          if (!uniqueUnitsMap.has(u.id) || (!uniqueUnitsMap.get(u.id).name && u.name)) {
+          if (!uniqueUnitsMap.has(u.id)) {
             uniqueUnitsMap.set(u.id, u);
+            console.log(`  ➕ 新增单位: ${name} (ID: ${u.id.substring(0, 8)}...)`);
+          } else if (!uniqueUnitsMap.get(u.id).name && u.name) {
+            console.log(`  🔄 更新单位名称: ${name} (ID: ${u.id.substring(0, 8)}...)`);
+            uniqueUnitsMap.set(u.id, u);
+          } else {
+            console.log(`  ⏭️  跳过重复单位: ${name} (ID: ${u.id.substring(0, 8)}...)`);
           }
         }
       });
+      
+      console.log(`  去重后单位总数: ${uniqueUnitsMap.size}\n`);
 
       const locationMap = new Map();
       allLocations.forEach(loc => {
@@ -105,8 +141,13 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
           time: locInfo?.time || null
         };
       });
+      
+      console.log(`\n📋 最终合并数据列表 (${mergedData.length} 个单位):`);
+      mergedData.forEach((unit, idx) => {
+        console.log(`  ${idx + 1}. ${unit.name} (ID: ${unit.id.substring(0, 8)}..., 位置: ${unit.location ? '有' : '无'})`);
+      });
 
-      console.log(`✅ 同步完成: Vehicles(${counts.vehicles}), Trailers(${counts.trailers}), Equipment/Assets(${counts.equipment}), Total Unique(${uniqueUnitsMap.size})`);
+      console.log(`\n✅ 同步完成: Vehicles(${counts.vehicles}), Trailers(${counts.trailers}), Equipment/Assets(${counts.equipment}), Total Unique(${uniqueUnitsMap.size})`);
 
       return {
         success: true,
