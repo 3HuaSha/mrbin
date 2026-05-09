@@ -11,7 +11,7 @@ import { Plus, Power, Pencil, Trash2, RefreshCw } from "lucide-react";
 import { formatPhone } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { fetchSamsaraVehicles } from "@/lib/samsara-api";
+import { fetchSamsaraData } from "@/actions/samsara";
 
 type Driver = { id: string; name: string; phone: string | null; email: string | null; is_active: boolean };
 type Vehicle = { id: string; name: string; type: "HINO" | "MACK"; plate: string; samsara_id: string | null; max_bin_size: string | null; is_active: boolean };
