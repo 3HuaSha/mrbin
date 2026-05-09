@@ -67,7 +67,13 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
   
   // 根据业务类型自动筛选车辆
   const filteredVehicles = useMemo(() => {
-    return samsaraLocs.filter(truck => {
+    console.log('🔍 地图筛选车辆:', {
+      businessType,
+      totalVehicles: samsaraLocs.length,
+      vehicleNames: samsaraLocs.map(v => v.name)
+    });
+    
+    const filtered = samsaraLocs.filter(truck => {
       const vehicleType = extractVehicleType(truck.name || "");
       
       if (businessType === 'garbage') {
@@ -80,6 +86,13 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
       
       return false;
     });
+    
+    console.log('✅ 筛选后车辆:', {
+      filteredCount: filtered.length,
+      filteredNames: filtered.map(v => v.name)
+    });
+    
+    return filtered;
   }, [samsaraLocs, businessType]);
 
   // 1. 加载 Google Maps JS 脚本 (原生方式最稳)
