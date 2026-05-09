@@ -11,7 +11,7 @@ import { Plus, Power, Pencil, Trash2, RefreshCw } from "lucide-react";
 import { formatPhone } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { fetchSamsaraData, syncSamsaraAction } from "@/actions/samsara";
+import { fetchSamsaraData } from "@/actions/samsara";
 
 type Driver = { id: string; name: string; phone: string | null; email: string | null; is_active: boolean };
 type Vehicle = { id: string; name: string; type: "HINO" | "MACK"; plate: string; samsara_id: string | null; max_bin_size: string | null; is_active: boolean };
@@ -67,7 +67,6 @@ export function FleetPage() {
     return true;
   });
 
-  // 提取车辆类型前缀
   const extractVehiclePrefix = (name: string): string => {
     if (!name) return "OTHER";
     const upperName = name.toUpperCase();
@@ -104,12 +103,85 @@ export function FleetPage() {
 
   const syncSamsara = useMutation({
     mutationFn: async () => {
-      const res = await syncSamsaraAction();
-      if (!res.success) throw new Error(res.error || '同步失败');
-      return res.summary;
+      const result = await fetchSamsaraData();
+      if (!result.success) throw new Error(result.error || '获取数据失败');
+      
+      const samsaraVehicles = (result as any).vehicles || [];
+      const samsaraDrivers = (result as any).drivers || [];
+      const vehicleStats = (result as any).vehicleStats || [];
+
+      // 1. 同步车辆
+      await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+      await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+      const { error: deleteError } = await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+      if (deleteError) throw new Error(`清除旧数据失败: ${deleteError.message}`);
+
+      const vehicleInserts: any[] = [];
+      const uniquePlates = new Set();
+      samsaraVehicles.forEach((v: any) => {
+        if (!v.name) return;
+        const plate = v.name.toUpperCase();
+        if (uniquePlates.has(plate)) return;
+        uniquePlates.add(plate);
+        let type: "HINO" | "MACK" = "MACK";
+        let size = "40";
+        if (plate.includes("HINO") || plate.startsWith("BIN")) { type = "HINO"; size = "20"; }
+        vehicleInserts.push({ name: v.name, type, plate, samsara_id: v.id, max_bin_size: size, is_active: true });
+      });
+
+      const { data: insertedVehicles, error: vError } = await supabase.from("vehicles").insert(vehicleInserts).select();
+      if (vError) throw vError;
+      const allVehicles = insertedVehicles || [];
+
+      // 2. 清理并准备分配
+      await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+      const pendingAssignments = new Map<string, string>(); // driverInternalId -> vehicleInternalId
+
+      // 3. 同步司机并收集分配
+      let addedCount = 0;
+      let updatedCount = 0;
+
+      for (const sd of samsaraDrivers) {
+        if (!sd.name) continue;
+        const { data: existing } = await supabase.from("profiles").select("id").eq("name", sd.name).eq("role", "driver");
+        let dId = '';
+        if (existing && existing.length > 0) {
+          dId = existing[0].id;
+          await supabase.from("profiles").update({ phone: sd.phone || null, email: sd.email || null, is_active: true }).eq("id", dId);
+          updatedCount++;
+        } else {
+          const { data: nw, error: nE } = await supabase.from("profiles").insert({ name: sd.name, phone: sd.phone || null, email: sd.email || null, role: "driver", is_active: true }).select().single();
+          if (nE) continue;
+          dId = nw.id;
+          addedCount++;
+        }
+        const vRef = sd.currentVehicle || sd.staticAssignedVehicle;
+        if (dId && vRef?.id) {
+          const v = allVehicles.find(veh => veh.samsara_id === vRef.id || veh.name.toUpperCase() === vRef.name.toUpperCase());
+          if (v) pendingAssignments.set(dId, v.id);
+        }
+      }
+
+      // 4. 补充 OBD 实时状态 (根据姓名)
+      const { data: freshDrivers } = await supabase.from("profiles").select("id, name").eq("role", "driver");
+      const driverNameToId = new Map(freshDrivers?.map(d => [d.name.toUpperCase(), d.id]));
+
+      vehicleStats.forEach((stat: any) => {
+        const dName = stat.obdDriver?.driver?.name;
+        if (dName) {
+          const dId = driverNameToId.get(dName.toUpperCase());
+          const v = allVehicles.find(veh => veh.samsara_id === stat.id || veh.name.toUpperCase() === stat.name.toUpperCase());
+          if (dId && v) pendingAssignments.set(dId, v.id);
+        }
+      });
+
+      const finalInserts = Array.from(pendingAssignments.entries()).map(([dId, vId]) => ({ driver_id: dId, vehicle_id: vId }));
+      if (finalInserts.length > 0) await supabase.from("driver_vehicle_assignments").insert(finalInserts);
+
+      return { vehicles: allVehicles.length, added: addedCount, updated: updatedCount, assignments: finalInserts.length };
     },
-    onSuccess: (summary: any) => {
-      toast.success(`同步成功！车辆: ${summary.vehicles}, 活跃分配: ${summary.assignments}`);
+    onSuccess: (res) => {
+      toast.success(`同步成功！车辆: ${res.vehicles}, 活跃分配: ${res.assignments}`);
       qc.invalidateQueries({ queryKey: ["vehicles-all"] });
       qc.invalidateQueries({ queryKey: ["drivers-all"] });
       qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] });
@@ -173,14 +245,11 @@ export function FleetPage() {
                     }}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </div>
-                {/* 显示已分配的车辆 */}
                 <div className="ml-13 space-y-1">
                   {getDriverVehicles(d.id).length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {getDriverVehicles(d.id).map(v => (
-                        <Badge key={v.id} variant="outline" className="text-xs">
-                          {v.name}
-                        </Badge>
+                        <Badge key={v.id} variant="outline" className="text-xs">{v.name}</Badge>
                       ))}
                     </div>
                   ) : (
@@ -208,8 +277,6 @@ export function FleetPage() {
               </Button>
             </div>
           </div>
-          
-          {/* 车辆类型筛选器 */}
           <div className="mb-3 flex flex-wrap gap-2">
             {vehicleTypes.map((type) => (
               <Button
@@ -223,7 +290,6 @@ export function FleetPage() {
               </Button>
             ))}
           </div>
-
           <div className="space-y-2">
             {filteredVehicles.map((v) => (
               <div key={v.id} className={cn("bg-card border rounded-lg p-3 flex items-center gap-3", !v.is_active && "opacity-50")}>
@@ -276,24 +342,16 @@ function AddDriverDialog({ onClose }: { onClose: () => void }) {
 
   const add = useMutation({
     mutationFn: async () => {
-      if (!email || !password) throw new Error("邮箱和密码必填，用于开通登录账号");
-      // 获取当前 session token，通过 Authorization header 传给 server function
+      if (!email || !password) throw new Error("邮箱和密码必填");
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
-      if (!token) throw new Error("未登录，请重新登录后操作");
+      if (!token) throw new Error("未登录");
       return await createStaffOrDriverUser({
-        data: {
-          name: name.trim(),
-          email: email.trim(),
-          password: password,
-          phone: phone || undefined,
-          role: "driver",
-          accessToken: token // 将 token 放在这里传
-        }
+        data: { name: name.trim(), email: email.trim(), password, phone: phone || undefined, role: "driver", accessToken: token }
       });
     },
     onSuccess: () => { 
-      toast.success("已添加司机并开通登录账号"); 
+      toast.success("已添加司机"); 
       qc.invalidateQueries({ queryKey: ["drivers-all"] }); 
       onClose(); 
     },
@@ -303,21 +361,16 @@ function AddDriverDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>添加司机并开通账号</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>添加司机</DialogTitle></DialogHeader>
         <div className="space-y-3">
-          <div><Label>姓名</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：张三" /></div>
-          <div><Label>电话</Label><Input value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} placeholder="例如：(123) 456-7890" /></div>
-          <div><Label>登录邮箱</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="driver@kennedy.test" /></div>
-          <div><Label>初始密码 (至少6位)</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="设置司机的登录密码" /></div>
-          <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
-            提示：在这里添加司机会同步在系统后台创建登录账号，司机可使用此邮箱和密码登录 PWA 端。
-          </div>
+          <div><Label>姓名</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div><Label>电话</Label><Input value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} /></div>
+          <div><Label>登录邮箱</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+          <div><Label>初始密码</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={() => add.mutate()} disabled={!name.trim() || !email || password.length < 6 || add.isPending}>
-            {add.isPending ? "创建中..." : "确认添加并开通"}
-          </Button>
+          <Button onClick={() => add.mutate()} disabled={!name.trim() || !email || password.length < 6 || add.isPending}>确认</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -334,13 +387,13 @@ function EditDriverDialog({ driver, onClose }: { driver: Driver; onClose: () => 
       const { error } = await supabase.from("profiles").update({ name: name.trim(), phone: phone || null, email: email || null }).eq("id", driver.id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("已保存司机信息"); qc.invalidateQueries({ queryKey: ["drivers-all"] }); onClose(); },
+    onSuccess: () => { toast.success("已保存"); qc.invalidateQueries({ queryKey: ["drivers-all"] }); onClose(); },
     onError: (e: Error) => toast.error(e.message),
   });
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>编辑司机: {driver.name}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>编辑司机</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div><Label>姓名</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div><Label>电话</Label><Input value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} /></div>
@@ -363,11 +416,7 @@ function AddVehicleDialog({ onClose }: { onClose: () => void }) {
   const [samsara, setSamsara] = useState("");
   const add = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("vehicles").insert({
-        name: name.trim(), type, plate: plate.trim(),
-        samsara_id: samsara || null,
-        max_bin_size: type === "HINO" ? "20" : "40",
-      });
+      const { error } = await supabase.from("vehicles").insert({ name: name.trim(), type, plate: plate.trim(), samsara_id: samsara || null, max_bin_size: type === "HINO" ? "20" : "40" });
       if (error) throw error;
     },
     onSuccess: () => { toast.success("已添加车辆"); qc.invalidateQueries({ queryKey: ["vehicles-all"] }); onClose(); },
@@ -378,19 +427,9 @@ function AddVehicleDialog({ onClose }: { onClose: () => void }) {
       <DialogContent>
         <DialogHeader><DialogTitle>添加车辆</DialogTitle></DialogHeader>
         <div className="space-y-3">
-          <div><Label>车辆名</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="MACK-4" /></div>
-          <div>
-            <Label>车型</Label>
-            <Select value={type} onValueChange={(v) => setType(v as "HINO" | "MACK")}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="HINO">HINO (最大 20yd)</SelectItem>
-                <SelectItem value="MACK">MACK (最大 40yd)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <div><Label>车辆名</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div><Label>车牌</Label><Input value={plate} onChange={(e) => setPlate(e.target.value)} /></div>
-          <div><Label>Samsara ID(可选)</Label><Input value={samsara} onChange={(e) => setSamsara(e.target.value)} /></div>
+          <div><Label>Samsara ID</Label><Input value={samsara} onChange={(e) => setSamsara(e.target.value)} /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>
@@ -409,32 +448,18 @@ function EditVehicleDialog({ vehicle, onClose }: { vehicle: Vehicle; onClose: ()
   const [samsara, setSamsara] = useState(vehicle.samsara_id || "");
   const save = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("vehicles").update({
-        name: name.trim(), type, plate: plate.trim(),
-        samsara_id: samsara || null,
-        max_bin_size: type === "HINO" ? "20" : "40",
-      }).eq("id", vehicle.id);
+      const { error } = await supabase.from("vehicles").update({ name: name.trim(), type, plate: plate.trim(), samsara_id: samsara || null, max_bin_size: type === "HINO" ? "20" : "40" }).eq("id", vehicle.id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("已保存车辆信息"); qc.invalidateQueries({ queryKey: ["vehicles-all"] }); onClose(); },
+    onSuccess: () => { toast.success("已保存"); qc.invalidateQueries({ queryKey: ["vehicles-all"] }); onClose(); },
     onError: (e: Error) => toast.error(e.message),
   });
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
-        <DialogHeader><DialogTitle>编辑车辆: {vehicle.name}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>编辑车辆</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div><Label>车辆名</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div>
-            <Label>车型</Label>
-            <Select value={type} onValueChange={(v) => setType(v as "HINO" | "MACK")}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="HINO">HINO (最大 20yd)</SelectItem>
-                <SelectItem value="MACK">MACK (最大 40yd)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
           <div><Label>车牌</Label><Input value={plate} onChange={(e) => setPlate(e.target.value)} /></div>
           <div><Label>Samsara ID</Label><Input value={samsara} onChange={(e) => setSamsara(e.target.value)} /></div>
         </div>
@@ -447,208 +472,29 @@ function EditVehicleDialog({ vehicle, onClose }: { vehicle: Vehicle; onClose: ()
   );
 }
 
-function AssignVehicleDialog({ 
-  driver, 
-  vehicles, 
-  assignments,
-  onClose 
-}: { 
-  driver: Driver; 
-  vehicles: Vehicle[];
-  assignments: DriverVehicleAssignment[];
-  onClose: () => void;
-}) {
+function AssignVehicleDialog({ driver, vehicles, assignments, onClose }: { driver: Driver; vehicles: Vehicle[]; assignments: any[]; onClose: () => void; }) {
   const qc = useQueryClient();
-  const [selectedType, setSelectedType] = useState<string | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
-
-  // 提取车辆类型前缀 (统一逻辑)
-  const extractVehiclePrefix = (name: string): string => {
-    if (!name) return "OTHER";
-    const upperName = name.toUpperCase();
-    if (upperName.startsWith("BIN")) return "BIN";
-    if (upperName.startsWith("FLAT")) return "FLAT";
-    if (upperName.startsWith("DUMP")) return "DUMP";
-    if (upperName.startsWith("HINO")) return "HINO";
-    if (upperName.startsWith("MACK")) return "MACK";
-    if (upperName.startsWith("PROALL")) return "PROALL";
-    
-    const match = upperName.match(/^([A-Z]+)[#\s\-_0-9]/) || upperName.match(/^([A-Z]+)$/);
-    return match ? match[1] : "OTHER";
-  };
-
-  // 获取所有车辆类型
-  const vehicleTypes = Array.from(new Set(vehicles.map(v => extractVehiclePrefix(v.name)))).sort();
-
-  // 根据选中的类型过滤车辆
-  const filteredVehicles = selectedType 
-    ? vehicles.filter(v => extractVehiclePrefix(v.name) === selectedType)
-    : [];
-
-  // 获取司机已分配的车辆ID
-  const assignedVehicleIds = assignments
-    .filter(a => a.driver_id === driver.id)
-    .map(a => a.vehicle_id);
-
-  // 分配车辆
-  const assignVehicle = useMutation({
+  const assign = useMutation({
     mutationFn: async () => {
-      if (!selectedVehicleId) throw new Error("请选择车辆");
-      
-      // 检查是否已分配
-      if (assignedVehicleIds.includes(selectedVehicleId)) {
-        throw new Error("该车辆已分配给此司机");
-      }
-
-      // 先删除该司机的所有旧分配（确保一个司机只有一辆车）
-      const { error: deleteError } = await supabase
-        .from("driver_vehicle_assignments")
-        .delete()
-        .eq("driver_id", driver.id);
-      
-      if (deleteError) throw deleteError;
-
-      // 再插入新的分配
-      const { error } = await supabase.from("driver_vehicle_assignments").insert({
-        driver_id: driver.id,
-        vehicle_id: selectedVehicleId,
-      });
+      if (!selectedVehicleId) return;
+      await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", driver.id);
+      const { error } = await supabase.from("driver_vehicle_assignments").insert({ driver_id: driver.id, vehicle_id: selectedVehicleId });
       if (error) throw error;
     },
-    onSuccess: () => {
-      toast.success("已分配车辆");
-      qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] });
-      onClose();
-    },
-    onError: (e: Error) => toast.error(e.message),
+    onSuccess: () => { toast.success("已分配"); qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] }); onClose(); },
   });
-
-  // 取消分配车辆
-  const unassignVehicle = useMutation({
-    mutationFn: async (vehicleId: string) => {
-      const assignment = assignments.find(
-        a => a.driver_id === driver.id && a.vehicle_id === vehicleId
-      );
-      if (!assignment) throw new Error("未找到分配记录");
-
-      const { error } = await supabase
-        .from("driver_vehicle_assignments")
-        .delete()
-        .eq("id", assignment.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("已取消分配");
-      qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>为 {driver.name} 分配车辆</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          {/* 已分配的车辆 */}
-          <div>
-            <Label className="mb-2 block">已分配的车辆</Label>
-            {assignedVehicleIds.length > 0 ? (
-              <div className="space-y-2">
-                {vehicles
-                  .filter(v => assignedVehicleIds.includes(v.id))
-                  .map(v => (
-                    <div key={v.id} className="flex items-center justify-between bg-muted p-2 rounded">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">{extractVehiclePrefix(v.name)}</Badge>
-                        <span className="font-medium">{v.name}</span>
-                        <span className="text-xs text-muted-foreground">{v.plate}</span>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive"
-                        onClick={() => {
-                          if (confirm(`确定取消分配 ${v.name} 吗？`)) {
-                            unassignVehicle.mutate(v.id);
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground bg-muted p-3 rounded">
-                暂无分配的车辆
-              </div>
-            )}
-          </div>
-
-          {/* 选择车辆类型 */}
-          <div>
-            <Label className="mb-2 block">1. 选择车辆类型</Label>
-            <div className="flex flex-wrap gap-2">
-              {vehicleTypes.map(type => (
-                <Button
-                  key={type}
-                  size="sm"
-                  variant={selectedType === type ? "default" : "outline"}
-                  onClick={() => {
-                    setSelectedType(type);
-                    setSelectedVehicleId(null);
-                  }}
-                >
-                  {type} ({vehicles.filter(v => extractVehiclePrefix(v.name) === type).length})
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          {/* 选择具体车辆 */}
-          {selectedType && (
-            <div>
-              <Label className="mb-2 block">2. 选择车辆</Label>
-              <div className="max-h-60 overflow-y-auto space-y-2 border rounded p-2">
-                {filteredVehicles.map(v => {
-                  const isAssigned = assignedVehicleIds.includes(v.id);
-                  return (
-                    <div
-                      key={v.id}
-                      className={cn(
-                        "flex items-center justify-between p-2 rounded cursor-pointer hover:bg-muted",
-                        selectedVehicleId === v.id && "bg-primary/10 border border-primary",
-                        isAssigned && "opacity-50"
-                      )}
-                      onClick={() => !isAssigned && setSelectedVehicleId(v.id)}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs">{v.type}</Badge>
-                        <span className="font-medium">{v.name}</span>
-                        <span className="text-xs text-muted-foreground">车牌: {v.plate}</span>
-                      </div>
-                      {isAssigned && (
-                        <Badge variant="secondary" className="text-xs">已分配</Badge>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
+      <DialogContent>
+        <DialogHeader><DialogTitle>分配车辆</DialogTitle></DialogHeader>
+        <Select onValueChange={setSelectedVehicleId}>
+          <SelectTrigger><SelectValue placeholder="选择车辆" /></SelectTrigger>
+          <SelectContent>{vehicles.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
+        </Select>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>关闭</Button>
-          <Button 
-            onClick={() => assignVehicle.mutate()} 
-            disabled={!selectedVehicleId || assignVehicle.isPending}
-          >
-            {assignVehicle.isPending ? "分配中..." : "确认分配"}
-          </Button>
+          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button onClick={() => assign.mutate()} disabled={!selectedVehicleId}>确认</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
