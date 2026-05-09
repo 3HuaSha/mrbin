@@ -749,14 +749,6 @@ function createOrderIconWithLabel(order: any, orderETA?: any): string {
   
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
-        <circle cx='12' cy='11' r='4.5' fill='white' opacity='0.95'/>
-        <line x1='12' y1='22' x2='12' y2='35' stroke='${scheme.pin}' stroke-width='2.5'/>
-      </g>
-    </svg>
-  `.trim();
-  
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
 
 // 辅助函数: 更新订单的图标
 function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: any[], orderETA?: any) {
