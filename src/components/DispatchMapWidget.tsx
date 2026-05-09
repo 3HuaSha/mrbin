@@ -214,7 +214,17 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
   useEffect(() => {
     if (!mapInstance.current || !(window as any).google) return;
     
+    console.log('🗺️ 开始绘制地图标记, businessType:', businessType, 'filteredVehicles:', filteredVehicles.length);
+    
     const newMarkers: Record<string, any> = {};
+
+    // 首先清除所有车辆标记（truck_ 开头的）
+    Object.keys(markersRef.current).forEach(key => {
+      if (key.startsWith('truck_') && markersRef.current[key] && markersRef.current[key] !== "pending") {
+        markersRef.current[key].setMap(null);
+        delete markersRef.current[key];
+      }
+    });
 
     // 绘制真实车辆 (直接来自 Samsara)
     filteredVehicles.forEach(truck => {
@@ -448,7 +458,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
       }
     });
 
-  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments, driverETAs]);
+  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments, driverETAs, businessType]);
 
   // 5. 绘制ETA路线
   useEffect(() => {
