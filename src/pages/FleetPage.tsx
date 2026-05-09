@@ -164,25 +164,26 @@ export function FleetPage() {
       const analysisData: Array<{ name: string; ref: string; source: string; matched: boolean }> = [];
 
       console.group('🎯 自动关联逻辑');
+      
+      // 策略 A: 从司机角度寻找车辆
       sDrivers.forEach((sd: any) => {
         const dId = dSamsaraIdToInternal.get(sd.id) || dNameToInternal.get(clean(sd.name));
         if (!dId) return;
 
         let vRef = null;
         let source = '';
+        
+        // 1. 实时分配接口
         const assign = sAssigns.find((a: any) => a.driver?.id === sd.id || clean(a.driver?.name) === clean(sd.name));
         if (assign) { vRef = assign.vehicle; source = 'Samsara分配接口'; }
 
+        // 2. OBD (由于 sStatus 400，这里可能暂时拿不到)
         if (!vRef?.id) {
           const stat = sStats.find((s: any) => clean(s.obdDriver?.driver?.name) === clean(sd.name));
           if (stat) { vRef = { id: stat.id, name: stat.name }; source = '车辆OBD状态'; }
         }
 
-        if (!vRef?.id) {
-          const loc = sLocs.find((l: any) => clean(l.obdDriver?.driver?.name) === clean(sd.name));
-          if (loc) { vRef = { id: loc.id, name: loc.name }; source = '车辆实时位置'; }
-        }
-
+        // 3. 静态档案关联
         if (!vRef?.id) {
           const profileRef = sd.currentVehicle || sd.staticAssignedVehicle;
           if (profileRef) { vRef = profileRef; source = 'Samsara司机档案'; }
@@ -191,10 +192,28 @@ export function FleetPage() {
         if (vRef) {
           const vehicle = allVehicles.find(v => (vRef.id && v.samsara_id === vRef.id) || (vRef.name && clean(v.name) === clean(vRef.name)));
           const matched = !!vehicle;
-          if (matched) pending.set(dId, vehicle.id);
-          analysisData.push({ name: sd.name, ref: vRef.name || vRef.id, source, matched });
+          if (matched) {
+            pending.set(dId, vehicle.id);
+            analysisData.push({ name: sd.name, ref: vRef.name || vRef.id, source, matched });
+          }
         }
       });
+
+      // 策略 B: 从车辆角度寻找司机 (重要补充：处理车辆侧的静态分配)
+      sVehicles.forEach((sv: any) => {
+        if (sv.staticAssignedDriver) {
+          const dRef = sv.staticAssignedDriver;
+          const dId = dSamsaraIdToInternal.get(dRef.id) || dNameToInternal.get(clean(dRef.name));
+          const vehicle = allVehicles.find(v => v.samsara_id === sv.id || clean(v.name) === clean(sv.name));
+          
+          if (dId && vehicle && !pending.has(dId)) {
+            console.log(`✅ [车辆静态分配] 匹配: ${dRef.name} -> ${vehicle.name}`);
+            pending.set(dId, vehicle.id);
+            analysisData.push({ name: dRef.name, ref: vehicle.name, source: '车辆侧静态分配', matched: true });
+          }
+        }
+      });
+
       console.groupEnd();
 
       const finalInserts = Array.from(pending.entries()).map(([dId, vId]) => ({ driver_id: dId, vehicle_id: vId }));
