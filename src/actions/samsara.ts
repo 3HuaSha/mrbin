@@ -10,72 +10,45 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       let allUnits: any[] = [];
       let counts = { vehicles: 0, trailers: 0, equipment: 0 };
       
-      // -- 1. 获取 Vehicles --
-      let hasNextPage = true;
-      let after = '';
-      while (hasNextPage) {
-        const url = `https://api.samsara.com/fleet/vehicles${after ? `?after=${after}` : ''}`;
-        const response = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-        });
-        if (!response.ok) break;
-        const result = await response.json();
-        const data = result.data || [];
-        allUnits = [...allUnits, ...data];
-        counts.vehicles += data.length;
-        hasNextPage = result.pagination?.hasNextPage || false;
-        after = result.pagination?.endCursor || '';
-      }
+      // -- 1-4. 获取所有单位数据 (多维度尝试以确保不漏掉 FLAT 等资产) --
+      const endpoints = [
+        { key: 'vehicles', url: 'https://api.samsara.com/fleet/vehicles', name: 'Vehicles' },
+        { key: 'trailers', url: 'https://api.samsara.com/fleet/trailers', name: 'Trailers' },
+        { key: 'equipment', url: 'https://api.samsara.com/fleet/equipment', name: 'Equipment' },
+        { key: 'assets', url: 'https://api.samsara.com/assets', name: 'Assets (Unified)' },
+        { key: 'v1_assets', url: 'https://api.samsara.com/v1/fleet/assets', name: 'V1 Assets' },
+        { key: 'machines', url: 'https://api.samsara.com/fleet/machines', name: 'Machines' }
+      ];
 
-      // -- 2. 获取 Trailers --
-      hasNextPage = true;
-      after = '';
-      while (hasNextPage) {
-        const url = `https://api.samsara.com/fleet/trailers${after ? `?after=${after}` : ''}`;
-        const response = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-        });
-        if (!response.ok) break;
-        const result = await response.json();
-        const data = result.data || [];
-        allUnits = [...allUnits, ...data];
-        counts.trailers += data.length;
-        hasNextPage = result.pagination?.hasNextPage || false;
-        after = result.pagination?.endCursor || '';
-      }
+      for (const ep of endpoints) {
+        hasNextPage = true;
+        after = '';
+        while (hasNextPage) {
+          const url = `${ep.url}${after ? (ep.url.includes('?') ? `&after=${after}` : `?after=${after}`) : ''}`;
+          try {
+            const response = await fetch(url, {
+              headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
+            });
+            if (!response.ok) {
+              console.warn(`⚠️ Samsara API [${ep.name}] 响应异常: ${response.status} ${response.statusText}`);
+              break;
+            }
+            const result = await response.json();
+            const data = result.data || [];
+            allUnits = [...allUnits, ...data];
+            
+            // 更新统计
+            if (ep.key === 'vehicles') counts.vehicles += data.length;
+            else if (ep.key === 'trailers') counts.trailers += data.length;
+            else counts.equipment += data.length;
 
-      // -- 3. 获取 Equipment (资产) --
-      hasNextPage = true;
-      after = '';
-      while (hasNextPage) {
-        const url = `https://api.samsara.com/fleet/equipment${after ? `?after=${after}` : ''}`;
-        const response = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-        });
-        if (!response.ok) break;
-        const result = await response.json();
-        const data = result.data || [];
-        allUnits = [...allUnits, ...data];
-        counts.equipment += data.length;
-        hasNextPage = result.pagination?.hasNextPage || false;
-        after = result.pagination?.endCursor || '';
-      }
-
-      // -- 4. 获取 Assets (Beta 统一接口，包含 Unpowered Assets 等) --
-      hasNextPage = true;
-      after = '';
-      while (hasNextPage) {
-        const url = `https://api.samsara.com/assets${after ? `?after=${after}` : ''}`;
-        const response = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-        });
-        if (!response.ok) break;
-        const result = await response.json();
-        const data = result.data || [];
-        allUnits = [...allUnits, ...data];
-        counts.equipment += data.length; // 将其计入 equipment 或作为附加资产
-        hasNextPage = result.pagination?.hasNextPage || false;
-        after = result.pagination?.endCursor || '';
+            hasNextPage = result.pagination?.hasNextPage || false;
+            after = result.pagination?.endCursor || '';
+          } catch (err) {
+            console.error(`❌ 获取 [${ep.name}] 失败:`, err);
+            break;
+          }
+        }
       }
 
       // -- 5. 获取所有位置信息 --
@@ -123,9 +96,11 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
 
       const mergedData = Array.from(uniqueUnitsMap.values()).map(v => {
         const locInfo = locationMap.get(v.id);
+        // 确保名称不为空，依次尝试 name, trailerName, machineName, externalIds
+        const name = v.name || v.trailerName || v.machineName || v.externalIds?.vin || `Unit-${v.id.substring(0, 5)}`;
         return {
           id: v.id,
-          name: v.name || `Unnamed ${v.id.substring(0, 4)}`,
+          name: name,
           location: locInfo?.location || null,
           time: locInfo?.time || null
         };
