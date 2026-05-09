@@ -646,14 +646,14 @@ function createVehicleIconWithLabel(vehicleType: string, driverName: string): st
 
 // 辅助函数: 创建带标签的订单图标
 function createOrderIconWithLabel(order: any, orderETA?: any): string {
-  // 为每种订单类型定义配色方案 - 使用更显眼的颜色（深色文字+亮色背景）
-  const colorSchemes: Record<string, { bg: string; text: string; pin: string }> = {
-    'delivery': { bg: '#2196F3', text: '#FFFFFF', pin: '#1976D2' },  // 亮蓝底白字
-    'pickup': { bg: '#4CAF50', text: '#FFFFFF', pin: '#388E3C' },    // 亮绿底白字
-    'swap': { bg: '#9C27B0', text: '#FFFFFF', pin: '#7B1FA2' }       // 亮紫底白字
+  // 为每种订单类型定义配色方案 - 使用高对比度颜色
+  const colorSchemes: Record<string, { bg: string; text: string; border: string; badge: string }> = {
+    'delivery': { bg: '#2196F3', text: '#FFFFFF', border: '#0D47A1', badge: '#BBDEFB' },  // 蓝色系
+    'pickup': { bg: '#4CAF50', text: '#FFFFFF', border: '#1B5E20', badge: '#C8E6C9' },    // 绿色系
+    'swap': { bg: '#9C27B0', text: '#FFFFFF', border: '#4A148C', badge: '#E1BEE7' }       // 紫色系
   };
   
-  const scheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', pin: '#F57C00' };
+  const scheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', border: '#E65100', badge: '#FFE0B2' };
   
   // 订单类型中文映射
   const typeNames: Record<string, string> = {
@@ -664,92 +664,91 @@ function createOrderIconWithLabel(order: any, orderETA?: any): string {
   };
   const typeName = typeNames[order.type] || order.type;
   
-  // 桶类型中文映射
-  const binTypeNames: Record<string, string> = {
-    'garbage': '垃圾桶',
-    'brick': '砖桶',
-    'soil': '土桶',
-    'cement': '水泥桶',
-    'asphalt': '沥青桶'
+  // 桶类型emoji映射
+  const binTypeEmojis: Record<string, string> = {
+    'garbage': '🗑️',
+    'brick': '🧱',
+    'soil': '🪨',
+    'cement': '🏗️',
+    'asphalt': '🛣️'
   };
-  const binTypeName = binTypeNames[order.bin_type] || '桶';
+  const binEmoji = binTypeEmojis[order.bin_type] || '📦';
   
-  // 提取街道号和城市名
-  const extractAddressShort = (addr: string): string => {
-    if (!addr) return '';
-    
-    // 提取街道号（第一个数字部分）
-    const streetNumberMatch = addr.match(/^\d+[A-Za-z]?/);
-    const streetNumber = streetNumberMatch ? streetNumberMatch[0] : '';
-    
-    // 提取城市名（逗号后的第一个词，通常是城市）
-    const parts = addr.split(',').map(p => p.trim());
-    const city = parts.length > 1 ? parts[1].split(' ')[0] : '';
-    
-    return streetNumber && city ? `${streetNumber}, ${city}` : addr.substring(0, 20);
-  };
+  // 构建标签文本 - 简化为：emoji + 操作 + 尺寸
+  const binSize = order.bin_size || '';
+  const mainText = `${binEmoji}${typeName}${binSize}`;
   
-  // 显示自定义时段或默认时段
+  // 时段信息（如果有）
   const timeDisplay = order.time_window_custom || order.time_window || '';
   
-  // 构建标签文本 - 格式：操作+尺寸+桶类型 时段
-  // 例如：换20yd垃圾桶 8AM-10AM
-  const binSize = order.bin_size || '';
-  const line1 = `${typeName}${binSize}${binTypeName} ${timeDisplay}`.trim();
-  const line2 = extractAddressShort(order.address);
+  // 固定尺寸的圆角矩形徽章
+  const badgeWidth = 70;
+  const badgeHeight = 28;
+  const svgWidth = 80;
+  const svgHeight = 70;
   
-  // 如果有ETA，添加ETA行
-  const lines = [line1, line2];
+  const badgeX = (svgWidth - badgeWidth) / 2;
+  const pinX = svgWidth / 2;
+  
+  // ETA信息（如果有）
+  let etaText = '';
   if (orderETA && orderETA.status === 'OK') {
     const etaTime = new Date(orderETA.eta).toLocaleTimeString('zh-CN', { 
       hour: '2-digit', 
       minute: '2-digit',
       hour12: false 
     });
-    lines.push(`ETA: ${etaTime}`);
+    etaText = etaTime;
   }
   
-  const filteredLines = lines.filter(line => line);
-  
-  // 计算卡片尺寸 - 增大尺寸，使用固定宽度
-  const cardWidth = 140; // 固定宽度，更显眼
-  const cardHeight = 14 + filteredLines.length * 20; // 增大行高到20px
-  const svgWidth = 150;
-  const svgHeight = cardHeight + 42;
-  
-  const cardX = (svgWidth - cardWidth) / 2;
-  const pinX = svgWidth / 2;
-  
-  // 生成文本行 - 字体14px，白色文字加黑色描边
-  let textElements = '';
-  filteredLines.forEach((line, index) => {
-    const y = 18 + index * 20; // 调整y位置
-    // ETA行使用特殊样式
-    const isETALine = line.startsWith('ETA:');
-    const fontWeight = index === 0 ? 'bold' : (isETALine ? 'bold' : '600');
-    const fill = isETALine ? '#FFD700' : scheme.text; // ETA用金色
-    const fontSize = index === 0 ? '14' : '13'; // 第一行稍大
-    textElements += `<text x='${svgWidth/2}' y='${y}' text-anchor='middle' font-size='${fontSize}' font-weight='${fontWeight}' fill='${fill}' font-family='Arial, sans-serif' stroke='#000' stroke-width='0.8'>${line}</text>`;
-  });
-  
-  // 创建SVG
+  // 创建SVG - 紧凑的徽章样式
   const svg = `
     <svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
       <defs>
-        <filter id="cardShadow" x="-50%" y="-50%" width="200%" height="200%">
-          <feDropShadow dx="0" dy="3" stdDeviation="3" flood-opacity="0.4"/>
+        <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+          <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.4"/>
         </filter>
       </defs>
-      <!-- 顶部信息卡片 - 更显眼的颜色和阴影 -->
-      <rect x='${cardX}' y='0' width='${cardWidth}' height='${cardHeight}' rx='5' fill='${scheme.bg}' stroke='${scheme.pin}' stroke-width='3' opacity='0.98' filter="url(#cardShadow)"/>
-      ${textElements}
       
-      <!-- 连接线 -->
-      <line x1='${pinX}' y1='${cardHeight}' x2='${pinX}' y2='${cardHeight + 3}' stroke='${scheme.pin}' stroke-width='3'/>
+      <!-- 主徽章 - 圆角矩形 -->
+      <rect x='${badgeX}' y='0' width='${badgeWidth}' height='${badgeHeight}' rx='14' 
+            fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='3' opacity='0.95' filter="url(#shadow)"/>
+      
+      <!-- 主文本 - emoji + 操作 + 尺寸 -->
+      <text x='${svgWidth/2}' y='19' text-anchor='middle' font-size='16' font-weight='bold' 
+            fill='${scheme.text}' font-family='Arial, sans-serif'>${mainText}</text>
+      
+      <!-- 时段标签（如果有） - 小徽章 -->
+      ${timeDisplay ? `
+        <rect x='${badgeX}' y='30' width='${badgeWidth}' height='16' rx='8' 
+              fill='${scheme.badge}' stroke='${scheme.border}' stroke-width='1.5' opacity='0.9'/>
+        <text x='${svgWidth/2}' y='41' text-anchor='middle' font-size='9' font-weight='600' 
+              fill='${scheme.border}' font-family='Arial, sans-serif'>${timeDisplay}</text>
+      ` : ''}
+      
+      <!-- ETA标签（如果有） -->
+      ${etaText ? `
+        <rect x='${badgeX}' y='${timeDisplay ? '48' : '30'}' width='${badgeWidth}' height='14' rx='7' 
+              fill='#FFD700' stroke='#FF8F00' stroke-width='1.5' opacity='0.95'/>
+        <text x='${svgWidth/2}' y='${timeDisplay ? '58' : '40'}' text-anchor='middle' font-size='9' font-weight='bold' 
+              fill='#000000' font-family='Arial, sans-serif'>⏱${etaText}</text>
+      ` : ''}
+      
+      <!-- 连接线到图钉 -->
+      <line x1='${pinX}' y1='${timeDisplay && etaText ? '62' : (timeDisplay || etaText ? '46' : '28')}' 
+            x2='${pinX}' y2='${timeDisplay && etaText ? '65' : (timeDisplay || etaText ? '49' : '31')}' 
+            stroke='${scheme.border}' stroke-width='2.5'/>
       
       <!-- 底部图钉 -->
-      <g transform='translate(${pinX - 12}, ${cardHeight + 3})'>
-        <circle cx='12' cy='11' r='11' fill='${scheme.pin}' stroke='#000' stroke-width='2'/>
+      <g transform='translate(${pinX - 10}, ${timeDisplay && etaText ? '65' : (timeDisplay || etaText ? '49' : '31')})'>
+        <circle cx='10' cy='9' r='9' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='2.5'/>
+        <circle cx='10' cy='9' r='4' fill='${scheme.text}'/>
+      </g>
+    </svg>
+  `.trim();
+  
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
         <circle cx='12' cy='11' r='4.5' fill='white' opacity='0.95'/>
         <line x1='12' y1='22' x2='12' y2='35' stroke='${scheme.pin}' stroke-width='2.5'/>
       </g>
@@ -801,19 +800,19 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
   const lines = [line1, line2].filter(line => line);
   
   // 如果有ETA，添加ETA行
+  let hasETA = false;
   if (orderETA && orderETA.status === 'OK') {
-    const etaTime = new Date(orderETA.eta).toLocaleTimeString('zh-CN', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
-    lines.push(`ETA: ${etaTime}`);
+    hasETA = true;
   }
   
-  const baseHeight = 14 + lines.length * 20 + 42;
-  const scaleFactor = 1.0;
-  const width = 150 * scaleFactor;
-  const height = baseHeight * scaleFactor;
+  // 计算高度：主徽章28 + (时段16) + (ETA14) + 连接线 + 图钉18
+  let baseHeight = 28; // 主徽章
+  if (timeDisplay) baseHeight += 18; // 时段标签 + 间距
+  if (hasETA) baseHeight += 16; // ETA标签 + 间距
+  baseHeight += 3 + 18; // 连接线 + 图钉
+  
+  const width = 80;
+  const height = baseHeight;
   
   marker.setIcon({
     url: iconUrl,
