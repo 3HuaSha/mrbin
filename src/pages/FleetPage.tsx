@@ -24,7 +24,7 @@ export function FleetPage() {
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<string>("ALL");
-  const [driverFilter, setDriverFilter] = useState<"ALL" | "ASSIGNED">("ALL");
+  const [driverFilter, setDriverFilter] = useState<"ALL" | "ASSIGNED">("ASSIGNED");
   const [assigningDriver, setAssigningDriver] = useState<Driver | null>(null);
 
   const { data: drivers = [] } = useQuery({
@@ -60,8 +60,7 @@ export function FleetPage() {
 
   const filteredDrivers = drivers.filter(d => {
     if (driverFilter === "ASSIGNED") {
-      const assigned = getDriverVehicles(d.id).length > 0;
-      return assigned;
+      return getDriverVehicles(d.id).length > 0;
     }
     return true;
   });
@@ -155,54 +154,54 @@ export function FleetPage() {
         }
       }
 
-      // 3. 匹配逻辑
+      // 3. 匹配关联 (寻找当前“正在开车”的司机)
       const pending = new Map<string, string>(); // dId -> vId
       const clean = (s: string) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       const matchedNames: string[] = [];
-      const unmatchedRefs: string[] = [];
 
-      console.group('🎯 匹配详情记录');
+      console.group('🎯 自动关联逻辑');
+      
+      // A. 优先级 1: 实时分配接口 (最权威)
+      sAssigns.forEach((sa: any) => {
+        const dId = dSamsaraIdToInternal.get(sa.driver?.id) || dNameToInternal.get(clean(sa.driver?.name));
+        const vehicle = allVehicles.find(v => (sa.vehicle?.id && v.samsara_id === sa.vehicle.id) || (sa.vehicle?.name && clean(v.name) === clean(sa.vehicle.name)));
+        if (dId && vehicle) {
+          console.log(`✅ [分配接口] 匹配: ${sa.driver.name} -> ${vehicle.name}`);
+          pending.set(dId, vehicle.id);
+          matchedNames.push(`${sa.driver.name} (${vehicle.name})`);
+        }
+      });
+
+      // B. 优先级 2: OBD 实时驾驶员 (兜底实时状态)
+      sStats.forEach((stat: any) => {
+        const dName = stat.obdDriver?.driver?.name;
+        if (dName) {
+          const dId = dNameToInternal.get(clean(dName));
+          const vehicle = allVehicles.find(v => v.samsara_id === stat.id || clean(v.name) === clean(stat.name));
+          if (dId && vehicle && !pending.has(dId)) {
+            console.log(`✅ [OBD状态] 匹配: ${dName} -> ${vehicle.name}`);
+            pending.set(dId, vehicle.id);
+            matchedNames.push(`${dName} (${vehicle.name})`);
+          }
+        }
+      });
+
+      // C. 优先级 3: 司机档案静态关联 (长期稳定关联)
       sDrivers.forEach((sd: any) => {
         const dId = dSamsaraIdToInternal.get(sd.id) || dNameToInternal.get(clean(sd.name));
-        if (!dId) {
-          console.warn(`🕵️ 司机不在本地数据库: ${sd.name}`);
-          return;
-        }
-
-        // 寻找车辆引用 (司机属性 > 分配记录 > OBD)
-        let vRef = sd.currentVehicle || sd.staticAssignedVehicle;
-        let source = 'Profile';
-        
-        if (!vRef?.id) {
-          const assign = sAssigns.find((a: any) => a.driver?.id === sd.id || clean(a.driver?.name) === clean(sd.name));
-          if (assign) { vRef = assign.vehicle; source = 'Assignments API'; }
-        }
-
-        if (!vRef?.id) {
-          const stat = sStats.find((s: any) => clean(s.obdDriver?.driver?.name) === clean(sd.name));
-          if (stat) { vRef = { id: stat.id, name: stat.name }; source = 'OBD Stats'; }
-        }
-
-        if (vRef?.id || vRef?.name) {
-          const vehicle = allVehicles.find(v => 
-            (vRef.id && v.samsara_id === vRef.id) || 
-            (vRef.name && clean(v.name) === clean(vRef.name)) ||
-            (vRef.name && v.plate && clean(v.plate) === clean(vRef.name))
-          );
-
-          if (vehicle) {
-            console.log(`✅ [${source}] 匹配成功: ${sd.name} -> ${vehicle.name}`);
-            pending.set(dId, vehicle.id);
-            matchedNames.push(`${sd.name} (${vehicle.name})`);
-          } else {
-            console.warn(`❌ [${source}] 引用车辆无法匹配: 司机(${sd.name}), 引用(${vRef.name || '无名'}, ID: ${vRef.id || '无ID'})`);
-            unmatchedRefs.push(`${sd.name} -> ${vRef.name || vRef.id}`);
+        if (dId && !pending.has(dId)) {
+          const vRef = sd.currentVehicle || sd.staticAssignedVehicle;
+          if (vRef) {
+            const vehicle = allVehicles.find(v => (vRef.id && v.samsara_id === vRef.id) || (vRef.name && clean(v.name) === clean(vRef.name)));
+            if (vehicle) {
+              console.log(`✅ [档案关联] 匹配: ${sd.name} -> ${vehicle.name}`);
+              pending.set(dId, vehicle.id);
+              matchedNames.push(`${sd.name} (${vehicle.name})`);
+            }
           }
         }
       });
       console.groupEnd();
-
-      console.log('🏁 匹配总结:', { 成功: matchedNames, 失败但有引用: unmatchedRefs });
 
       const finalInserts = Array.from(pending.entries()).map(([dId, vId]) => ({ driver_id: dId, vehicle_id: vId }));
       if (finalInserts.length > 0) {
