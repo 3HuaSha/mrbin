@@ -76,7 +76,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     name: 'Draglam Salt Vaughan',
     shortName: 'draglam',
     fullAddress: 'Draglam Salt, 401 Bowes Rd, Vaughan, ON L4K 1J5',
-    coordinates: { lat: 43.7912, lng: -79.4567 },
+    coordinates: { lat: 43.8105, lng: -79.5105 },
     type: 'material_site',
     icon: '♻'
   },
