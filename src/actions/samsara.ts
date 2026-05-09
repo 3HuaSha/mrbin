@@ -1,16 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
 
-export const fetchSamsaraData = createServerFn({ method: "GET" })
+export const fetchSamsaraData = createServerFn({ method: "POST" })
   .handler(async () => {
     const SAMSARA_TOKEN = (process.env.VITE_SAMSARA_TOKEN || process.env.SAMSARA_API_KEY || import.meta.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke') as string;
     
-    console.log('🔄 Server Function: 开始同步 Samsara 全量数据 (Vehicles & Trailers)');
+    console.log('🔄 Server Function: 开始全量同步 Samsara 数据 (Vehicles, Trailers, Equipment)');
 
     try {
-      // 1. 获取所有车辆基本信息 (支持分页)
       let allUnits: any[] = [];
+      let counts = { vehicles: 0, trailers: 0, equipment: 0 };
       
-      // -- 获取 Vehicles --
+      // -- 1. 获取 Vehicles --
       let hasNextPage = true;
       let after = '';
       while (hasNextPage) {
@@ -20,16 +20,16 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         });
         if (!response.ok) break;
         const result = await response.json();
-        allUnits = [...allUnits, ...(result.data || [])];
+        const data = result.data || [];
+        allUnits = [...allUnits, ...data];
+        counts.vehicles += data.length;
         hasNextPage = result.pagination?.hasNextPage || false;
         after = result.pagination?.endCursor || '';
       }
-      console.log('✅ 获取到', allUnits.length, '辆 Vehicles');
 
-      // -- 获取 Trailers (有些 FLAT 可能注册为挂车) --
+      // -- 2. 获取 Trailers --
       hasNextPage = true;
       after = '';
-      let trailerCount = 0;
       while (hasNextPage) {
         const url = `https://api.samsara.com/fleet/trailers${after ? `?after=${after}` : ''}`;
         const response = await fetch(url, {
@@ -37,15 +37,31 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         });
         if (!response.ok) break;
         const result = await response.json();
-        const trailers = result.data || [];
-        allUnits = [...allUnits, ...trailers];
-        trailerCount += trailers.length;
+        const data = result.data || [];
+        allUnits = [...allUnits, ...data];
+        counts.trailers += data.length;
         hasNextPage = result.pagination?.hasNextPage || false;
         after = result.pagination?.endCursor || '';
       }
-      console.log('✅ 获取到', trailerCount, '辆 Trailers');
 
-      // 2. 获取位置信息
+      // -- 3. 获取 Equipment (资产) --
+      hasNextPage = true;
+      after = '';
+      while (hasNextPage) {
+        const url = `https://api.samsara.com/fleet/equipment${after ? `?after=${after}` : ''}`;
+        const response = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
+        });
+        if (!response.ok) break;
+        const result = await response.json();
+        const data = result.data || [];
+        allUnits = [...allUnits, ...data];
+        counts.equipment += data.length;
+        hasNextPage = result.pagination?.hasNextPage || false;
+        after = result.pagination?.endCursor || '';
+      }
+
+      // -- 4. 获取所有位置信息 --
       let allLocations: any[] = [];
       hasNextPage = true;
       after = '';
@@ -61,7 +77,6 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         after = result.pagination?.endCursor || '';
       }
 
-      // 3. 合并数据
       const locationMap = new Map();
       allLocations.forEach(loc => locationMap.set(loc.id, loc));
 
@@ -75,11 +90,12 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         };
       });
 
-      console.log('✅ 数据合并完成，总计', mergedData.length, '个单元');
+      console.log('✅ 同步完成:', counts);
 
       return {
         success: true,
         data: mergedData,
+        summary: counts,
         timestamp: new Date().toISOString()
       };
     } catch (error: any) {
@@ -87,6 +103,7 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       return { success: false, error: error.message || 'Unknown error', data: [] };
     }
   });
+
 
 
 // ==========================================
