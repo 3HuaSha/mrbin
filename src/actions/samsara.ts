@@ -61,36 +61,77 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         after = result.pagination?.endCursor || '';
       }
 
-      // -- 4. 获取所有位置信息 --
-      let allLocations: any[] = [];
+      // -- 4. 获取 Assets (Beta 统一接口，包含 Unpowered Assets 等) --
       hasNextPage = true;
       after = '';
       while (hasNextPage) {
-        const url = `https://api.samsara.com/fleet/vehicles/locations${after ? `?after=${after}` : ''}`;
+        const url = `https://api.samsara.com/assets${after ? `?after=${after}` : ''}`;
         const response = await fetch(url, {
           headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
         });
         if (!response.ok) break;
         const result = await response.json();
-        allLocations = [...allLocations, ...(result.data || [])];
+        const data = result.data || [];
+        allUnits = [...allUnits, ...data];
+        counts.equipment += data.length; // 将其计入 equipment 或作为附加资产
         hasNextPage = result.pagination?.hasNextPage || false;
         after = result.pagination?.endCursor || '';
       }
 
-      const locationMap = new Map();
-      allLocations.forEach(loc => locationMap.set(loc.id, loc));
+      // -- 5. 获取所有位置信息 --
+      let allLocations: any[] = [];
+      const locationEndpoints = [
+        'https://api.samsara.com/fleet/vehicles/locations',
+        'https://api.samsara.com/fleet/trailers/locations',
+        'https://api.samsara.com/fleet/equipment/locations',
+        'https://api.samsara.com/assets/locations'
+      ];
 
-      const mergedData = allUnits.map(v => {
+      for (const endpoint of locationEndpoints) {
+        hasNextPage = true;
+        after = '';
+        while (hasNextPage) {
+          const url = `${endpoint}${after ? `?after=${after}` : ''}`;
+          const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
+          });
+          if (!response.ok) break;
+          const result = await response.json();
+          allLocations = [...allLocations, ...(result.data || [])];
+          hasNextPage = result.pagination?.hasNextPage || false;
+          after = result.pagination?.endCursor || '';
+        }
+      }
+
+      // -- 6. 合并数据并去重 --
+      const uniqueUnitsMap = new Map();
+      allUnits.forEach(u => {
+        if (u && u.id) {
+          // 如果已存在且没有名称，则尝试用新的覆盖（以防某些接口返回的信息不全）
+          if (!uniqueUnitsMap.has(u.id) || (!uniqueUnitsMap.get(u.id).name && u.name)) {
+            uniqueUnitsMap.set(u.id, u);
+          }
+        }
+      });
+
+      const locationMap = new Map();
+      allLocations.forEach(loc => {
+        if (loc && loc.id) {
+          locationMap.set(loc.id, loc);
+        }
+      });
+
+      const mergedData = Array.from(uniqueUnitsMap.values()).map(v => {
         const locInfo = locationMap.get(v.id);
         return {
           id: v.id,
-          name: v.name,
+          name: v.name || `Unnamed ${v.id.substring(0, 4)}`,
           location: locInfo?.location || null,
           time: locInfo?.time || null
         };
       });
 
-      console.log('✅ 同步完成:', counts);
+      console.log(`✅ 同步完成: Vehicles(${counts.vehicles}), Trailers(${counts.trailers}), Equipment/Assets(${counts.equipment}), Total Unique(${uniqueUnitsMap.size})`);
 
       return {
         success: true,
