@@ -3,30 +3,86 @@ import { createServerFn } from "@tanstack/react-start";
 export const fetchSamsaraData = createServerFn({ method: "GET" })
   .handler(async () => {
     const SAMSARA_TOKEN = (process.env.VITE_SAMSARA_TOKEN || process.env.SAMSARA_API_KEY || import.meta.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke') as string;
-    const GOOGLE_MAPS_API_KEY = (process.env.VITE_GOOGLE_MAPS_API_KEY || import.meta.env.VITE_GOOGLE_MAPS_API_KEY) as string;
-
-    console.log('🔄 Server Function: 开始获取 Samsara 数据');
+    
+    console.log('🔄 Server Function: 开始同步 Samsara 全量车辆数据');
 
     try {
-      const response = await fetch('https://api.samsara.com/fleet/vehicles/locations', {
-        headers: {
-          'Authorization': `Bearer ${SAMSARA_TOKEN}`,
-          'Accept': 'application/json'
-        }
-      });
+      // 1. 获取所有车辆基本信息 (支持分页)
+      let allVehicles: any[] = [];
+      let hasNextPage = true;
+      let after = '';
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Samsara API 错误:', response.status, errorText);
-        throw new Error(`Samsara API Error: ${response.status} - ${errorText}`);
+      while (hasNextPage) {
+        const url = `https://api.samsara.com/fleet/vehicles${after ? `?after=${after}` : ''}`;
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${SAMSARA_TOKEN}`,
+            'Accept': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Samsara Vehicles API Error: ${response.status} - ${errorText}`);
+        }
+
+        const result = await response.json();
+        allVehicles = [...allVehicles, ...(result.data || [])];
+        
+        hasNextPage = result.pagination?.hasNextPage || false;
+        after = result.pagination?.endCursor || '';
       }
 
-      const data = await response.json();
-      console.log('✅ Samsara API 成功，获取到', data.data?.length || 0, '辆车');
+      console.log('✅ 获取到', allVehicles.length, '辆车辆元数据');
+
+      // 2. 获取所有车辆位置信息 (用于地图显示)
+      let allLocations: any[] = [];
+      hasNextPage = true;
+      after = '';
+
+      while (hasNextPage) {
+        const url = `https://api.samsara.com/fleet/vehicles/locations${after ? `?after=${after}` : ''}`;
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${SAMSARA_TOKEN}`,
+            'Accept': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          // 如果位置接口失败，我们仍然返回车辆列表，只是没有位置
+          console.error('❌ 获取 Samsara 位置失败，仅同步元数据');
+          break;
+        }
+
+        const result = await response.json();
+        allLocations = [...allLocations, ...(result.data || [])];
+        
+        hasNextPage = result.pagination?.hasNextPage || false;
+        after = result.pagination?.endCursor || '';
+      }
+
+      // 3. 合并数据
+      const locationMap = new Map();
+      allLocations.forEach(loc => {
+        locationMap.set(loc.id, loc);
+      });
+
+      const mergedData = allVehicles.map(v => {
+        const locInfo = locationMap.get(v.id);
+        return {
+          id: v.id,
+          name: v.name,
+          location: locInfo?.location || null,
+          time: locInfo?.time || null
+        };
+      });
+
+      console.log('✅ 数据合并完成，总计', mergedData.length, '辆车');
 
       return {
         success: true,
-        data: data.data || [],
+        data: mergedData,
         timestamp: new Date().toISOString()
       };
     } catch (error: any) {
