@@ -183,6 +183,11 @@ export function FleetPage() {
       const { data: allCurrentVehicles } = await supabase.from("vehicles").select("id, name, samsara_id, plate");
       const vehiclesForMatching = allCurrentVehicles || insertedVehicles;
 
+      // 在应用新分配之前，先清除所有旧分配，确保“不全”或“对不上”的问题得到解决
+      await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+
+      const processedDriverIds = new Set<string>();
+
       for (const sa of samsaraAssignments) {
         // 优先通过 ID 找司机，找不到通过名字找
         let internalDriverId = driverSamsaraIdToInternalId.get(sa.driver?.id);
@@ -190,7 +195,7 @@ export function FleetPage() {
           internalDriverId = driverNameToInternalId.get(sa.driver.name.toUpperCase());
         }
         
-        if (!internalDriverId) continue;
+        if (!internalDriverId || processedDriverIds.has(internalDriverId)) continue;
 
         let internalVehicle = vehiclesForMatching.find(v => v.samsara_id === sa.vehicle?.id);
         if (!internalVehicle && sa.vehicle?.name) {
@@ -199,9 +204,11 @@ export function FleetPage() {
         }
         
         if (internalVehicle) {
-          await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", internalDriverId);
           const { error } = await supabase.from("driver_vehicle_assignments").insert({ driver_id: internalDriverId, vehicle_id: internalVehicle.id });
-          if (!error) driverSyncResults.assigned++;
+          if (!error) {
+            driverSyncResults.assigned++;
+            processedDriverIds.add(internalDriverId);
+          }
         }
       }
       
@@ -209,7 +216,7 @@ export function FleetPage() {
       return { totalVehicles: samsaraVehicles.length, addedVehicles: inserts.length, driversAdded: driverSyncResults.added, driversUpdated: driverSyncResults.updated, autoAssigned: finalAssignments?.length || 0 };
     },
     onSuccess: (res) => {
-      toast.success(`同步成功！车辆: +${res.addedVehicles}, 司机: +${res.driversAdded}/~${res.driversUpdated}, 当前总分配: ${res.autoAssigned}`);
+      toast.success(`同步成功！车辆: +${res.addedVehicles}, 司机: +${res.driversAdded}/~${res.driversUpdated}, 当前活跃分配: ${res.autoAssigned}`);
       qc.invalidateQueries({ queryKey: ["vehicles-all"] });
       qc.invalidateQueries({ queryKey: ["drivers-all"] });
       qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] });

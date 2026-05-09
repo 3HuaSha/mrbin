@@ -100,15 +100,16 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       // 获取当前所有司机-车辆分配关系
       let allAssignments: any[] = [];
       try {
-        // 1. 获取显式分配关系 (过去 24 小时)
-        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const url = `https://api.samsara.com/fleet/driver-vehicle-assignments?startTime=${yesterday}&filterBy=drivers`;
+        // 1. 获取显式分配关系 (只保留当前活跃的，即没有 endTime 的)
+        const url = `https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=drivers`;
         const response = await fetch(url, {
           headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
         });
         if (response.ok) {
           const result = await response.json();
-          allAssignments = [...(result.data || [])];
+          // 过滤掉已结束的分配
+          const activeAssignments = (result.data || []).filter((a: any) => !a.endTime);
+          allAssignments = [...activeAssignments];
         }
 
         // 2. 获取车辆实时状态 (包含当前 OBD 司机)
@@ -121,11 +122,21 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
           
           vehicleStats.forEach((stat: any) => {
             if (stat.obdDriver?.driver?.id) {
-              // 模拟分配记录格式
-              allAssignments.push({
-                driver: { id: stat.obdDriver.driver.id, name: stat.obdDriver.driver.name },
-                vehicle: { id: stat.id, name: stat.name }
-              });
+              // 检查是否已经存在该司机的分配（优先使用 OBD 状态）
+              const driverId = stat.obdDriver.driver.id;
+              const existingIdx = allAssignments.findIndex(a => a.driver?.id === driverId);
+              
+              const newAssign = {
+                driver: { id: driverId, name: stat.obdDriver.driver.name },
+                vehicle: { id: stat.id, name: stat.name },
+                isRealtime: true
+              };
+
+              if (existingIdx >= 0) {
+                allAssignments[existingIdx] = newAssign;
+              } else {
+                allAssignments.push(newAssign);
+              }
             }
           });
         }
