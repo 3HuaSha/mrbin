@@ -14,36 +14,39 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       // 1. 获取车辆
       const vRes = await fetch('https://api.samsara.com/fleet/vehicles?limit=512', { headers });
       const vehicles = vRes.ok ? (await vRes.json()).data : [];
-      console.log(`[Vehicles] Status: ${vRes.status}, Count: ${vehicles.length}`);
 
       // 2. 获取资产
       const assetRes = await fetch('https://api.samsara.com/fleet/assets?limit=512', { headers });
       const assets = assetRes.ok ? (await assetRes.json()).data : [];
-      console.log(`[Assets] Status: ${assetRes.status}, Count: ${assets.length}`);
 
       // 3. 获取司机
       const dRes = await fetch('https://api.samsara.com/fleet/drivers?limit=512&includeDeactivated=true', { headers });
       const drivers = dRes.ok ? (await dRes.json()).data : [];
-      console.log(`[Drivers] Status: ${dRes.status}, Count: ${drivers.length}`);
 
-      // 4. 获取实时分配 (尝试不加 filterBy)
-      const aRes = await fetch('https://api.samsara.com/fleet/driver-vehicle-assignments', { headers });
+      // 4. 获取实时分配 (修正 400 错误：添加必要的 filterBy)
+      // 注意：有些账号可能不支持不带参数的调用
+      const aRes = await fetch('https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=drivers', { headers });
       let assignments = [];
       if (aRes.ok) {
         const result = await aRes.json();
         assignments = (result.data || []).filter((a: any) => !a.endTime);
+      } else {
+        console.warn(`[Assignments API Error] Status: ${aRes.status}`);
       }
-      console.log(`[Assignments] Status: ${aRes.status}, Count: ${assignments.length}`);
 
-      // 5. 获取车辆实时状态 (OBD + Location)
-      const sRes = await fetch('https://api.samsara.com/fleet/vehicles/stats?types=obdDriver', { headers });
-      const vehicleStats = sRes.ok ? (await sRes.json()).data : [];
-      console.log(`[Stats] Status: ${sRes.status}, Count: ${vehicleStats.length}`);
+      // 5. 获取车辆实时状态 (修正 400 错误：尝试更通用的 types)
+      const sRes = await fetch('https://api.samsara.com/fleet/vehicles/stats?types=obdDriver,fuelPerc,engineStates', { headers });
+      let vehicleStats = [];
+      if (sRes.ok) {
+        const result = await sRes.json();
+        vehicleStats = result.data || [];
+      } else {
+        console.warn(`[Stats API Error] Status: ${sRes.status}`);
+      }
 
-      // 6. 获取位置信息 (有时包含 driver info)
+      // 6. 获取位置信息 ( locations 接口通常很稳)
       const lRes = await fetch('https://api.samsara.com/fleet/vehicles/locations', { headers });
       const locations = lRes.ok ? (await lRes.json()).data : [];
-      console.log(`[Locations] Status: ${lRes.status}, Count: ${locations.length}`);
 
       return {
         success: true,
