@@ -150,7 +150,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
         icon: {
           url: createManualLocationIcon(location),
           scaledSize: new (window as any).google.maps.Size(45, 45),
-          anchor: new (window as any).google.maps.Point(22.5, 45)
+          anchor: new (window as any).google.maps.Point(22.5, 18.75)
         },
         title: location.name,
         zIndex: 50
