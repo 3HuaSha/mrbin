@@ -3,33 +3,25 @@ import { createServerFn } from "@tanstack/react-start";
 export const fetchSamsaraData = createServerFn({ method: "GET" })
   .handler(async () => {
     const SAMSARA_TOKEN = (process.env.VITE_SAMSARA_TOKEN || process.env.SAMSARA_API_KEY || import.meta.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke') as string;
-    
-    console.log('🔄 Server Function: 开始全量同步 Samsara 数据 (Vehicles, Trailers, Equipment)');
 
     try {
       let allUnits: any[] = [];
       let counts = { vehicles: 0, trailers: 0, equipment: 0 };
       
-      // -- 1-4. 获取所有单位数据 (多维度尝试以确保不漏掉 FLAT 等资产) --
+      // 获取所有单位数据
       const endpoints = [
-        { key: 'vehicles', url: 'https://api.samsara.com/fleet/vehicles', name: 'Vehicles' },
-        { key: 'trailers', url: 'https://api.samsara.com/fleet/trailers', name: 'Trailers' },
-        { key: 'equipment', url: 'https://api.samsara.com/fleet/equipment', name: 'Equipment' },
-        { key: 'assets', url: 'https://api.samsara.com/assets', name: 'Assets (Unified)' },
-        { key: 'v1_assets', url: 'https://api.samsara.com/v1/fleet/assets', name: 'V1 Assets' },
-        { key: 'machines', url: 'https://api.samsara.com/fleet/machines', name: 'Machines' }
+        { key: 'vehicles', url: 'https://api.samsara.com/fleet/vehicles?limit=512', name: 'Vehicles' },
+        { key: 'trailers', url: 'https://api.samsara.com/fleet/trailers?limit=512', name: 'Trailers' },
+        { key: 'equipment', url: 'https://api.samsara.com/fleet/equipment?limit=512', name: 'Equipment' },
+        { key: 'assets', url: 'https://api.samsara.com/assets?limit=512', name: 'Assets (Unified)' },
       ];
 
       for (const ep of endpoints) {
         let hasNextPage = true;
         let after = '';
-        let pageNum = 0;
-        console.log(`\n🔍 开始获取 [${ep.name}] 数据...`);
         
         while (hasNextPage) {
-          pageNum++;
-          const url = `${ep.url}${after ? (ep.url.includes('?') ? `&after=${after}` : `?after=${after}`) : ''}`;
-          console.log(`  📄 [${ep.name}] 第 ${pageNum} 页: ${url}`);
+          const url = `${ep.url}${after ? `&after=${after}` : ''}`;
           
           try {
             const response = await fetch(url, {
@@ -37,21 +29,12 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
             });
             
             if (!response.ok) {
-              const errorText = await response.text();
-              console.warn(`⚠️ Samsara API [${ep.name}] 响应异常: ${response.status} ${response.statusText}`);
-              console.warn(`  错误详情: ${errorText}`);
+              console.warn(`⚠️ Samsara API [${ep.name}] 响应异常: ${response.status}`);
               break;
             }
             
             const result = await response.json();
             const data = result.data || [];
-            
-            // 详细记录每个单位的名称
-            console.log(`  ✅ [${ep.name}] 第 ${pageNum} 页获取到 ${data.length} 个单位:`);
-            data.forEach((unit: any, idx: number) => {
-              const name = unit.name || unit.trailerName || unit.machineName || unit.externalIds?.vin || `Unit-${unit.id?.substring(0, 5)}`;
-              console.log(`    ${idx + 1}. ${name} (ID: ${unit.id?.substring(0, 8)}...)`);
-            });
             
             allUnits = [...allUnits, ...data];
             
@@ -62,33 +45,27 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
 
             hasNextPage = result.pagination?.hasNextPage || false;
             after = result.pagination?.endCursor || '';
-            
-            console.log(`  📊 [${ep.name}] 分页信息: hasNextPage=${hasNextPage}, endCursor=${after ? after.substring(0, 20) + '...' : 'null'}`);
-            
-            if (!hasNextPage) {
-              console.log(`  ✅ [${ep.name}] 数据获取完成，共 ${pageNum} 页\n`);
-            }
           } catch (err) {
-            console.error(`❌ 获取 [${ep.name}] 第 ${pageNum} 页失败:`, err);
+            console.error(`❌ 获取 [${ep.name}] 失败:`, err);
             break;
           }
         }
       }
 
-      // -- 5. 获取所有位置信息 --
+      // 获取所有位置信息
       let allLocations: any[] = [];
       const locationEndpoints = [
-        'https://api.samsara.com/fleet/vehicles/locations',
-        'https://api.samsara.com/fleet/trailers/locations',
-        'https://api.samsara.com/fleet/equipment/locations',
-        'https://api.samsara.com/assets/locations'
+        'https://api.samsara.com/fleet/vehicles/locations?limit=512',
+        'https://api.samsara.com/fleet/trailers/locations?limit=512',
+        'https://api.samsara.com/fleet/equipment/locations?limit=512',
+        'https://api.samsara.com/assets/locations?limit=512'
       ];
 
       for (const endpoint of locationEndpoints) {
         let hasNextPage = true;
         let after = '';
         while (hasNextPage) {
-          const url = `${endpoint}${after ? `?after=${after}` : ''}`;
+          const url = `${endpoint}${after ? `&after=${after}` : ''}`;
           const response = await fetch(url, {
             headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
           });
@@ -100,28 +77,15 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         }
       }
 
-      // -- 6. 合并数据并去重 --
-      console.log(`\n📊 开始合并和去重数据...`);
-      console.log(`  原始单位总数: ${allUnits.length}`);
-      
+      // 合并数据并去重
       const uniqueUnitsMap = new Map();
       allUnits.forEach(u => {
         if (u && u.id) {
-          const name = u.name || u.trailerName || u.machineName || u.externalIds?.vin || `Unit-${u.id.substring(0, 5)}`;
-          // 如果已存在且没有名称，则尝试用新的覆盖（以防某些接口返回的信息不全）
-          if (!uniqueUnitsMap.has(u.id)) {
+          if (!uniqueUnitsMap.has(u.id) || (!uniqueUnitsMap.get(u.id).name && u.name)) {
             uniqueUnitsMap.set(u.id, u);
-            console.log(`  ➕ 新增单位: ${name} (ID: ${u.id.substring(0, 8)}...)`);
-          } else if (!uniqueUnitsMap.get(u.id).name && u.name) {
-            console.log(`  🔄 更新单位名称: ${name} (ID: ${u.id.substring(0, 8)}...)`);
-            uniqueUnitsMap.set(u.id, u);
-          } else {
-            console.log(`  ⏭️  跳过重复单位: ${name} (ID: ${u.id.substring(0, 8)}...)`);
           }
         }
       });
-      
-      console.log(`  去重后单位总数: ${uniqueUnitsMap.size}\n`);
 
       const locationMap = new Map();
       allLocations.forEach(loc => {
@@ -132,7 +96,6 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
 
       const mergedData = Array.from(uniqueUnitsMap.values()).map(v => {
         const locInfo = locationMap.get(v.id);
-        // 确保名称不为空，依次尝试 name, trailerName, machineName, externalIds
         const name = v.name || v.trailerName || v.machineName || v.externalIds?.vin || `Unit-${v.id.substring(0, 5)}`;
         return {
           id: v.id,
@@ -141,13 +104,8 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
           time: locInfo?.time || null
         };
       });
-      
-      console.log(`\n📋 最终合并数据列表 (${mergedData.length} 个单位):`);
-      mergedData.forEach((unit, idx) => {
-        console.log(`  ${idx + 1}. ${unit.name} (ID: ${unit.id.substring(0, 8)}..., 位置: ${unit.location ? '有' : '无'})`);
-      });
 
-      console.log(`\n✅ 同步完成: Vehicles(${counts.vehicles}), Trailers(${counts.trailers}), Equipment/Assets(${counts.equipment}), Total Unique(${uniqueUnitsMap.size})`);
+      console.log(`✅ 同步完成: Vehicles(${counts.vehicles}), Trailers(${counts.trailers}), Equipment/Assets(${counts.equipment}), Total(${uniqueUnitsMap.size})`);
 
       return {
         success: true,

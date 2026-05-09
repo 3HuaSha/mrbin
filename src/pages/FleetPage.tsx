@@ -101,50 +101,28 @@ export function FleetPage() {
 
   const syncSamsara = useMutation({
     mutationFn: async () => {
-      console.log('🔄 前端: 开始调用 Samsara 同步...');
       const result = await fetchSamsaraVehicles();
-      
-      console.log('📦 前端: 收到 Samsara 响应:', result);
       
       if (!result.success) {
         throw new Error(result.error || 'API 返回失败');
       }
       
       const samsaraVehicles = result.data || [];
-      console.log(`📊 前端: 收到 ${samsaraVehicles.length} 辆车的数据`);
       
-      // 打印所有车辆名称
-      samsaraVehicles.forEach((v: any, idx: number) => {
-        console.log(`  ${idx + 1}. ${v.name} (ID: ${v.id?.substring(0, 8)}...)`);
-      });
-      
-      // 1. 深度清理：按顺序删除受约束的数据
-      console.log("🔄 正在清理旧的派遣数据...");
-      
-      // 先删步骤 (依赖于 assignments)
+      // 深度清理：按顺序删除受约束的数据
       await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
-      
-      // 再删派遣记录 (依赖于 vehicles)
       await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       
-      // 最后删除所有车辆
       const { error: deleteError } = await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
-      
       if (deleteError) {
-        console.error("❌ 删除旧车辆失败:", deleteError);
         throw new Error(`清除旧数据失败: ${deleteError.message}`);
       }
-      
-      console.log("✅ 已完成深度清理");
 
-      // 2. 准备新数据，并进行内部分组去重（防止 Samsara 返回重复的车牌名）
+      // 准备新数据并去重
       const uniqueInsertsMap = new Map();
       
       samsaraVehicles.forEach((v: any) => {
-        if (!v.name) {
-          console.log(`⚠️ 跳过无名称的车辆: ID=${v.id?.substring(0, 8)}...`);
-          return;
-        }
+        if (!v.name) return;
         const plate = v.name.toUpperCase();
         if (!uniqueInsertsMap.has(plate)) {
           // 根据车辆名称智能判断车型
@@ -152,18 +130,13 @@ export function FleetPage() {
           let vehicleType: "HINO" | "MACK" = "MACK";
           let maxBinSize = "40";
           
-          // HINO 通常是小型车，最大 20yd
           if (upperName.includes("HINO") || upperName.startsWith("BIN")) {
             vehicleType = "HINO";
             maxBinSize = "20";
-          }
-          // FLAT, DUMP, MACK 等都是大型车，最大 40yd
-          else if (upperName.includes("FLAT") || upperName.includes("DUMP") || upperName.includes("MACK")) {
+          } else if (upperName.includes("FLAT") || upperName.includes("DUMP") || upperName.includes("MACK")) {
             vehicleType = "MACK";
             maxBinSize = "40";
           }
-          
-          console.log(`  ➕ 准备插入: ${v.name} → 类型=${vehicleType}, 容量=${maxBinSize}yd`);
           
           uniqueInsertsMap.set(plate, {
             name: v.name,
@@ -173,35 +146,24 @@ export function FleetPage() {
             max_bin_size: maxBinSize,
             is_active: true
           });
-        } else {
-          console.log(`  ⏭️  跳过重复车牌: ${v.name}`);
         }
       });
       
       const inserts = Array.from(uniqueInsertsMap.values());
-      console.log(`📊 准备插入 ${inserts.length} 辆车到数据库`);
       
-      // 3. 插入所有同步到的车辆
+      // 插入所有同步到的车辆
       if (inserts.length > 0) {
         const { error: insertError } = await supabase.from("vehicles").insert(inserts);
-        if (insertError) {
-          console.error("❌ 插入车辆失败:", insertError);
-          throw insertError;
-        }
-        console.log("✅ 车辆插入成功");
+        if (insertError) throw insertError;
       }
       
       return { total: samsaraVehicles.length, added: inserts.length };
     },
     onSuccess: (result) => {
       toast.success(`同步成功！共 ${result.total} 辆车，新增 ${result.added} 辆`);
-      console.log('✅ 前端: 同步完成，刷新车辆列表');
       qc.invalidateQueries({ queryKey: ["vehicles-all"] });
     },
-    onError: (e: Error) => {
-      console.error('❌ 前端: 同步失败:', e);
-      toast.error(`同步失败: ${e.message}`);
-    },
+    onError: (e: Error) => toast.error(`同步失败: ${e.message}`),
   });
 
   const deleteDriver = useMutation({
