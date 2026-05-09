@@ -77,6 +77,26 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         }
       }
 
+      // 获取所有司机信息
+      let allDrivers: any[] = [];
+      try {
+        let hasNextPage = true;
+        let after = '';
+        while (hasNextPage) {
+          const url = `https://api.samsara.com/fleet/drivers?limit=512${after ? `&after=${after}` : ''}`;
+          const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
+          });
+          if (!response.ok) break;
+          const result = await response.json();
+          allDrivers = [...allDrivers, ...(result.data || [])];
+          hasNextPage = result.pagination?.hasNextPage || false;
+          after = result.pagination?.endCursor || '';
+        }
+      } catch (err) {
+        console.error('❌ 获取司机失败:', err);
+      }
+
       // 合并数据并去重
       const uniqueUnitsMap = new Map();
       allUnits.forEach(u => {
@@ -105,17 +125,18 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         };
       });
 
-      console.log(`✅ 同步完成: Vehicles(${counts.vehicles}), Trailers(${counts.trailers}), Equipment/Assets(${counts.equipment}), Total(${uniqueUnitsMap.size})`);
+      console.log(`✅ 同步完成: Vehicles(${counts.vehicles}), Trailers(${counts.trailers}), Equipment/Assets(${counts.equipment}), Drivers(${allDrivers.length}), Total(${uniqueUnitsMap.size})`);
 
       return {
         success: true,
         data: mergedData,
-        summary: counts,
+        drivers: allDrivers,
+        summary: { ...counts, drivers: allDrivers.length },
         timestamp: new Date().toISOString()
       };
     } catch (error: any) {
       console.error('❌ Samsara API 异常:', error);
-      return { success: false, error: error.message || 'Unknown error', data: [] };
+      return { success: false, error: error.message || 'Unknown error', data: [], drivers: [] };
     }
   });
 

@@ -101,15 +101,17 @@ export function FleetPage() {
 
   const syncSamsara = useMutation({
     mutationFn: async () => {
-      const result = await fetchSamsaraVehicles();
+      const result = await fetchSamsaraData();
       
       if (!result.success) {
         throw new Error(result.error || 'API 返回失败');
       }
       
       const samsaraVehicles = result.data || [];
+      const samsaraDrivers = (result as any).drivers || [];
       
-      // 深度清理：按顺序删除受约束的数据
+      // 1. 同步车辆
+      // 深度清理受约束的数据（这里保持原有逻辑，清除旧的车辆数据）
       await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       
@@ -118,14 +120,11 @@ export function FleetPage() {
         throw new Error(`清除旧数据失败: ${deleteError.message}`);
       }
 
-      // 准备新数据并去重
       const uniqueInsertsMap = new Map();
-      
       samsaraVehicles.forEach((v: any) => {
         if (!v.name) return;
         const plate = v.name.toUpperCase();
         if (!uniqueInsertsMap.has(plate)) {
-          // 根据车辆名称智能判断车型
           const upperName = v.name.toUpperCase();
           let vehicleType: "HINO" | "MACK" = "MACK";
           let maxBinSize = "40";
@@ -150,18 +149,90 @@ export function FleetPage() {
       });
       
       const inserts = Array.from(uniqueInsertsMap.values());
-      
-      // 插入所有同步到的车辆
+      let insertedVehicles: any[] = [];
       if (inserts.length > 0) {
-        const { error: insertError } = await supabase.from("vehicles").insert(inserts);
+        const { data: vData, error: insertError } = await supabase.from("vehicles").insert(inserts).select();
         if (insertError) throw insertError;
+        insertedVehicles = vData || [];
+      }
+
+      // 2. 同步司机
+      const driverSyncResults = { added: 0, updated: 0, assigned: 0 };
+      
+      for (const sd of samsaraDrivers) {
+        if (!sd.name) continue;
+        
+        // 查找或更新司机信息 (根据姓名匹配)
+        const { data: existingProfiles } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("name", sd.name)
+          .eq("role", "driver");
+          
+        let driverId = '';
+        
+        if (existingProfiles && existingProfiles.length > 0) {
+          driverId = existingProfiles[0].id;
+          // 更新已有司机
+          await supabase.from("profiles").update({
+            phone: sd.phone || null,
+            email: sd.email || null,
+            is_active: true
+          }).eq("id", driverId);
+          driverSyncResults.updated++;
+        } else {
+          // 创建新司机
+          const { data: newProfile, error: pError } = await supabase.from("profiles").insert({
+            name: sd.name,
+            phone: sd.phone || null,
+            email: sd.email || null,
+            role: "driver",
+            is_active: true
+          }).select().single();
+          
+          if (pError) {
+            console.error(`创建司机 ${sd.name} 失败:`, pError);
+            continue;
+          }
+          driverId = newProfile.id;
+          driverSyncResults.added++;
+        }
+
+        // 3. 自动分配车辆
+        const assignedVehicle = sd.staticAssignedVehicle || sd.currentVehicle;
+        if (assignedVehicle && assignedVehicle.id) {
+          // 查找该车辆在系统中的内部 ID
+          const vehicle = insertedVehicles.find(v => v.samsara_id === assignedVehicle.id);
+          if (vehicle) {
+            // 清除旧分配
+            await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", driverId);
+            
+            // 插入新分配
+            const { error: assignError } = await supabase.from("driver_vehicle_assignments").insert({
+              driver_id: driverId,
+              vehicle_id: vehicle.id
+            });
+            
+            if (!assignError) {
+              driverSyncResults.assigned++;
+            }
+          }
+        }
       }
       
-      return { total: samsaraVehicles.length, added: inserts.length };
+      return { 
+        totalVehicles: samsaraVehicles.length, 
+        addedVehicles: inserts.length,
+        driversAdded: driverSyncResults.added,
+        driversUpdated: driverSyncResults.updated,
+        autoAssigned: driverSyncResults.assigned
+      };
     },
-    onSuccess: (result) => {
-      toast.success(`同步成功！共 ${result.total} 辆车，新增 ${result.added} 辆`);
+    onSuccess: (res) => {
+      toast.success(`同步成功！车辆: +${res.addedVehicles}, 司机: +${res.driversAdded}/~${res.driversUpdated}, 自动分配: ${res.autoAssigned}`);
       qc.invalidateQueries({ queryKey: ["vehicles-all"] });
+      qc.invalidateQueries({ queryKey: ["drivers-all"] });
+      qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] });
     },
     onError: (e: Error) => toast.error(`同步失败: ${e.message}`),
   });

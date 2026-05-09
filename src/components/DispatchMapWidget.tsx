@@ -65,7 +65,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     return match ? match[1] : "OTHER";
   };
   
-  // 根据业务类型自动筛选车辆
+  // 根据业务类型和司机分配自动筛选车辆
   const filteredVehicles = useMemo(() => {
     console.log('🔍 地图筛选车辆:', {
       businessType,
@@ -76,15 +76,34 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     const filtered = samsaraLocs.filter(truck => {
       const vehicleType = extractVehicleType(truck.name || "");
       
+      // 业务类型过滤
+      let matchesType = false;
       if (businessType === 'garbage') {
         // 垃圾桶业务：显示 BIN 开头的车辆
-        return vehicleType === 'BIN';
+        matchesType = vehicleType === 'BIN';
       } else if (businessType === 'brick') {
         // 砖块业务：显示 FLAT 开头的车辆
-        return vehicleType === 'FLAT';
+        matchesType = vehicleType === 'FLAT';
       }
       
-      return false;
+      if (!matchesType) return false;
+
+      // 司机分配过滤：如果没有分配司机，就不显示
+      const hasDriver = vehicleAssignments.some((a: any) => {
+        const vehicleSamsaraId = a.vehicles?.samsara_id;
+        if (vehicleSamsaraId && vehicleSamsaraId === truck.id) return true;
+        
+        // 模糊匹配逻辑与下方 Marker 逻辑保持一致
+        const vehicleName = (a.vehicles?.name || "").toUpperCase();
+        const truckName = (truck.name || "").toUpperCase();
+        const cleanVehicleName = vehicleName.replace(/[^A-Z0-9]/g, '');
+        const cleanTruckName = truckName.replace(/[^A-Z0-9]/g, '');
+        return cleanVehicleName === cleanTruckName || 
+               vehicleName.includes(truckName) || 
+               truckName.includes(vehicleName);
+      });
+
+      return hasDriver;
     });
     
     console.log('✅ 筛选后车辆:', {
@@ -93,7 +112,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     });
     
     return filtered;
-  }, [samsaraLocs, businessType]);
+  }, [samsaraLocs, businessType, vehicleAssignments]);
 
   // 1. 加载 Google Maps JS 脚本 (原生方式最稳)
   useEffect(() => {
