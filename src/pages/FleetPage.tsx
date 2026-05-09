@@ -135,12 +135,28 @@ export function FleetPage() {
         if (!v.name) return;
         const plate = v.name.toUpperCase();
         if (!uniqueInsertsMap.has(plate)) {
+          // 根据车辆名称智能判断车型
+          const upperName = v.name.toUpperCase();
+          let vehicleType: "HINO" | "MACK" = "MACK";
+          let maxBinSize = "40";
+          
+          // HINO 通常是小型车，最大 20yd
+          if (upperName.includes("HINO") || upperName.startsWith("BIN")) {
+            vehicleType = "HINO";
+            maxBinSize = "20";
+          }
+          // FLAT, DUMP, MACK 等都是大型车，最大 40yd
+          else if (upperName.includes("FLAT") || upperName.includes("DUMP") || upperName.includes("MACK")) {
+            vehicleType = "MACK";
+            maxBinSize = "40";
+          }
+          
           uniqueInsertsMap.set(plate, {
             name: v.name,
-            type: "MACK" as const,
+            type: vehicleType,
             plate: plate,
             samsara_id: v.id,
-            max_bin_size: "40",
+            max_bin_size: maxBinSize,
             is_active: true
           });
         }
