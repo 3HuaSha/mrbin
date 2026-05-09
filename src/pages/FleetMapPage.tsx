@@ -77,13 +77,20 @@ export function FleetMapPage() {
   };
 
   const { data: drivers = [] } = useQuery({
-    queryKey: ["drivers-active"],
+    queryKey: ["drivers-assigned"],
     queryFn: async () => {
+      // 获取已分配车辆的司机 ID
+      const { data: assignments } = await supabase
+        .from("driver_vehicle_assignments")
+        .select("driver_id");
+      const assignedIds = (assignments || []).map(a => a.driver_id);
+
       const { data, error } = await supabase
         .from("profiles")
         .select("id,name")
         .eq("role", "driver")
         .eq("is_active", true)
+        .in("id", assignedIds.length > 0 ? assignedIds : ["none"])
         .order("name");
       if (error) throw error;
       return data as Driver[];
