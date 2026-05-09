@@ -148,6 +148,9 @@ export function FleetPage() {
       const driverSamsaraIdToInternalId = new Map<string, string>();
       const driverNameToInternalId = new Map<string, string>();
       
+      // 在应用新分配之前，先清除所有旧分配，确保数据的一致性
+      await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+
       for (const sd of samsaraDrivers) {
         if (!sd.name) continue;
         const { data: existingProfiles } = await supabase.from("profiles").select("id").eq("name", sd.name).eq("role", "driver");
@@ -172,7 +175,6 @@ export function FleetPage() {
         if (assignedVehicle && assignedVehicle.id) {
           const vehicle = insertedVehicles.find(v => v.samsara_id === assignedVehicle.id);
           if (vehicle) {
-            await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", driverId);
             const { error } = await supabase.from("driver_vehicle_assignments").insert({ driver_id: driverId, vehicle_id: vehicle.id });
             if (!error) driverSyncResults.assigned++;
           }
@@ -183,10 +185,14 @@ export function FleetPage() {
       const { data: allCurrentVehicles } = await supabase.from("vehicles").select("id, name, samsara_id, plate");
       const vehiclesForMatching = allCurrentVehicles || insertedVehicles;
 
-      // 在应用新分配之前，先清除所有旧分配，确保“不全”或“对不上”的问题得到解决
-      await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
-
       const processedDriverIds = new Set<string>();
+      // 记录已经在第 2 步分配过的司机，避免重复
+      for (const sd of samsaraDrivers) {
+        if (sd.staticAssignedVehicle || sd.currentVehicle) {
+          const internalId = driverSamsaraIdToInternalId.get(sd.id);
+          if (internalId) processedDriverIds.add(internalId);
+        }
+      }
 
       for (const sa of samsaraAssignments) {
         // 优先通过 ID 找司机，找不到通过名字找
