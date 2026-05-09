@@ -140,6 +140,28 @@ export function FleetMapPage() {
     }
     return map;
   }, [jobSteps]);
+
+  const { data: vehicleAssignments = [] } = useQuery({
+    queryKey: ["driver-vehicle-assignments-map"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("driver_vehicle_assignments")
+        .select("*, vehicles(*)");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const filteredDrivers = useMemo(() => {
+    return drivers.filter(d => {
+      const assignment = vehicleAssignments.find((a: any) => a.driver_id === d.id);
+      if (!assignment) return false;
+      const vName = (assignment.vehicles?.name || "").toUpperCase();
+      if (businessType === 'garbage') return vName.startsWith('BIN');
+      if (businessType === 'brick') return vName.startsWith('FLAT');
+      return true;
+    });
+  }, [drivers, vehicleAssignments, businessType]);
   
   // 为了兼容地图组件，仍然需要 assignments
   const assignments = useMemo(() => {
@@ -296,7 +318,7 @@ export function FleetMapPage() {
         <Card className="w-64 flex flex-col overflow-hidden shrink-0 shadow-sm rounded-none border-r border-t-0 border-l-0 border-b-0">
           <div className="p-3 border-b bg-muted/20 font-semibold text-sm flex items-center gap-2 shrink-0">
             <Truck className="h-4 w-4" />
-            司机任务 ({drivers.length})
+            司机任务 ({filteredDrivers.length})
           </div>
           
           {/* 日期选择器 */}
@@ -310,7 +332,7 @@ export function FleetMapPage() {
           </div>
           
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
-            {drivers.map(d => {
+            {filteredDrivers.map(d => {
               const steps = driverJobSteps[d.id] ?? [];
               const isExpanded = expandedDrivers.has(d.id);
               
@@ -373,20 +395,6 @@ export function FleetMapPage() {
                             // 获取该订单的 ETA
                             const driverETA = driverETAs[d.id];
                             const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
-                            
-                            // 调试日志
-                            console.log('🔍 司机 ETA 数据:', {
-                              driverId: d.id,
-                              driverName: d.name,
-                              orderId: order.id,
-                              orderAddress: order.address,
-                              hasDriverETA: !!driverETA,
-                              orderETACount: driverETA?.orders.length,
-                              foundOrderETA: !!orderETA,
-                              orderETA: orderETA,
-                              orderETAStatus: orderETA?.status,
-                              shouldShow: !!(orderETA && orderETA.status === 'OK')
-                            });
                             
                             return (
                               <div key={step.id} className="relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl">
@@ -457,8 +465,8 @@ export function FleetMapPage() {
                 </div>
               );
             })}
-            {drivers.length === 0 && (
-              <div className="text-xs text-muted-foreground text-center py-6">无活跃司机</div>
+            {filteredDrivers.length === 0 && (
+              <div className="text-xs text-muted-foreground text-center py-6">当前业务无活跃司机</div>
             )}
           </div>
         </Card>
@@ -466,7 +474,7 @@ export function FleetMapPage() {
         {/* 右侧地图 - 移除上方白边 */}
         <div className="flex-1 overflow-hidden relative">
            <DispatchMapWidget 
-             drivers={drivers} 
+             drivers={filteredDrivers} 
              orders={orders} 
              assignments={assignments}
              driverETAs={driverETAs}

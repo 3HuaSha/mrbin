@@ -186,6 +186,39 @@ export function DispatchPage() {
       return data as Vehicle[];
     },
   });
+
+  const { data: vehicleAssignments = [] } = useQuery({
+    queryKey: ["driver-vehicle-assignments-all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("driver_vehicle_assignments")
+        .select("*, vehicles(*)");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // 根据业务类型过滤司机
+  const filteredDrivers = useMemo(() => {
+    return drivers.filter(d => {
+      const assignment = vehicleAssignments.find((a: any) => a.driver_id === d.id);
+      if (!assignment) return false;
+      const vName = (assignment.vehicles?.name || "").toUpperCase();
+      if (businessType === 'garbage') return vName.startsWith('BIN');
+      if (businessType === 'brick') return vName.startsWith('FLAT');
+      return true;
+    });
+  }, [drivers, vehicleAssignments, businessType]);
+
+  // 根据业务类型过滤车辆
+  const filteredVehicles = useMemo(() => {
+    return vehicles.filter(v => {
+      const vName = (v.name || "").toUpperCase();
+      if (businessType === 'garbage') return vName.startsWith('BIN');
+      if (businessType === 'brick') return vName.startsWith('FLAT');
+      return true;
+    });
+  }, [vehicles, businessType]);
   const { data: bins = [] } = useQuery({
     queryKey: ["bins-depot"],
     queryFn: async () => {
@@ -278,10 +311,10 @@ export function DispatchPage() {
   const getDriverVehicle = (driverId: string) => {
     if (driverVehicle[driverId]) return driverVehicle[driverId];
     const fromAssignment = currentAssignments.find((a) => a.driver_id === driverId)?.vehicle_id;
-    return fromAssignment ?? vehicles[0]?.id ?? "";
+    return fromAssignment ?? filteredVehicles[0]?.id ?? "";
   };
   const getVehicle = (driverId: string) =>
-    vehicles.find((v) => v.id === getDriverVehicle(driverId));
+    filteredVehicles.find((v) => v.id === getDriverVehicle(driverId)) || vehicles.find(v => v.id === getDriverVehicle(driverId));
 
   // ============ Mutations ============
   const saveAllChanges = useMutation({
@@ -886,7 +919,7 @@ export function DispatchPage() {
 
             {/* 右侧:司机行 */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/10">
-              {drivers.map((d) => {
+              {filteredDrivers.map((d) => {
                 const list = activeAssignments.filter((a) => a.driver_id === d.id)
                   .sort((x, y) => x.sequence - y.sequence);
                 const driverSteps = currentJobSteps.filter(s => s.driver_id === d.id);
@@ -906,7 +939,7 @@ export function DispatchPage() {
                     key={d.id}
                     driver={d}
                     vehicle={getVehicle(d.id)}
-                    vehicles={vehicles}
+                    vehicles={filteredVehicles}
                     onChangeVehicle={(v) => {
                       setDriverVehicle((prev) => ({ ...prev, [d.id]: v }));
                       if (localAssignments) {
@@ -936,9 +969,9 @@ export function DispatchPage() {
                   />
                 );
               })}
-              {drivers.length === 0 && (
+              {filteredDrivers.length === 0 && (
                 <div className="text-center text-muted-foreground p-12 bg-card rounded-lg border border-dashed">
-                  尚无司机,请到车队页添加。
+                  当前业务下无活跃司机。
                 </div>
               )}
             </div>
