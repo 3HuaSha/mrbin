@@ -77,13 +77,13 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         }
       }
 
-      // 获取所有司机信息
+      // 获取所有司机信息 (包含停用的)
       let allDrivers: any[] = [];
       try {
         let hasNextPage = true;
         let after = '';
         while (hasNextPage) {
-          const url = `https://api.samsara.com/fleet/drivers?limit=512${after ? `&after=${after}` : ''}`;
+          const url = `https://api.samsara.com/fleet/drivers?limit=512&includeDeactivated=true${after ? `&after=${after}` : ''}`;
           const response = await fetch(url, {
             headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
           });
@@ -100,16 +100,21 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       // 获取当前所有司机-车辆分配关系
       let allAssignments: any[] = [];
       try {
-        // 1. 获取显式分配关系 (只保留当前活跃的，即没有 endTime 的)
-        const url = `https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=drivers`;
-        const response = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
-        });
-        if (response.ok) {
-          const result = await response.json();
-          // 过滤掉已结束的分配
-          const activeAssignments = (result.data || []).filter((a: any) => !a.endTime);
-          allAssignments = [...activeAssignments];
+        // 1. 分别从司机和车辆维度获取分配关系
+        const endpoints = [
+          'https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=drivers',
+          'https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=vehicles'
+        ];
+
+        for (const url of endpoints) {
+          const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' }
+          });
+          if (response.ok) {
+            const result = await response.json();
+            const active = (result.data || []).filter((a: any) => !a.endTime);
+            allAssignments = [...allAssignments, ...active];
+          }
         }
 
         // 2. 获取车辆实时状态 (包含当前 OBD 司机)
@@ -118,25 +123,13 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         });
         if (statsResponse.ok) {
           const statsResult = await statsResponse.json();
-          const vehicleStats = statsResult.data || [];
-          
-          vehicleStats.forEach((stat: any) => {
+          (statsResult.data || []).forEach((stat: any) => {
             if (stat.obdDriver?.driver?.id) {
-              // 检查是否已经存在该司机的分配（优先使用 OBD 状态）
-              const driverId = stat.obdDriver.driver.id;
-              const existingIdx = allAssignments.findIndex(a => a.driver?.id === driverId);
-              
-              const newAssign = {
-                driver: { id: driverId, name: stat.obdDriver.driver.name },
+              allAssignments.push({
+                driver: { id: stat.obdDriver.driver.id, name: stat.obdDriver.driver.name },
                 vehicle: { id: stat.id, name: stat.name },
                 isRealtime: true
-              };
-
-              if (existingIdx >= 0) {
-                allAssignments[existingIdx] = newAssign;
-              } else {
-                allAssignments.push(newAssign);
-              }
+              });
             }
           });
         }

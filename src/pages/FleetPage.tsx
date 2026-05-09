@@ -143,12 +143,12 @@ export function FleetPage() {
         insertedVehicles = vData || [];
       }
 
-      // 2. 同步司机
+      // 2. 同步司机 (包含停用的，确保历史分配能对应上)
       const driverSyncResults = { added: 0, updated: 0, assigned: 0 };
       const driverSamsaraIdToInternalId = new Map<string, string>();
       const driverNameToInternalId = new Map<string, string>();
       
-      // 在应用新分配之前，先清除所有旧分配，确保数据的一致性
+      // 在应用新分配之前，先清除所有旧分配
       await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
 
       for (const sd of samsaraDrivers) {
@@ -169,60 +169,65 @@ export function FleetPage() {
         
         driverSamsaraIdToInternalId.set(sd.id, driverId);
         driverNameToInternalId.set(sd.name.toUpperCase(), driverId);
-
-        // 自动分配车辆 (Static/Current)
-        const assignedVehicle = sd.staticAssignedVehicle || sd.currentVehicle;
-        if (assignedVehicle && assignedVehicle.id) {
-          const vehicle = insertedVehicles.find(v => v.samsara_id === assignedVehicle.id);
-          if (vehicle) {
-            const { error } = await supabase.from("driver_vehicle_assignments").insert({ driver_id: driverId, vehicle_id: vehicle.id });
-            if (!error) driverSyncResults.assigned++;
-          }
-        }
       }
 
-      // 3. 专门分配接口 + Fallback 匹配
+      // 3. 专门分配接口 + OBD 实时数据匹配
       const { data: allCurrentVehicles } = await supabase.from("vehicles").select("id, name, samsara_id, plate");
       const vehiclesForMatching = allCurrentVehicles || insertedVehicles;
 
-      const processedDriverIds = new Set<string>();
-      // 记录已经在第 2 步分配过的司机，避免重复
+      // 准备待处理的分配列表 (优先级：OBD > 显式分配 > 静态分配)
+      const pendingAssignments = new Map<string, string>(); // driverId -> vehicleId
+
+      // A. 静态分配 (从司机列表中提取)
       for (const sd of samsaraDrivers) {
-        if (sd.staticAssignedVehicle || sd.currentVehicle) {
-          const internalId = driverSamsaraIdToInternalId.get(sd.id);
-          if (internalId) processedDriverIds.add(internalId);
+        const internalDriverId = driverSamsaraIdToInternalId.get(sd.id);
+        const assignedVehicle = sd.staticAssignedVehicle || sd.currentVehicle;
+        if (internalDriverId && assignedVehicle?.id) {
+          const vehicle = vehiclesForMatching.find(v => v.samsara_id === assignedVehicle.id);
+          if (vehicle) pendingAssignments.set(internalDriverId, vehicle.id);
         }
       }
 
+      // B. 显式分配与 OBD 数据 (从 samsaraAssignments 提取)
       for (const sa of samsaraAssignments) {
-        // 优先通过 ID 找司机，找不到通过名字找
         let internalDriverId = driverSamsaraIdToInternalId.get(sa.driver?.id);
         if (!internalDriverId && sa.driver?.name) {
           internalDriverId = driverNameToInternalId.get(sa.driver.name.toUpperCase());
         }
         
-        if (!internalDriverId || processedDriverIds.has(internalDriverId)) continue;
+        if (!internalDriverId) continue;
 
         let internalVehicle = vehiclesForMatching.find(v => v.samsara_id === sa.vehicle?.id);
+        
+        // 只有在 ID 匹配不到时才尝试名称匹配
         if (!internalVehicle && sa.vehicle?.name) {
           const samsaraVName = sa.vehicle.name.toUpperCase().replace(/[^A-Z0-9]/g, '');
-          internalVehicle = vehiclesForMatching.find(v => (v.name.toUpperCase().replace(/[^A-Z0-9]/g, '') === samsaraVName) || (v.plate.toUpperCase().replace(/[^A-Z0-9]/g, '') === samsaraVName));
+          internalVehicle = vehiclesForMatching.find(v => {
+            const vName = v.name.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            return vName === samsaraVName;
+          });
         }
         
         if (internalVehicle) {
-          const { error } = await supabase.from("driver_vehicle_assignments").insert({ driver_id: internalDriverId, vehicle_id: internalVehicle.id });
-          if (!error) {
-            driverSyncResults.assigned++;
-            processedDriverIds.add(internalDriverId);
-          }
+          pendingAssignments.set(internalDriverId, internalVehicle.id);
         }
       }
       
-      const { data: finalAssignments } = await supabase.from("driver_vehicle_assignments").select("id");
-      return { totalVehicles: samsaraVehicles.length, addedVehicles: inserts.length, driversAdded: driverSyncResults.added, driversUpdated: driverSyncResults.updated, autoAssigned: finalAssignments?.length || 0 };
+      // 执行批量分配写入
+      const assignmentInserts = Array.from(pendingAssignments.entries()).map(([dId, vId]) => ({
+        driver_id: dId,
+        vehicle_id: vId
+      }));
+
+      if (assignmentInserts.length > 0) {
+        const { error } = await supabase.from("driver_vehicle_assignments").insert(assignmentInserts);
+        if (!error) driverSyncResults.assigned = assignmentInserts.length;
+      }
+      
+      return { totalVehicles: samsaraVehicles.length, addedVehicles: inserts.length, driversAdded: driverSyncResults.added, driversUpdated: driverSyncResults.updated, autoAssigned: assignmentInserts.length };
     },
     onSuccess: (res) => {
-      toast.success(`同步成功！车辆: +${res.addedVehicles}, 司机: +${res.driversAdded}/~${res.driversUpdated}, 当前活跃分配: ${res.autoAssigned}`);
+      toast.success(`同步成功！车辆: +${res.addedVehicles}, 司机: +${res.driversAdded}/~${res.driversUpdated}, 活跃分配: ${res.autoAssigned}`);
       qc.invalidateQueries({ queryKey: ["vehicles-all"] });
       qc.invalidateQueries({ queryKey: ["drivers-all"] });
       qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] });
