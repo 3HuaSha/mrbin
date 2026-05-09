@@ -21,8 +21,8 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       ];
 
       for (const ep of endpoints) {
-        hasNextPage = true;
-        after = '';
+        let hasNextPage = true;
+        let after = '';
         while (hasNextPage) {
           const url = `${ep.url}${after ? (ep.url.includes('?') ? `&after=${after}` : `?after=${after}`) : ''}`;
           try {
@@ -61,8 +61,8 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       ];
 
       for (const endpoint of locationEndpoints) {
-        hasNextPage = true;
-        after = '';
+        let hasNextPage = true;
+        let after = '';
         while (hasNextPage) {
           const url = `${endpoint}${after ? `?after=${after}` : ''}`;
           const response = await fetch(url, {
