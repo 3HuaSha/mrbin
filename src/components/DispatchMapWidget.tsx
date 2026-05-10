@@ -644,234 +644,113 @@ function createVehicleIconWithLabel(vehicleType: string, driverName: string): st
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-// 辅助函数: 创建带标签的订单图标
+// 辅助函数: 创建订单标记 (单行窄徽章, 紧凑清爽)
 function createOrderIconWithLabel(order: any, orderETA?: any): string {
-  // 为每种订单类型定义配色方案 - 使用高对比度颜色
-  const colorSchemes: Record<string, { bg: string; text: string; border: string; badge: string }> = {
-    'delivery': { bg: '#2196F3', text: '#FFFFFF', border: '#0D47A1', badge: '#BBDEFB' },  // 蓝色系
-    'pickup': { bg: '#4CAF50', text: '#FFFFFF', border: '#1B5E20', badge: '#C8E6C9' },    // 绿色系
-    'swap': { bg: '#9C27B0', text: '#FFFFFF', border: '#4A148C', badge: '#E1BEE7' }       // 紫色系
+  // 订单类型配色
+  const colorSchemes: Record<string, { bg: string; text: string; border: string }> = {
+    'delivery': { bg: '#2196F3', text: '#FFFFFF', border: '#0D47A1' },  // 蓝
+    'pickup':   { bg: '#4CAF50', text: '#FFFFFF', border: '#1B5E20' },  // 绿
+    'swap':     { bg: '#9C27B0', text: '#FFFFFF', border: '#4A148C' },  // 紫
   };
-  
-  const scheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', border: '#E65100', badge: '#FFE0B2' };
-  
-  // 订单类型中文映射
+  const scheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', border: '#E65100' };
+
   const typeNames: Record<string, string> = {
-    'delivery': '送',
-    'pickup': '收',
-    'swap': '换',
-    'material': '料'
+    delivery: '送', pickup: '收', swap: '换', material: '料',
   };
   const typeName = typeNames[order.type] || order.type;
-  
-  // 桶类型emoji映射
+
   const binTypeEmojis: Record<string, string> = {
-    'garbage': '🗑️',
-    'brick': '🧱',
-    'soil': '🪨',
-    'cement': '🏗️',
-    'asphalt': '🛣️'
+    garbage: '🗑', brick: '🧱', soil: '🪨', cement: '🏗', asphalt: '🛣',
   };
-  const binEmoji = binTypeEmojis[order.bin_type] || '📦';
-  
-  // 提取地址：街号 + 街道名 + 城市
-  // 例如：102 Fenelon Dr, North York, ON M3A 3K6 -> 102 Fenelon Dr, North York
-  const extractAddress = (addr: string): string => {
-    if (!addr) return '';
-    
-    // 分割地址
-    const parts = addr.split(',').map(p => p.trim());
-    
-    if (parts.length >= 2) {
-      // 第一部分：街号 + 街道名
-      const street = parts[0];
-      // 第二部分：城市名（去掉省份和邮编）
-      const cityPart = parts[1].split(/\s+/)[0]; // 只取第一个词作为城市
-      
-      return `${street}, ${cityPart}`;
-    }
-    
-    return parts[0] || addr.substring(0, 25);
-  };
-  
-  // 构建标签文本
-  const binSize = order.bin_size || '';
-  const mainText = `${binEmoji}${typeName}${binSize}`;
-  const addressText = extractAddress(order.address);
-  
-  // 时段信息（如果有）
+  const binEmoji = binTypeEmojis[order.bin_type] || '';
+
+  const binSize = order.bin_size ? `${order.bin_size}yd` : '';
   const timeDisplay = order.time_window_custom || order.time_window || '';
-  
-  // 动态计算宽度
-  const addressWidth = Math.max(addressText.split('').reduce((width, char) => {
-    return width + (/[\u4e00-\u9fa5]/.test(char) ? 11 : 7);
-  }, 0), 70);
-  
-  const badgeWidth = Math.min(Math.max(addressWidth + 16, 90), 140);
-  const svgWidth = badgeWidth + 10;
-  
-  const badgeX = (svgWidth - badgeWidth) / 2;
-  const pinX = svgWidth / 2;
-  
-  // ETA信息（如果有）
+
+  // 主徽章文本: 类型 + 尺寸 + 时段, 单行
+  // 例: "送 20yd · 14:00" / "换 30yd · AM"
+  const parts = [typeName, binSize, timeDisplay].filter(Boolean);
+  const mainText = parts.join(' · ');
+
+  // ETA 右上角小徽章
   let etaText = '';
   if (orderETA && orderETA.status === 'OK') {
-    const etaTime = new Date(orderETA.eta).toLocaleTimeString('zh-CN', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
+    etaText = new Date(orderETA.eta).toLocaleTimeString('zh-CN', {
+      hour: '2-digit', minute: '2-digit', hour12: false,
     });
-    etaText = etaTime;
   }
-  
-  // 计算总高度
-  let currentY = 0;
-  const mainBadgeHeight = 26;
-  const addressBadgeHeight = 18;
-  const timeBadgeHeight = 16;
-  const etaBadgeHeight = 14;
-  const spacing = 2;
-  
-  currentY += mainBadgeHeight;
-  const addressY = currentY;
-  currentY += addressBadgeHeight + spacing;
-  
-  const timeY = timeDisplay ? currentY : 0;
-  if (timeDisplay) currentY += timeBadgeHeight + spacing;
-  
-  const etaY = etaText ? currentY : 0;
-  if (etaText) currentY += etaBadgeHeight + spacing;
-  
-  const pinStartY = currentY;
-  const svgHeight = currentY + 3 + 18; // 连接线 + 图钉
-  
-  // 创建SVG - 紧凑的徽章样式
+
+  // 宽度按文本动态计算 (中文字符按 14 计, 英数按 7 计)
+  const mainCharWidth = mainText.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 14 : 7), 0);
+  const badgeWidth = Math.max(mainCharWidth + 18, 80);
+  const svgWidth = badgeWidth + (etaText ? 46 : 6);
+  const svgHeight = 38; // 徽章 22 + 间距 2 + 图钉 14
+
+  const badgeX = 3;
+  const badgeY = 0;
+  const badgeH = 22;
+  const pinCx = badgeX + badgeWidth / 2;
+
   const svg = `
-    <svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
-      <defs>
-        <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
-          <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.4"/>
-        </filter>
-      </defs>
-      
-      <!-- 主徽章 - 订单类型 + 尺寸 -->
-      <rect x='${badgeX}' y='0' width='${badgeWidth}' height='${mainBadgeHeight}' rx='13' 
-            fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='3' opacity='0.95' filter="url(#shadow)"/>
-      <text x='${svgWidth/2}' y='18' text-anchor='middle' font-size='15' font-weight='bold' 
-            fill='${scheme.text}' font-family='Arial, sans-serif'>${mainText}</text>
-      
-      <!-- 地址徽章 -->
-      <rect x='${badgeX}' y='${addressY}' width='${badgeWidth}' height='${addressBadgeHeight}' rx='9' 
-            fill='${scheme.badge}' stroke='${scheme.border}' stroke-width='1.5' opacity='0.95'/>
-      <text x='${svgWidth/2}' y='${addressY + 13}' text-anchor='middle' font-size='10' font-weight='600' 
-            fill='${scheme.border}' font-family='Arial, sans-serif'>${addressText}</text>
-      
-      <!-- 时段标签（如果有） -->
-      ${timeDisplay ? `
-        <rect x='${badgeX}' y='${timeY}' width='${badgeWidth}' height='${timeBadgeHeight}' rx='8' 
-              fill='${scheme.badge}' stroke='${scheme.border}' stroke-width='1.5' opacity='0.9'/>
-        <text x='${svgWidth/2}' y='${timeY + 11}' text-anchor='middle' font-size='9' font-weight='600' 
-              fill='${scheme.border}' font-family='Arial, sans-serif'>${timeDisplay}</text>
-      ` : ''}
-      
-      <!-- ETA标签（如果有） -->
-      ${etaText ? `
-        <rect x='${badgeX}' y='${etaY}' width='${badgeWidth}' height='${etaBadgeHeight}' rx='7' 
-              fill='#FFD700' stroke='#FF8F00' stroke-width='1.5' opacity='0.95'/>
-        <text x='${svgWidth/2}' y='${etaY + 10}' text-anchor='middle' font-size='9' font-weight='bold' 
-              fill='#000000' font-family='Arial, sans-serif'>⏱${etaText}</text>
-      ` : ''}
-      
-      <!-- 连接线到图钉 -->
-      <line x1='${pinX}' y1='${pinStartY}' x2='${pinX}' y2='${pinStartY + 3}' 
-            stroke='${scheme.border}' stroke-width='2.5'/>
-      
-      <!-- 底部图钉 -->
-      <g transform='translate(${pinX - 10}, ${pinStartY + 3})'>
-        <circle cx='10' cy='9' r='9' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='2.5'/>
-        <circle cx='10' cy='9' r='4' fill='${scheme.text}'/>
-      </g>
-    </svg>
-  `.trim();
-  
+<svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
+  <defs>
+    <filter id='s' x='-20%' y='-20%' width='140%' height='140%'>
+      <feDropShadow dx='0' dy='1' stdDeviation='1.5' flood-opacity='0.35'/>
+    </filter>
+  </defs>
+  <!-- 主徽章 -->
+  <rect x='${badgeX}' y='${badgeY}' width='${badgeWidth}' height='${badgeH}' rx='11'
+        fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5' filter='url(#s)'/>
+  <text x='${badgeX + badgeWidth / 2}' y='${badgeY + 15}' text-anchor='middle'
+        font-size='12' font-weight='bold' fill='${scheme.text}'
+        font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${escapeXml(binEmoji + (binEmoji ? ' ' : '') + mainText)}</text>
+
+  ${etaText ? `
+  <!-- ETA 小徽章 -->
+  <rect x='${badgeX + badgeWidth + 4}' y='${badgeY + 2}' width='38' height='18' rx='9'
+        fill='#FFD54F' stroke='#F57F17' stroke-width='1' filter='url(#s)'/>
+  <text x='${badgeX + badgeWidth + 23}' y='${badgeY + 15}' text-anchor='middle'
+        font-size='10' font-weight='bold' fill='#333'
+        font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${etaText}</text>
+  ` : ''}
+
+  <!-- 连接线 + 图钉 -->
+  <line x1='${pinCx}' y1='${badgeH}' x2='${pinCx}' y2='${badgeH + 4}' stroke='${scheme.border}' stroke-width='2'/>
+  <circle cx='${pinCx}' cy='${badgeH + 9}' r='5' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5'/>
+  <circle cx='${pinCx}' cy='${badgeH + 9}' r='2' fill='${scheme.text}'/>
+</svg>`.trim();
+
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-// 辅助函数: 更新订单的图标
+function escapeXml(s: string): string {
+  return s.replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]!));
+}
+
+// 辅助函数: 更新订单的图标 (单行窄徽章)
 function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: any[], orderETA?: any) {
   const iconUrl = createOrderIconWithLabel(order, orderETA);
-  
-  // 提取街道号和城市名
-  const extractAddressShort = (addr: string): string => {
-    if (!addr) return '';
-    const streetNumberMatch = addr.match(/^\d+[A-Za-z]?/);
-    const streetNumber = streetNumberMatch ? streetNumberMatch[0] : '';
-    const parts = addr.split(',').map(p => p.trim());
-    const city = parts.length > 1 ? parts[1].split(' ')[0] : '';
-    return streetNumber && city ? `${streetNumber}, ${city}` : addr.substring(0, 20);
-  };
-  
-  // 显示自定义时段或默认时段
-  const timeDisplay = order.time_window_custom || order.time_window || '';
-  
-  // 桶类型中文映射
-  const binTypeNames: Record<string, string> = {
-    'garbage': '垃圾桶',
-    'brick': '砖桶',
-    'soil': '土桶',
-    'cement': '水泥桶',
-    'asphalt': '沥青桶'
-  };
-  const binTypeName = binTypeNames[order.bin_type] || '桶';
-  
-  // 计算图标尺寸 - 缩小尺寸
-  const binSize = order.bin_size || '';
-  const typeNames: Record<string, string> = {
-    'delivery': '送',
-    'pickup': '收',
-    'swap': '换',
-    'material': '料'
-  };
+
+  // 跟 createOrderIconWithLabel 保持一致的尺寸计算
+  const typeNames: Record<string, string> = { delivery: '送', pickup: '收', swap: '换', material: '料' };
   const typeName = typeNames[order.type] || order.type;
-  
-  // 提取地址：街号 + 街道名 + 城市
-  const extractAddress = (addr: string): string => {
-    if (!addr) return '';
-    const parts = addr.split(',').map(p => p.trim());
-    if (parts.length >= 2) {
-      const street = parts[0];
-      const cityPart = parts[1].split(/\s+/)[0];
-      return `${street}, ${cityPart}`;
-    }
-    return parts[0] || addr.substring(0, 25);
-  };
-  
-  const addressText = extractAddress(order.address);
-  const addressWidth = Math.max(addressText.split('').reduce((width, char) => {
-    return width + (/[\u4e00-\u9fa5]/.test(char) ? 11 : 7);
-  }, 0), 70);
-  
-  const badgeWidth = Math.min(Math.max(addressWidth + 16, 90), 140);
-  
-  // 计算高度
-  let height = 26 + 18 + 2; // 主徽章 + 地址徽章 + 间距
-  if (timeDisplay) height += 16 + 2; // 时段徽章
-  
-  // 如果有ETA，添加ETA行
-  let hasETA = false;
-  if (orderETA && orderETA.status === 'OK') {
-    hasETA = true;
-    height += 14 + 2; // ETA徽章
-  }
-  
-  height += 3 + 18; // 连接线 + 图钉
-  
-  const width = badgeWidth + 10;
-  
+  const binTypeEmojis: Record<string, string> = { garbage: '🗑', brick: '🧱', soil: '🪨', cement: '🏗', asphalt: '🛣' };
+  const binEmoji = binTypeEmojis[order.bin_type] || '';
+  const binSize = order.bin_size ? `${order.bin_size}yd` : '';
+  const timeDisplay = order.time_window_custom || order.time_window || '';
+  const parts = [typeName, binSize, timeDisplay].filter(Boolean);
+  const mainText = (binEmoji ? binEmoji + ' ' : '') + parts.join(' · ');
+
+  const mainCharWidth = mainText.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 14 : 7), 0);
+  const badgeWidth = Math.max(mainCharWidth + 18, 80);
+  const hasETA = !!(orderETA && orderETA.status === 'OK');
+  const width = badgeWidth + (hasETA ? 46 : 6);
+  const height = 38;
+
   marker.setIcon({
     url: iconUrl,
     scaledSize: new (window as any).google.maps.Size(width, height),
-    anchor: new (window as any).google.maps.Point(width / 2, height),
+    anchor: new (window as any).google.maps.Point((badgeWidth / 2) + 3, height),
   });
 }
 

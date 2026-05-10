@@ -5,6 +5,11 @@
 
 import { calculateSamsaraRouteForVehicle } from "@/actions/samsara";
 
+// 卡车速度系数 (Google Routes 返回轿车时长, 卡车更慢)
+const TRUCK_SPEED_FACTOR = 1.2;
+// 每到一站的作业时间 (秒)
+const STOP_DURATION_SEC = 15 * 60;
+
 export interface ETAResult {
   orderId: string;
   orderAddress: string;
@@ -89,14 +94,15 @@ export async function calculateDriverETAWithSamsara(
     }
 
     // 解析路线数据，为每个订单生成 ETA
+    // 每段 duration * TRUCK_SPEED_FACTOR, 到达每站后加 STOP_DURATION_SEC 作业时间
     const results: ETAResult[] = [];
     let cumulativeDuration = 0;
 
-    // routeData.legs 包含每段路线的信息
     routeData.legs?.forEach((leg: any, index: number) => {
       if (index < orders.length) {
         const order = orders[index];
-        cumulativeDuration += leg.duration || 0;
+        const adjustedDriveSec = (leg.duration || 0) * TRUCK_SPEED_FACTOR;
+        cumulativeDuration += adjustedDriveSec;
 
         const eta = new Date(Date.now() + cumulativeDuration * 1000);
 
@@ -104,10 +110,13 @@ export async function calculateDriverETAWithSamsara(
           orderId: order.id,
           orderAddress: order.address,
           distance: leg.distance || 0,
-          duration: leg.duration || 0,
-          eta: eta.toISOString(), // 转换为 ISO 字符串
+          duration: adjustedDriveSec,
+          eta: eta.toISOString(),
           status: 'OK',
         });
+
+        // 下一站开始前, 先算本站 15 分钟作业时间
+        cumulativeDuration += STOP_DURATION_SEC;
       }
     });
 
