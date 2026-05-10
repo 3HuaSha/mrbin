@@ -138,6 +138,48 @@ export function FleetPage() {
       const activeVehicleIds = getActiveVehicleIds(sStats);
       console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆 (引擎 On/Idle 且 1 小时内更新)`);
 
+      // ---- 活跃判定调试: 列出每辆车的 stats 原始数据和判定结果 ----
+      console.group('🔎 [活跃判定调试] 每辆车的 stats 详情');
+      const nowMs = Date.now();
+      const statsTable = sStats.map((s: any) => {
+        const lastTime = s.engineState?.time || s.engineRpm?.time || s.ecuSpeedMph?.time;
+        const ageMin = lastTime ? Math.round((nowMs - new Date(lastTime).getTime()) / 60000) : null;
+        return {
+          name: s.name || '-',
+          id: s.id,
+          engineState: s.engineState?.value || '-',
+          engineStateTime: s.engineState?.time || '-',
+          ageMin: ageMin === null ? '-' : `${ageMin} 分钟前`,
+          rpm: s.engineRpm?.value ?? '-',
+          speed: s.ecuSpeedMph?.value ?? '-',
+          obdDriver: s.obdDriver?.driver?.name || '-',
+          isActive: activeVehicleIds.has(s.id) ? '✅' : '❌',
+        };
+      });
+      console.table(statsTable);
+
+      // 找出 "引擎 On/Idle 但因为超过 1 小时被排除的车" —— 这往往是你说的"在动但没识别"
+      const staleActive = sStats.filter((s: any) => {
+        const v = s.engineState?.value;
+        const t = s.engineState?.time;
+        if ((v !== 'On' && v !== 'Idle') || !t) return false;
+        const age = nowMs - new Date(t).getTime();
+        return age > 60 * 60 * 1000; // 超过 1 小时
+      });
+      if (staleActive.length > 0) {
+        console.warn(`⚠️ [活跃判定] ${staleActive.length} 辆车引擎=On/Idle 但最后更新超过 1 小时,被判为不活跃:`, 
+          staleActive.map((s: any) => ({ name: s.name, state: s.engineState?.value, time: s.engineState?.time })));
+      }
+
+      // 找出 "stats 里完全没数据的车" —— Samsara 没吐 engineState
+      const vehiclesInStats = new Set(sStats.map((s: any) => s.id));
+      const vehiclesNotInStats = sVehicles.filter((v: any) => !vehiclesInStats.has(v.id));
+      if (vehiclesNotInStats.length > 0) {
+        console.warn(`⚠️ [活跃判定] ${vehiclesNotInStats.length} 辆车在 /vehicles 有但在 /stats 没返回:`,
+          vehiclesNotInStats.map((v: any) => ({ name: v.name, id: v.id })));
+      }
+      console.groupEnd();
+
       // ---- 步骤 1a: 过滤名称为空的车 ----
       const filteredOut = sVehicles.filter((v: any) => !v.name);
       if (filteredOut.length > 0) {

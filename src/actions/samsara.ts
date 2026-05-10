@@ -17,7 +17,8 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       let vStatus = 0;
       let vPages = 0;
       do {
-        const url = `https://api.samsara.com/fleet/vehicles?limit=512${vAfter ? `&after=${encodeURIComponent(vAfter)}` : ''}`;
+        // includeDeactivated=true 可以把 Samsara 后台停用的车也拉回来（便于排查"少一辆"问题）
+        const url = `https://api.samsara.com/fleet/vehicles?limit=512&includeDeactivated=true${vAfter ? `&after=${encodeURIComponent(vAfter)}` : ''}`;
         const vRes = await fetch(url, { headers });
         vStatus = vRes.status;
         if (!vRes.ok) {
@@ -42,15 +43,30 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       const dRes = await fetch('https://api.samsara.com/fleet/drivers?limit=512&includeDeactivated=true', { headers });
       const drivers = dRes.ok ? (await dRes.json()).data : [];
 
-      // 4. 获取实时分配 (修正 400 错误：添加必要的 filterBy)
-      // 注意：有些账号可能不支持不带参数的调用
-      const aRes = await fetch('https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=drivers', { headers });
-      let assignments = [];
+      // 4. 获取实时分配
+      // 先尝试带 filterBy=drivers（有些账号需要）；失败或空则回退到不带参数
+      let aRes = await fetch('https://api.samsara.com/fleet/driver-vehicle-assignments?filterBy=drivers', { headers });
+      let assignments: any[] = [];
+      let aStatusFinal = aRes.status;
       if (aRes.ok) {
         const result = await aRes.json();
         assignments = (result.data || []).filter((a: any) => !a.endTime);
+        console.log(`📌 [Assignments] filterBy=drivers 返回 ${assignments.length} 条`);
       } else {
-        console.warn(`[Assignments API Error] Status: ${aRes.status}`);
+        console.warn(`[Assignments API Error] filterBy=drivers 状态 ${aRes.status}`);
+      }
+      // 如果返回 0 条，尝试不带 filterBy 的调用作为回退
+      if (assignments.length === 0) {
+        console.log('🔁 [Assignments] 尝试不带 filterBy 的回退调用');
+        const aRes2 = await fetch('https://api.samsara.com/fleet/driver-vehicle-assignments', { headers });
+        aStatusFinal = aRes2.status;
+        if (aRes2.ok) {
+          const result2 = await aRes2.json();
+          assignments = (result2.data || []).filter((a: any) => !a.endTime);
+          console.log(`📌 [Assignments] 回退调用返回 ${assignments.length} 条`);
+        } else {
+          console.warn(`[Assignments Fallback Error] 状态 ${aRes2.status}`);
+        }
       }
 
       // 5. 获取车辆实时状态
@@ -118,7 +134,7 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
           vStatus,
           vPages,
           vCount: vehicles.length,
-          aStatus: aRes.status,
+          aStatus: aStatusFinal,
           sStatus: sRes1.status,
           lStatus: lRes.status,
           statsCount: vehicleStats.length
