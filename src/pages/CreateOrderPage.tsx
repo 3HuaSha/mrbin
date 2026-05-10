@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ORDER_TYPES, todayISO, tomorrowISO, formatPhone } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -41,8 +42,47 @@ export function CreateOrderPage() {
   const [form, setForm] = useState(empty());
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [lastCreated, setLastCreated] = useState<string | null>(null);
+  const [swapLinkedOrderId, setSwapLinkedOrderId] = useState<string | null>(null);
+  const [showSwapPicker, setShowSwapPicker] = useState(false);
   const qc = useQueryClient();
   const audit = useAudit();
+
+  // 当是换桶单且输入了地址时,查找同地址同尺寸的未回收桶/未完成的送桶单
+  const { data: activeDeliveriesAtAddress = [] } = useQuery({
+    queryKey: ["active-deliveries-at", form.address, form.bin_size],
+    enabled: form.type === "swap" && form.address.trim().length >= 3,
+    queryFn: async () => {
+      const addr = form.address.trim();
+      const { data, error } = await supabase
+        .from("orders")
+        .select("id, order_number, address, bin_size, bin_type, service_date, customer_name, status, linked_order_id")
+        .eq("type", "delivery")
+        .ilike("address", `%${addr}%`)
+        .eq("bin_size", form.bin_size)
+        .is("linked_order_id", null)  // 只显示还没关联收桶单的
+        .order("service_date", { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  // 用户改类型或地址时重置关联
+  useEffect(() => {
+    if (form.type !== "swap") {
+      setSwapLinkedOrderId(null);
+      setShowSwapPicker(false);
+    }
+  }, [form.type]);
+
+  useEffect(() => {
+    if (form.type === "swap" && form.address.trim().length >= 3) {
+      setShowSwapPicker(true);
+    } else {
+      setShowSwapPicker(false);
+    }
+    setSwapLinkedOrderId(null);
+  }, [form.address, form.bin_size]);
 
   // 格式化时间范围为字符串
   const formatTimeRange = (slot: TimeSlot, range: [number, number] | null): string => {
@@ -95,6 +135,47 @@ export function CreateOrderPage() {
         customer_notes: payload.customer_notes.trim() || null,
         netsuite_order_id: null,
       };
+
+      // 换桶订单: 创建 delivery (新桶) + 在原 delivery 订单号下新增 pickup 记录, 互相关联
+      if (payload.type === "swap") {
+        if (!swapLinkedOrderId) {
+          throw new Error("请先选择同地址待回收的桶");
+        }
+        // 查原送桶单拿到 order_number
+        const { data: linkedOrder, error: linkedErr } = await supabase
+          .from("orders")
+          .select("order_number")
+          .eq("id", swapLinkedOrderId)
+          .single();
+        if (linkedErr || !linkedOrder) throw new Error("无法找到关联的送桶订单");
+
+        // 1) 创建 delivery 新桶 (type 改为 delivery, 触发器生成新单号)
+        const { data: newDelivery, error: dErr } = await supabase
+          .from("orders")
+          .insert({ ...insertPayload, type: "delivery" })
+          .select("id, order_number, type, address, customer_name")
+          .single();
+        if (dErr) throw dErr;
+
+        // 2) 创建 pickup 记录,沿用旧单号 (order_number + type=pickup 复合唯一)
+        const { data: pickupRow, error: pErr } = await supabase
+          .from("orders")
+          .insert({
+            ...insertPayload,
+            type: "pickup",
+            order_number: linkedOrder.order_number,
+            linked_order_id: newDelivery.id,
+          })
+          .select("id")
+          .single();
+        if (pErr) throw pErr;
+
+        // 3) 回填 delivery 的 linked_order_id 指向 pickup
+        await supabase.from("orders").update({ linked_order_id: pickupRow.id }).eq("id", newDelivery.id);
+
+        return newDelivery;
+      }
+
       const { data, error } = await supabase.from("orders").insert(insertPayload).select("id,order_number,type,address,customer_name").single();
       if (error) throw error;
       return data;
@@ -112,6 +193,8 @@ export function CreateOrderPage() {
       const lastType = form.type;
       setForm(empty(lastType));
       setErrors({});
+      setSwapLinkedOrderId(null);
+      setShowSwapPicker(false);
       qc.invalidateQueries({ queryKey: ["orders"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -124,6 +207,10 @@ export function CreateOrderPage() {
     if (!form.customer_contact.trim()) e2.customer_contact = true;
     setErrors(e2);
     if (Object.keys(e2).length) return;
+    if (form.type === "swap" && !swapLinkedOrderId) {
+      toast.error("换桶订单必须选择同地址待回收的桶对应订单");
+      return;
+    }
     submit.mutate(form);
   };
 
@@ -494,6 +581,46 @@ export function CreateOrderPage() {
                   placeholder="123 Main St, Toronto, ON"
                   className={cn("h-10 text-sm rounded-lg border-2", errors.address && "border-red-500")}
                 />
+                {/* 换桶: 显示同地址待回收桶的订单 */}
+                {form.type === "swap" && showSwapPicker && (
+                  <div className="mt-2 p-3 bg-blue-50 border-2 border-blue-200 rounded-lg">
+                    <div className="text-xs font-bold text-blue-800 mb-2">
+                      🔵 选择对应待回收桶的订单号 ({form.bin_size}yd)
+                    </div>
+                    {activeDeliveriesAtAddress.length === 0 ? (
+                      <div className="text-xs text-gray-500 italic">
+                        未找到该地址 {form.bin_size}yd 的现场桶。请确认地址与尺寸。
+                      </div>
+                    ) : (
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {activeDeliveriesAtAddress.map((o: any) => {
+                          const isSel = swapLinkedOrderId === o.id;
+                          return (
+                            <button
+                              key={o.id}
+                              type="button"
+                              onClick={() => setSwapLinkedOrderId(isSel ? null : o.id)}
+                              className={cn(
+                                "w-full flex items-center justify-between px-3 py-2 rounded border-2 text-left transition-all",
+                                isSel
+                                  ? "bg-blue-500 text-white border-blue-600 shadow"
+                                  : "bg-white border-gray-200 hover:border-blue-400"
+                              )}
+                            >
+                              <div className="min-w-0">
+                                <div className="font-mono font-bold text-sm">{o.order_number}</div>
+                                <div className={cn("text-[10px] truncate", isSel ? "text-blue-100" : "text-gray-500")}>
+                                  {o.service_date} · {o.customer_name} · {o.bin_size}yd
+                                </div>
+                              </div>
+                              {isSel && <span className="text-xs font-bold">✓ 已选</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               
               {/* 联系方式和备注一行 */}

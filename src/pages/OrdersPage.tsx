@@ -37,6 +37,7 @@ type Order = {
   customer_notes: string | null;
   status: string;
   netsuite_order_id: string | null;
+  linked_order_id?: string | null;
 };
 
 export function OrdersPage() {
@@ -52,6 +53,7 @@ export function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [hideDone, setHideDone] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<Order | null>(null);
 
@@ -60,7 +62,7 @@ export function OrdersPage() {
     queryFn: async () => {
       let q = supabase
         .from("orders")
-        .select("*")
+        .select("*, linked_order_id")
         .gte("service_date", from)
         .lte("service_date", to)
         .eq("business_type", businessType)
@@ -75,15 +77,40 @@ export function OrdersPage() {
   });
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return orders;
-    const s = search.toLowerCase();
-    return orders.filter(
-      (o) =>
-        o.order_number.toLowerCase().includes(s) ||
-        o.customer_name.toLowerCase().includes(s) ||
-        o.address.toLowerCase().includes(s),
-    );
-  }, [orders, search]);
+    let list = orders;
+    if (hideDone) list = list.filter(o => o.status !== "done" && o.status !== "cancelled");
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      list = list.filter(
+        (o) =>
+          o.order_number.toLowerCase().includes(s) ||
+          o.customer_name.toLowerCase().includes(s) ||
+          o.address.toLowerCase().includes(s),
+      );
+    }
+    return list;
+  }, [orders, search, hideDone]);
+
+  // 换桶: 把 pickup 挂在对应 delivery 下面作为子行, 不单独出现在列表顶层
+  const groupedRows = useMemo(() => {
+    const pickupByLinked = new Map<string, Order>();
+    filtered.forEach(o => {
+      if (o.type === "pickup" && o.linked_order_id) pickupByLinked.set(o.linked_order_id, o);
+    });
+    const out: Array<{ main: Order; child?: Order }> = [];
+    const consumedIds = new Set<string>();
+    filtered.forEach(o => {
+      // 跳过已经作为子行的 pickup
+      if (o.type === "pickup" && o.linked_order_id && filtered.some(x => x.id === o.linked_order_id)) {
+        return;
+      }
+      if (consumedIds.has(o.id)) return;
+      const child = pickupByLinked.get(o.id);
+      out.push({ main: o, child });
+      if (child) consumedIds.add(child.id);
+    });
+    return out;
+  }, [filtered]);
 
   const cancelOrder = useMutation({
     mutationFn: async (id: string) => {
@@ -152,6 +179,16 @@ export function OrdersPage() {
             />
           </div>
         </div>
+        <div className="flex items-end">
+          <Button
+            size="sm"
+            variant={hideDone ? "default" : "outline"}
+            onClick={() => setHideDone(!hideDone)}
+            className="mt-1"
+          >
+            {hideDone ? "✓ 只看活跃" : "显示全部"}
+          </Button>
+        </div>
       </div>
 
       <div className="bg-card border rounded-lg overflow-hidden">
@@ -187,22 +224,23 @@ export function OrdersPage() {
             {isLoading && (
               <tr><td colSpan={12} className="px-3 py-8 text-center text-muted-foreground">加载中…</td></tr>
             )}
-            {!isLoading && filtered.length === 0 && (
+            {!isLoading && groupedRows.length === 0 && (
               <tr><td colSpan={12} className="px-3 py-8 text-center text-muted-foreground">暂无订单</td></tr>
             )}
-            {filtered.map((o) => {
-              const tm = typeMeta(o.type);
-              const isOpen = expanded === o.id;
+            {groupedRows.map(({ main, child }) => {
+              const tm = typeMeta(main.type);
+              const isOpen = expanded === main.id;
               return (
                 <FragmentRow
-                  key={o.id}
-                  order={o}
+                  key={main.id}
+                  order={main}
+                  childOrder={child}
                   businessType={businessType}
                   open={isOpen}
-                  onToggle={() => setExpanded(isOpen ? null : o.id)}
-                  onEdit={() => setEditing(o)}
+                  onToggle={() => setExpanded(isOpen ? null : main.id)}
+                  onEdit={() => setEditing(main)}
                   onCancel={() => {
-                    if (confirm(`取消订单 ${o.order_number}?`)) cancelOrder.mutate(o.id);
+                    if (confirm(`取消订单 ${main.order_number}?`)) cancelOrder.mutate(main.id);
                   }}
                   typeBadgeClass={tm.className}
                   typeLabel={tm.label}
@@ -219,9 +257,9 @@ export function OrdersPage() {
 }
 
 function FragmentRow({
-  order, businessType, open, onToggle, onEdit, onCancel, typeBadgeClass, typeLabel,
+  order, childOrder, businessType, open, onToggle, onEdit, onCancel, typeBadgeClass, typeLabel,
 }: {
-  order: Order; businessType: BusinessType; open: boolean; onToggle: () => void; onEdit: () => void; onCancel: () => void;
+  order: Order; childOrder?: Order; businessType: BusinessType; open: boolean; onToggle: () => void; onEdit: () => void; onCancel: () => void;
   typeBadgeClass: string; typeLabel: string;
 }) {
   // 桶类型中文映射
@@ -233,14 +271,14 @@ function FragmentRow({
     'asphalt': '沥青桶'
   };
   const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '—';
-  
+
   // 砖块订单类型标签
   const brickOrderTypeLabels: Record<string, string> = {
     'pickup_from_factory': '🏭 从砖厂取砖',
     'delivery_to_customer': '🚚 送砖给客户'
   };
   const brickOrderTypeLabel = order.brick_order_type ? brickOrderTypeLabels[order.brick_order_type] || order.brick_order_type : '—';
-  
+
   return (
     <>
       <tr className="border-t hover:bg-accent/40 cursor-pointer" onClick={onToggle}>
@@ -287,6 +325,40 @@ function FragmentRow({
           </div>
         </td>
       </tr>
+      {/* 换桶子行: 对应的收桶订单 (缩进, 小字, 浅色) */}
+      {childOrder && (
+        <tr className="border-t bg-amber-50/40">
+          <td className="px-3 py-1 pl-8">
+            <span className="text-xs text-amber-700">↳</span>
+          </td>
+          <td className="px-3 py-1 font-mono text-[11px] text-amber-800">{childOrder.order_number}</td>
+          {businessType === 'garbage' && (
+            <>
+              <td className="px-3 py-1">
+                <Badge className="text-[10px] bg-type-pickup text-type-pickup-foreground">收桶</Badge>
+              </td>
+              <td className="px-3 py-1 text-xs text-muted-foreground">{binTypeName}</td>
+              <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.bin_size ? `${childOrder.bin_size}yd` : "—"}</td>
+            </>
+          )}
+          {businessType === 'brick' && (
+            <>
+              <td className="px-3 py-1"></td>
+              <td className="px-3 py-1"></td>
+              <td className="px-3 py-1"></td>
+            </>
+          )}
+          <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.service_date}</td>
+          <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.time_window === "custom" ? childOrder.time_window_custom : childOrder.time_window}</td>
+          <td className="px-3 py-1 max-w-[240px] truncate text-xs text-muted-foreground">{childOrder.address}</td>
+          <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.customer_name}</td>
+          <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.customer_phone}</td>
+          <td className="px-3 py-1">
+            <Badge className={cn("text-[10px]", ORDER_STATUS_CLASS[childOrder.status])}>{ORDER_STATUS_LABEL[childOrder.status]}</Badge>
+          </td>
+          <td className="px-3 py-1"></td>
+        </tr>
+      )}
       {open && <OrderDetailRow orderId={order.id} order={order} />}
     </>
   );
