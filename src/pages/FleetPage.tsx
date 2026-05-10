@@ -131,23 +131,39 @@ export function FleetPage() {
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
 
       // 先找出所有引擎正在运行的车辆（用于车辆和司机同步）
+      console.log('\n🔍 开始分析车辆活跃状态...');
+      console.log(`📊 收到 ${sStats.length} 个车辆的状态数据`);
+      
       const activeVehicleIds = getActiveVehicleIds(sStats);
       
+      console.log(`\n📊 活跃车辆统计: ${activeVehicleIds.size} / ${sStats.length}`);
+      
       // 详细记录每辆活跃车辆的状态
+      let activeCount = 0;
       sStats.forEach((stat: any) => {
         const status = extractVehicleStatus(stat);
         if (status.isActive) {
+          activeCount++;
           const details = [];
           details.push(`状态: ${status.engineState}`);
           if (status.rpm) details.push(`${status.rpm} RPM`);
           if (status.speed) details.push(`${status.speed} mph`);
           if (status.hasDriver) details.push(`司机: ${status.driverName}`);
           
-          console.log(`🚗 活跃车辆: ${status.name || status.id} (${details.join(', ')})`);
+          console.log(`🚗 活跃车辆 #${activeCount}: ${status.name || status.id} (${details.join(', ')})`);
         }
       });
       
-      console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆`);
+      if (activeCount === 0) {
+        console.warn('⚠️ 警告: 没有找到任何活跃车辆！');
+        console.log('可能的原因:');
+        console.log('  1. 所有车辆的引擎都关闭了');
+        console.log('  2. API 返回的数据不完整');
+        console.log('  3. 车辆没有安装 OBD 设备');
+        console.log('\n请检查 window.__SAMSARA_DEBUG__.sStats 查看原始数据');
+      }
+      
+      console.log(`\n✅ 活跃车辆分析完成: 找到 ${activeVehicleIds.size} 辆活跃车辆`);
 
       const vehicleInserts = sVehicles.filter((v: any) => v.name).map((v: any) => {
         const name = v.name.toUpperCase().trim();

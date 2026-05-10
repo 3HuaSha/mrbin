@@ -28,22 +28,32 @@ export function extractVehicleStatus(stat: any): VehicleStatus {
     hasDriver: false,
   };
 
+  console.log(`\n🔍 分析车辆: ${stat.name || stat.id}`);
+  console.log('原始数据键:', Object.keys(stat));
+
   // 1. 检查引擎状态 (engineStates)
   if (stat.engineStates && Array.isArray(stat.engineStates) && stat.engineStates.length > 0) {
     const latestState = stat.engineStates[stat.engineStates.length - 1];
     status.engineState = latestState?.value || 'Unknown';
     status.lastUpdate = latestState?.time;
     
+    console.log(`  ✅ engineStates: ${status.engineState} (时间: ${status.lastUpdate})`);
+    
     // 引擎状态：Off（关闭）, On（运行）, Idle（怠速）
     if (status.engineState === 'On' || status.engineState === 'Idle') {
       status.isActive = true;
+      console.log(`  ⭐ 根据引擎状态判定为活跃`);
     }
+  } else {
+    console.log(`  ❌ engineStates: 无数据`);
   }
 
   // 2. 检查发动机转速 (engineRpm)
   if (stat.engineRpm && Array.isArray(stat.engineRpm) && stat.engineRpm.length > 0) {
     const latestRpm = stat.engineRpm[stat.engineRpm.length - 1];
     status.rpm = latestRpm?.value || 0;
+    
+    console.log(`  ✅ engineRpm: ${status.rpm} RPM`);
     
     // 如果转速 > 0，说明引擎在运行
     if (status.rpm > 0) {
@@ -52,7 +62,10 @@ export function extractVehicleStatus(stat: any): VehicleStatus {
       if (status.engineState === 'Unknown') {
         status.engineState = status.rpm > 1000 ? 'On' : 'Idle';
       }
+      console.log(`  ⭐ 根据转速判定为活跃`);
     }
+  } else {
+    console.log(`  ❌ engineRpm: 无数据`);
   }
 
   // 3. 检查车速 (ecuSpeedMph)
@@ -60,19 +73,27 @@ export function extractVehicleStatus(stat: any): VehicleStatus {
     const latestSpeed = stat.ecuSpeedMph[stat.ecuSpeedMph.length - 1];
     status.speed = latestSpeed?.value || 0;
     
+    console.log(`  ✅ ecuSpeedMph: ${status.speed} mph`);
+    
     // 如果车速 > 0，说明车辆在行驶
     if (status.speed > 0) {
       status.isActive = true;
       if (status.engineState === 'Unknown' || status.engineState === 'Idle') {
         status.engineState = 'On';
       }
+      console.log(`  ⭐ 根据车速判定为活跃`);
     }
+  } else {
+    console.log(`  ❌ ecuSpeedMph: 无数据`);
   }
 
   // 4. 检查燃油百分比 (fuelPercents)
   if (stat.fuelPercents && Array.isArray(stat.fuelPercents) && stat.fuelPercents.length > 0) {
     const latestFuel = stat.fuelPercents[stat.fuelPercents.length - 1];
     status.fuelPercent = latestFuel?.value || 0;
+    console.log(`  ✅ fuelPercents: ${status.fuelPercent}%`);
+  } else {
+    console.log(`  ❌ fuelPercents: 无数据`);
   }
 
   // 5. 检查是否有活跃的 OBD 司机
@@ -81,7 +102,13 @@ export function extractVehicleStatus(stat: any): VehicleStatus {
     status.driverName = stat.obdDriver.driver.name;
     // 如果有司机，车辆应该是活跃的
     status.isActive = true;
+    console.log(`  ✅ obdDriver: ${status.driverName}`);
+    console.log(`  ⭐ 根据司机信息判定为活跃`);
+  } else {
+    console.log(`  ❌ obdDriver: 无数据`);
   }
+
+  console.log(`  📊 最终判定: ${status.isActive ? '✅ 活跃' : '❌ 不活跃'} (状态: ${status.engineState})`);
 
   return status;
 }

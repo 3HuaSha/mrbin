@@ -46,14 +46,36 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         'gps'                // GPS 位置
       ].join(',');
       
+      console.log(`🔄 请求 Stats API: types=${statsTypes}`);
+      
       const sRes = await fetch(`https://api.samsara.com/fleet/vehicles/stats?types=${statsTypes}`, { headers });
       let vehicleStats = [];
       if (sRes.ok) {
         const result = await sRes.json();
         vehicleStats = result.data || [];
         console.log(`✅ 获取到 ${vehicleStats.length} 个车辆的实时状态`);
+        
+        // 调试：显示第一个车辆的完整数据结构
+        if (vehicleStats.length > 0) {
+          console.log('📊 第一个车辆的数据结构示例:');
+          console.log('  ID:', vehicleStats[0].id);
+          console.log('  Name:', vehicleStats[0].name);
+          console.log('  可用的数据字段:', Object.keys(vehicleStats[0]));
+          
+          // 检查每个状态类型是否有数据
+          const firstVehicle = vehicleStats[0];
+          console.log('  数据详情:');
+          console.log('    - engineStates:', firstVehicle.engineStates ? `有 ${firstVehicle.engineStates.length} 条` : '无');
+          console.log('    - engineRpm:', firstVehicle.engineRpm ? `有 ${firstVehicle.engineRpm.length} 条` : '无');
+          console.log('    - ecuSpeedMph:', firstVehicle.ecuSpeedMph ? `有 ${firstVehicle.ecuSpeedMph.length} 条` : '无');
+          console.log('    - fuelPercents:', firstVehicle.fuelPercents ? `有 ${firstVehicle.fuelPercents.length} 条` : '无');
+          console.log('    - obdDriver:', firstVehicle.obdDriver ? '有' : '无');
+          console.log('    - obdOdometerMeters:', firstVehicle.obdOdometerMeters ? `有 ${firstVehicle.obdOdometerMeters.length} 条` : '无');
+          console.log('    - gps:', firstVehicle.gps ? `有 ${firstVehicle.gps.length} 条` : '无');
+        }
       } else {
-        console.warn(`[Stats API Error] Status: ${sRes.status}`);
+        const errorText = await sRes.text();
+        console.warn(`[Stats API Error] Status: ${sRes.status}, Response: ${errorText}`);
       }
 
       // 6. 获取位置信息 ( locations 接口通常很稳)
