@@ -207,7 +207,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     };
     
     fetchData();
-    const id = setInterval(fetchData, 30000); // 改为30秒刷新一次，减少API调用
+    const id = setInterval(fetchData, 60000); // 60s 轮询,降低 API 压力
     return () => { active = false; clearInterval(id); };
   }, []);
 
@@ -644,33 +644,42 @@ function createVehicleIconWithLabel(vehicleType: string, driverName: string): st
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-// 辅助函数: 创建订单标记 (单行窄徽章, 紧凑清爽)
+// 辅助函数: 创建订单标记 (紧凑徽章: 主信息 + 地址 + HINO 提示)
 function createOrderIconWithLabel(order: any, orderETA?: any): string {
   // 订单类型配色
-  const colorSchemes: Record<string, { bg: string; text: string; border: string }> = {
-    'delivery': { bg: '#2196F3', text: '#FFFFFF', border: '#0D47A1' },  // 蓝
-    'pickup':   { bg: '#4CAF50', text: '#FFFFFF', border: '#1B5E20' },  // 绿
-    'swap':     { bg: '#9C27B0', text: '#FFFFFF', border: '#4A148C' },  // 紫
+  const colorSchemes: Record<string, { bg: string; text: string; border: string; addr: string }> = {
+    'delivery': { bg: '#2196F3', text: '#FFFFFF', border: '#0D47A1', addr: '#E3F2FD' },  // 蓝
+    'pickup':   { bg: '#4CAF50', text: '#FFFFFF', border: '#1B5E20', addr: '#E8F5E9' },  // 绿
+    'swap':     { bg: '#9C27B0', text: '#FFFFFF', border: '#4A148C', addr: '#F3E5F5' },  // 紫
   };
-  const scheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', border: '#E65100' };
+  const scheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', border: '#E65100', addr: '#FFF3E0' };
 
-  const typeNames: Record<string, string> = {
-    delivery: '送', pickup: '收', swap: '换', material: '料',
-  };
+  const typeNames: Record<string, string> = { delivery: '送', pickup: '收', swap: '换', material: '料' };
   const typeName = typeNames[order.type] || order.type;
 
-  const binTypeEmojis: Record<string, string> = {
-    garbage: '🗑', brick: '🧱', soil: '🪨', cement: '🏗', asphalt: '🛣',
-  };
+  const binTypeEmojis: Record<string, string> = { garbage: '🗑', brick: '🧱', soil: '🪨', cement: '🏗', asphalt: '🛣' };
   const binEmoji = binTypeEmojis[order.bin_type] || '';
 
   const binSize = order.bin_size ? `${order.bin_size}yd` : '';
   const timeDisplay = order.time_window_custom || order.time_window || '';
 
-  // 主徽章文本: 类型 + 尺寸 + 时段, 单行
-  // 例: "送 20yd · 14:00" / "换 30yd · AM"
-  const parts = [typeName, binSize, timeDisplay].filter(Boolean);
-  const mainText = parts.join(' · ');
+  // 主徽章: 类型 + 尺寸 + 时段
+  const mainParts = [typeName, binSize, timeDisplay].filter(Boolean);
+  const mainText = (binEmoji ? binEmoji + ' ' : '') + mainParts.join(' · ');
+
+  // 地址第二行: 只保留街号+街名和城市 (例: "102 Fenelon Dr, North York")
+  const extractAddr = (addr: string): string => {
+    if (!addr) return '';
+    const parts = addr.split(',').map(p => p.trim());
+    if (parts.length < 2) return parts[0] || '';
+    const street = parts[0];
+    const city = parts[1].split(/\s+/)[0];
+    return `${street}, ${city}`;
+  };
+  const addrText = extractAddr(order.address);
+
+  // HINO 标记: 备注里提到 hino (大小写都认) 说明仅 HINO 车可开
+  const hasHinoFlag = /\bhino\b/i.test(order.customer_notes || '');
 
   // ETA 右上角小徽章
   let etaText = '';
@@ -680,16 +689,27 @@ function createOrderIconWithLabel(order: any, orderETA?: any): string {
     });
   }
 
-  // 宽度按文本动态计算 (中文字符按 14 计, 英数按 7 计)
-  const mainCharWidth = mainText.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 14 : 7), 0);
-  const badgeWidth = Math.max(mainCharWidth + 18, 80);
-  const svgWidth = badgeWidth + (etaText ? 46 : 6);
-  const svgHeight = 38; // 徽章 22 + 间距 2 + 图钉 14
+  // 宽度按最宽那行计算
+  const charW = (s: string) => s.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 14 : 7), 0);
+  const mainW = charW(mainText);
+  const addrW = charW(addrText);
+  const badgeWidth = Math.max(mainW, addrW) + 18;
+  const badgeWidthClamped = Math.min(Math.max(badgeWidth, 90), 180);
+  const svgWidth = badgeWidthClamped + (etaText ? 46 : 6);
+
+  // 行高: 主行 22, 地址行 16, HINO 条 14
+  const mainH = 22;
+  const addrH = addrText ? 16 : 0;
+  const hinoH = hasHinoFlag ? 14 : 0;
+  const gap = 1;
+  const stackH = mainH + (addrH ? addrH + gap : 0) + (hinoH ? hinoH + gap : 0);
+  const svgHeight = stackH + 4 + 10; // + 连接线 + 图钉
 
   const badgeX = 3;
-  const badgeY = 0;
-  const badgeH = 22;
-  const pinCx = badgeX + badgeWidth / 2;
+  const pinCx = badgeX + badgeWidthClamped / 2;
+  const addrY = mainH + gap;
+  const hinoY = addrY + addrH + (addrH ? gap : 0);
+  const pinY = stackH;
 
   const svg = `
 <svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
@@ -699,25 +719,39 @@ function createOrderIconWithLabel(order: any, orderETA?: any): string {
     </filter>
   </defs>
   <!-- 主徽章 -->
-  <rect x='${badgeX}' y='${badgeY}' width='${badgeWidth}' height='${badgeH}' rx='11'
+  <rect x='${badgeX}' y='0' width='${badgeWidthClamped}' height='${mainH}' rx='11'
         fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5' filter='url(#s)'/>
-  <text x='${badgeX + badgeWidth / 2}' y='${badgeY + 15}' text-anchor='middle'
-        font-size='12' font-weight='bold' fill='${scheme.text}'
-        font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${escapeXml(binEmoji + (binEmoji ? ' ' : '') + mainText)}</text>
+  <text x='${pinCx}' y='15' text-anchor='middle' font-size='12' font-weight='bold' fill='${scheme.text}'
+        font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${escapeXml(mainText)}</text>
+
+  ${addrText ? `
+  <!-- 地址行 -->
+  <rect x='${badgeX}' y='${addrY}' width='${badgeWidthClamped}' height='${addrH}' rx='7'
+        fill='${scheme.addr}' stroke='${scheme.border}' stroke-width='1'/>
+  <text x='${pinCx}' y='${addrY + 11}' text-anchor='middle' font-size='10' font-weight='600' fill='${scheme.border}'
+        font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${escapeXml(addrText)}</text>
+  ` : ''}
+
+  ${hasHinoFlag ? `
+  <!-- HINO 警告条 -->
+  <rect x='${badgeX}' y='${hinoY}' width='${badgeWidthClamped}' height='${hinoH}' rx='6'
+        fill='#FFE082' stroke='#F57F17' stroke-width='1'/>
+  <text x='${pinCx}' y='${hinoY + 10}' text-anchor='middle' font-size='9' font-weight='bold' fill='#BF360C'
+        font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>⚠ HINO 专用</text>
+  ` : ''}
 
   ${etaText ? `
-  <!-- ETA 小徽章 -->
-  <rect x='${badgeX + badgeWidth + 4}' y='${badgeY + 2}' width='38' height='18' rx='9'
+  <!-- ETA 右上角小徽章 -->
+  <rect x='${badgeX + badgeWidthClamped + 4}' y='2' width='38' height='18' rx='9'
         fill='#FFD54F' stroke='#F57F17' stroke-width='1' filter='url(#s)'/>
-  <text x='${badgeX + badgeWidth + 23}' y='${badgeY + 15}' text-anchor='middle'
-        font-size='10' font-weight='bold' fill='#333'
+  <text x='${badgeX + badgeWidthClamped + 23}' y='15' text-anchor='middle' font-size='10' font-weight='bold' fill='#333'
         font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${etaText}</text>
   ` : ''}
 
   <!-- 连接线 + 图钉 -->
-  <line x1='${pinCx}' y1='${badgeH}' x2='${pinCx}' y2='${badgeH + 4}' stroke='${scheme.border}' stroke-width='2'/>
-  <circle cx='${pinCx}' cy='${badgeH + 9}' r='5' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5'/>
-  <circle cx='${pinCx}' cy='${badgeH + 9}' r='2' fill='${scheme.text}'/>
+  <line x1='${pinCx}' y1='${pinY}' x2='${pinCx}' y2='${pinY + 4}' stroke='${scheme.border}' stroke-width='2'/>
+  <circle cx='${pinCx}' cy='${pinY + 9}' r='5' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5'/>
+  <circle cx='${pinCx}' cy='${pinY + 9}' r='2' fill='${scheme.text}'/>
 </svg>`.trim();
 
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
@@ -727,25 +761,33 @@ function escapeXml(s: string): string {
   return s.replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]!));
 }
 
-// 辅助函数: 更新订单的图标 (单行窄徽章)
+// 辅助函数: 更新订单的图标
 function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: any[], orderETA?: any) {
   const iconUrl = createOrderIconWithLabel(order, orderETA);
 
-  // 跟 createOrderIconWithLabel 保持一致的尺寸计算
+  // 和 createOrderIconWithLabel 保持一致的尺寸计算
   const typeNames: Record<string, string> = { delivery: '送', pickup: '收', swap: '换', material: '料' };
   const typeName = typeNames[order.type] || order.type;
-  const binTypeEmojis: Record<string, string> = { garbage: '🗑', brick: '🧱', soil: '🪨', cement: '🏗', asphalt: '🛣' };
-  const binEmoji = binTypeEmojis[order.bin_type] || '';
+  const binEmojis: Record<string, string> = { garbage: '🗑', brick: '🧱', soil: '🪨', cement: '🏗', asphalt: '🛣' };
+  const binEmoji = binEmojis[order.bin_type] || '';
   const binSize = order.bin_size ? `${order.bin_size}yd` : '';
   const timeDisplay = order.time_window_custom || order.time_window || '';
-  const parts = [typeName, binSize, timeDisplay].filter(Boolean);
-  const mainText = (binEmoji ? binEmoji + ' ' : '') + parts.join(' · ');
+  const mainText = (binEmoji ? binEmoji + ' ' : '') + [typeName, binSize, timeDisplay].filter(Boolean).join(' · ');
 
-  const mainCharWidth = mainText.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 14 : 7), 0);
-  const badgeWidth = Math.max(mainCharWidth + 18, 80);
+  const extractAddr = (addr: string) => {
+    if (!addr) return '';
+    const parts = addr.split(',').map(p => p.trim());
+    if (parts.length < 2) return parts[0] || '';
+    return `${parts[0]}, ${parts[1].split(/\s+/)[0]}`;
+  };
+  const addrText = extractAddr(order.address);
+  const hasHinoFlag = /\bhino\b/i.test(order.customer_notes || '');
   const hasETA = !!(orderETA && orderETA.status === 'OK');
+
+  const charW = (s: string) => s.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 14 : 7), 0);
+  const badgeWidth = Math.min(Math.max(Math.max(charW(mainText), charW(addrText)) + 18, 90), 180);
   const width = badgeWidth + (hasETA ? 46 : 6);
-  const height = 38;
+  const height = 22 + (addrText ? 17 : 0) + (hasHinoFlag ? 15 : 0) + 14;
 
   marker.setIcon({
     url: iconUrl,

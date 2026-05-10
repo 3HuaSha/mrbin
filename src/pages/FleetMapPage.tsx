@@ -1,21 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { todayISO, typeMeta } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Truck, ChevronDown, ChevronRight, MapPin, AlertTriangle, Clock, Loader2 } from "lucide-react";
+import { Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2 } from "lucide-react";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
-import { calculateDriverETAWithSamsara, formatETA, formatETATime, type DriverETA } from "@/lib/eta-calculator";
+import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { getFullAddress } from "@/lib/manual-step-locations";
 import { toast } from "sonner";
 import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
 import { useBusinessType } from "@/lib/business-type-storage";
-import type { BusinessType } from "@/lib/business";
 
 type Driver = { id: string; name: string };
+
+const BIN_TYPE_NAMES: Record<string, string> = {
+  garbage: '垃圾桶',
+  brick: '砖桶',
+  soil: '土桶',
+  cement: '水泥桶',
+  asphalt: '沥青桶',
+};
+
+const STEP_TYPE_LABELS: Record<string, string> = {
+  pickup_bin: '取桶',
+  drop_bin: '放桶',
+  dump_waste: '倒垃圾',
+  load_material: '装料',
+  unload_material: '卸料',
+};
 
 type Order = { 
   id: string; 
@@ -56,18 +71,11 @@ type JobStep = {
 
 export function FleetMapPage() {
   const [date, setDate] = useState(todayISO());
-  const [now, setNow] = useState(Date.now());
   const [expandedDrivers, setExpandedDrivers] = useState<Set<string>>(new Set());
   const [calculatingDriverId, setCalculatingDriverId] = useState<string | null>(null);
   const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>({});
-  const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set()); // 跟踪哪些司机显示ETA
+  const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set());
   const [businessType, setBusinessType] = useBusinessType();
-
-  // 自动刷新
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 10_000);
-    return () => clearInterval(id);
-  }, []);
 
   const toggleDriver = (id: string) => {
     const next = new Set(expandedDrivers);
@@ -375,24 +383,11 @@ export function FleetMapPage() {
                       ) : (
                         steps.map((step, i) => {
                           if (step.node_type === 'order' && step.orders) {
-                            // 订单节点卡片 - 完全匹配排班页面样式
+                            // 订单节点卡片
                             const order = step.orders;
                             const tm = typeMeta(order.type);
-                            
-                            // 桶类型中文映射
-                            const binTypeNames: Record<string, string> = {
-                              'garbage': '垃圾桶',
-                              'brick': '砖桶',
-                              'soil': '土桶',
-                              'cement': '水泥桶',
-                              'asphalt': '沥青桶'
-                            };
-                            const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '';
-                            
-                            // 时段标签
+                            const binTypeName = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : '';
                             const timeLabel = order.time_window_custom || order.time_window || '';
-                            
-                            // 获取该订单的 ETA
                             const driverETA = driverETAs[d.id];
                             const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
                             
@@ -424,15 +419,8 @@ export function FleetMapPage() {
                               </div>
                             );
                           } else {
-                            // 手动步骤节点卡片 - 完全匹配排班页面样式
-                            const stepTypeLabels: Record<string, string> = {
-                              'pickup_bin': '取桶',
-                              'drop_bin': '放桶',
-                              'dump_waste': '倒垃圾',
-                              'load_material': '装料',
-                              'unload_material': '卸料',
-                            };
-                            const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
+                            // 手动步骤节点卡片
+                            const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
                             
                             return (
                               <div key={step.id} className="relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg">
