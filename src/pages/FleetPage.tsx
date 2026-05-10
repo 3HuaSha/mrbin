@@ -90,10 +90,9 @@ export function FleetPage() {
     if (vehicleTypeFilter !== "ALL" && extractVehiclePrefix(v.name) !== vehicleTypeFilter) {
       return false;
     }
-    // 状态筛选（活跃车辆 = 有司机分配的车辆）
+    // 状态筛选（活跃车辆 = 引擎正在运行的车辆）
     if (vehicleStatusFilter === "ACTIVE") {
-      const hasDriver = assignments.some(a => a.vehicle_id === v.id);
-      return hasDriver;
+      return v.is_active;
     }
     return true;
   });
@@ -130,6 +129,20 @@ export function FleetPage() {
       await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
 
+      // 先找出所有引擎正在运行的车辆（用于车辆和司机同步）
+      const activeVehicleIds = new Set<string>();
+      sStats.forEach((stat: any) => {
+        if (stat.engineStates && Array.isArray(stat.engineStates)) {
+          const latestState = stat.engineStates[stat.engineStates.length - 1];
+          if (latestState?.value === 'Running') {
+            activeVehicleIds.add(stat.id);
+            console.log(`🚗 引擎运行中: ${stat.name || stat.id}`);
+          }
+        }
+      });
+      
+      console.log(`📊 找到 ${activeVehicleIds.size} 辆引擎运行中的车辆`);
+
       const vehicleInserts = sVehicles.filter((v: any) => v.name).map((v: any) => {
         const name = v.name.toUpperCase().trim();
         
@@ -150,7 +163,17 @@ export function FleetPage() {
           size = "40";
         }
         
-        return { name: v.name, type, plate: v.name, samsara_id: v.id, max_bin_size: size, is_active: true };
+        // 检查这辆车的引擎是否正在运行
+        const isActive = activeVehicleIds.has(v.id);
+        
+        return { 
+          name: v.name, 
+          type, 
+          plate: v.name, 
+          samsara_id: v.id, 
+          max_bin_size: size, 
+          is_active: isActive 
+        };
       });
 
       const { data: insertedVehicles, error: vError } = await supabase.from("vehicles").insert(vehicleInserts).select();
@@ -176,40 +199,23 @@ export function FleetPage() {
       console.group('👥 司机同步与合并');
       
       // 第一步：从活跃的车辆（引擎正在运行）中找到司机
-      const activeVehicleIds = new Set<string>(); // Samsara 车辆 ID
       const activeDriverIds = new Set<string>();
       const activeDriverNames = new Set<string>();
       
-      // 从车辆状态中找到引擎正在运行的车辆
+      // 从车辆状态中找到引擎正在运行的车辆的司机
       sStats.forEach((stat: any) => {
-        // 检查引擎状态
-        if (stat.engineStates && Array.isArray(stat.engineStates)) {
-          const latestState = stat.engineStates[stat.engineStates.length - 1];
-          if (latestState?.value === 'Running') {
-            activeVehicleIds.add(stat.id);
-            console.log(`🚗 活跃车辆: ${stat.name || stat.id} (引擎运行中)`);
-            
-            // 如果有 OBD 司机信息
-            if (stat.obdDriver?.driver?.name) {
-              const name = normalizeDriverName(stat.obdDriver.driver.name);
-              activeDriverNames.add(name);
-              console.log(`  └─ 司机: ${stat.obdDriver.driver.name} -> ${name}`);
-            }
+        // 只处理引擎正在运行的车辆
+        if (activeVehicleIds.has(stat.id)) {
+          // 如果有 OBD 司机信息
+          if (stat.obdDriver?.driver?.name) {
+            const name = normalizeDriverName(stat.obdDriver.driver.name);
+            activeDriverNames.add(name);
+            console.log(`🚗 活跃车辆: ${stat.name || stat.id} - 司机: ${stat.obdDriver.driver.name} -> ${name}`);
           }
         }
       });
       
-      // 从位置信息中找到最近有移动的车辆（作为补充）
-      const now = Date.now();
-      const oneHourAgo = now - 60 * 60 * 1000; // 1小时前
-      sLocs.forEach((loc: any) => {
-        if (loc.time && new Date(loc.time).getTime() > oneHourAgo) {
-          activeVehicleIds.add(loc.id);
-          console.log(`📍 最近活跃车辆: ${loc.name || loc.id} (最近1小时有位置更新)`);
-        }
-      });
-      
-      console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆`);
+      console.log(`📊 找到 ${activeVehicleIds.size} 辆引擎运行中的车辆`);
       
       // 第二步：从活跃车辆中找到对应的司机
       // 方法1: 从实时分配接口
@@ -551,7 +557,7 @@ export function FleetPage() {
               variant={vehicleStatusFilter === "ACTIVE" ? "default" : "outline"}
               onClick={() => setVehicleStatusFilter("ACTIVE")}
             >
-              活跃车辆 ({vehicles.filter(v => assignments.some(a => a.vehicle_id === v.id)).length})
+              活跃车辆 ({vehicles.filter(v => v.is_active).length})
             </Button>
           </div>
           <div className="space-y-2">
