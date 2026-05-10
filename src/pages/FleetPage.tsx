@@ -136,27 +136,105 @@ export function FleetPage() {
       if (vError) throw vError;
       const allVehicles = insertedVehicles || [];
 
-      // 2. 同步司机
+      // 2. 同步司机 - 带重复账户合并逻辑
       await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+      
+      // 先将所有现有司机标记为停用（稍后会重新激活在 Samsara 中的司机）
+      await supabase.from("profiles").update({ is_active: false }).eq("role", "driver");
+      
       const dSamsaraIdToInternal = new Map<string, string>();
       const dNameToInternal = new Map<string, string>();
 
+      // 名称规范化函数：移除括号后缀，如 "Dao(1)" -> "Dao"
+      const normalizeDriverName = (name: string): string => {
+        if (!name) return '';
+        // 移除 (1), (2) 等后缀
+        return name.replace(/\s*\(\d+\)\s*$/g, '').trim();
+      };
+
+      console.group('👥 司机同步与合并');
+      
+      // 收集所有 Samsara 中的司机（规范化后的名称）
+      const samsaraDriverNames = new Set<string>();
+      sDrivers.forEach((sd: any) => {
+        if (sd.name) {
+          samsaraDriverNames.add(normalizeDriverName(sd.name));
+        }
+      });
+      
       for (const sd of sDrivers) {
         if (!sd.name) continue;
-        const { data: existing } = await supabase.from("profiles").select("id").eq("name", sd.name).eq("role", "driver");
+        
+        const originalName = sd.name;
+        const normalizedName = normalizeDriverName(sd.name);
+        
+        console.log(`🔍 处理司机: "${originalName}" -> 规范化为 "${normalizedName}"`);
+        
+        // 先尝试用规范化名称查找现有司机
+        const { data: existing } = await supabase
+          .from("profiles")
+          .select("id,name")
+          .eq("name", normalizedName)
+          .eq("role", "driver");
+        
         let dId = '';
+        
         if (existing && existing.length > 0) {
+          // 找到现有司机，使用该账户并激活
           dId = existing[0].id;
-          await supabase.from("profiles").update({ phone: sd.phone || null, is_active: true }).eq("id", dId);
+          console.log(`✅ 找到现有账户: ${existing[0].name} (ID: ${dId})`);
+          await supabase.from("profiles").update({ 
+            phone: sd.phone || null, 
+            is_active: true 
+          }).eq("id", dId);
         } else {
-          const { data: nw } = await supabase.from("profiles").insert({ name: sd.name, phone: sd.phone || null, role: "driver", is_active: true }).select().single();
+          // 创建新司机，使用规范化后的名称
+          console.log(`➕ 创建新账户: ${normalizedName}`);
+          const { data: nw } = await supabase
+            .from("profiles")
+            .insert({ 
+              name: normalizedName, 
+              phone: sd.phone || null, 
+              role: "driver", 
+              is_active: true 
+            })
+            .select()
+            .single();
           if (nw) dId = nw.id;
         }
+        
         if (dId) {
+          // 将Samsara ID和原始名称都映射到同一个内部ID
           dSamsaraIdToInternal.set(sd.id, dId);
-          dNameToInternal.set(sd.name.toUpperCase().trim(), dId);
+          dNameToInternal.set(normalizedName.toUpperCase().trim(), dId);
+          // 也映射原始名称（包含括号的），以便后续匹配
+          dNameToInternal.set(originalName.toUpperCase().trim(), dId);
+          console.log(`📌 映射: Samsara ID ${sd.id} -> 内部 ID ${dId}`);
         }
       }
+      
+      // 删除不在 Samsara 中的旧司机账户（带括号后缀的重复账户）
+      const { data: allDrivers } = await supabase
+        .from("profiles")
+        .select("id,name")
+        .eq("role", "driver");
+      
+      if (allDrivers) {
+        for (const driver of allDrivers) {
+          const normalizedName = normalizeDriverName(driver.name);
+          // 如果这个司机不在 Samsara 中，且名字包含括号后缀，则删除
+          if (!samsaraDriverNames.has(normalizedName) && driver.name.match(/\(\d+\)$/)) {
+            console.log(`🗑️ 删除旧的重复账户: ${driver.name}`);
+            // 先删除相关的外键引用
+            await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", driver.id);
+            await supabase.from("driver_locations").delete().eq("driver_id", driver.id);
+            // 注意：job_steps 和 dispatch_assignments 可能需要保留历史数据，所以只删除分配关系
+            await supabase.from("profiles").delete().eq("id", driver.id);
+          }
+        }
+      }
+      
+      console.groupEnd();
 
       // 3. 匹配关联 (寻找当前“正在开车”的司机)
       const pending = new Map<string, string>(); // dId -> vId
@@ -167,7 +245,10 @@ export function FleetPage() {
       
       // 策略 A: 从司机角度寻找车辆
       sDrivers.forEach((sd: any) => {
-        const dId = dSamsaraIdToInternal.get(sd.id) || dNameToInternal.get(clean(sd.name));
+        // 尝试多种方式查找内部ID（包括规范化名称）
+        const dId = dSamsaraIdToInternal.get(sd.id) 
+          || dNameToInternal.get(sd.name.toUpperCase().trim())
+          || dNameToInternal.get(clean(sd.name));
         if (!dId) return;
 
         let vRef = null;
@@ -203,7 +284,10 @@ export function FleetPage() {
       sVehicles.forEach((sv: any) => {
         if (sv.staticAssignedDriver) {
           const dRef = sv.staticAssignedDriver;
-          const dId = dSamsaraIdToInternal.get(dRef.id) || dNameToInternal.get(clean(dRef.name));
+          // 尝试多种方式查找内部ID（包括规范化名称）
+          const dId = dSamsaraIdToInternal.get(dRef.id) 
+            || dNameToInternal.get(dRef.name.toUpperCase().trim())
+            || dNameToInternal.get(clean(dRef.name));
           const vehicle = allVehicles.find(v => v.samsara_id === sv.id || clean(v.name) === clean(sv.name));
           
           if (dId && vehicle && !pending.has(dId)) {
