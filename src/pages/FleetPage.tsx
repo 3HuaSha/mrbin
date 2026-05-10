@@ -154,13 +154,32 @@ export function FleetPage() {
 
       console.group('👥 司机同步与合并');
       
-      // 收集所有 Samsara 中的司机（规范化后的名称）
-      const samsaraDriverNames = new Set<string>();
-      sDrivers.forEach((sd: any) => {
-        if (sd.name) {
-          samsaraDriverNames.add(normalizeDriverName(sd.name));
+      // 第一步：找出所有有实时车辆分配的司机（真正在工作的）
+      const activeDriverIds = new Set<string>();
+      const activeDriverNames = new Set<string>();
+      
+      // 从实时分配接口获取活跃司机
+      sAssigns.forEach((a: any) => {
+        if (a.driver?.id) {
+          activeDriverIds.add(a.driver.id);
+          if (a.driver.name) {
+            activeDriverNames.add(normalizeDriverName(a.driver.name));
+          }
         }
       });
+      
+      // 从车辆OBD状态获取活跃司机
+      sStats.forEach((s: any) => {
+        if (s.obdDriver?.driver?.name) {
+          activeDriverNames.add(normalizeDriverName(s.obdDriver.driver.name));
+        }
+      });
+      
+      console.log(`📊 找到 ${activeDriverIds.size} 个有实时分配的司机`);
+      console.log(`📊 活跃司机名单:`, Array.from(activeDriverNames));
+      
+      // 第二步：只同步活跃的司机
+      const samsaraDriverNames = new Set<string>();
       
       for (const sd of sDrivers) {
         if (!sd.name) continue;
@@ -168,7 +187,17 @@ export function FleetPage() {
         const originalName = sd.name;
         const normalizedName = normalizeDriverName(sd.name);
         
-        console.log(`🔍 处理司机: "${originalName}" -> 规范化为 "${normalizedName}"`);
+        // 检查这个司机是否活跃（有实时分配）
+        const isActive = activeDriverIds.has(sd.id) || activeDriverNames.has(normalizedName);
+        
+        if (!isActive) {
+          console.log(`⏭️ 跳过非活跃司机: "${originalName}" (没有实时车辆分配)`);
+          continue;
+        }
+        
+        samsaraDriverNames.add(normalizedName);
+        
+        console.log(`🔍 处理活跃司机: "${originalName}" -> 规范化为 "${normalizedName}"`);
         
         // 先尝试用规范化名称查找现有司机
         const { data: existing } = await supabase
