@@ -35,47 +35,29 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
       }
 
       // 5. 获取车辆实时状态
-      // 重要：Samsara API 的 types 参数是必需的，且最多支持 3 个类型
-      // 我们分批次调用来获取所有需要的数据
-      
-      console.log('🔄 开始获取车辆状态数据...');
+      console.log('🔄 获取车辆状态数据...');
       
       let vehicleStats = [];
       
-      // 第一批：最关键的 3 个状态（引擎状态、司机、转速）
+      // 第一批：最关键的 3 个状态
       const batch1Types = 'engineStates,obdDriver,engineRpm';
-      console.log(`📡 批次 1: ${batch1Types}`);
-      
       const sRes1 = await fetch(`https://api.samsara.com/fleet/vehicles/stats?types=${batch1Types}`, { headers });
       
       if (sRes1.ok) {
         const result1 = await sRes1.json();
         vehicleStats = result1.data || [];
-        console.log(`✅ 批次 1 成功: 获取 ${vehicleStats.length} 个车辆数据`);
-        
-        if (vehicleStats.length > 0) {
-          const first = vehicleStats[0];
-          console.log(`📊 示例车辆完整数据:`, JSON.stringify(first, null, 2));
-          console.log(`  - ID: ${first.id}`);
-          console.log(`  - Name: ${first.name}`);
-          console.log(`  - 所有字段: ${Object.keys(first).join(', ')}`);
-          console.log(`  - engineStates: ${first.engineStates ? first.engineStates.length + ' 条' : '无'}`);
-          console.log(`  - obdDriver: ${first.obdDriver ? '有' : '无'}`);
-          console.log(`  - engineRpm: ${first.engineRpm ? first.engineRpm.length + ' 条' : '无'}`);
-        }
+        console.log(`✅ 获取到 ${vehicleStats.length} 个车辆状态`);
         
         // 第二批：速度、燃油、GPS
         try {
           const batch2Types = 'ecuSpeedMph,fuelPercents,gps';
-          console.log(`📡 批次 2: ${batch2Types}`);
-          
           const sRes2 = await fetch(`https://api.samsara.com/fleet/vehicles/stats?types=${batch2Types}`, { headers });
           
           if (sRes2.ok) {
             const result2 = await sRes2.json();
             const batch2Data = result2.data || [];
             
-            // 合并数据到第一批
+            // 合并数据
             batch2Data.forEach((item: any) => {
               const existing = vehicleStats.find((v: any) => v.id === item.id);
               if (existing) {
@@ -84,36 +66,23 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
                 if (item.gps) existing.gps = item.gps;
               }
             });
-            
-            console.log(`✅ 批次 2 成功: 合并额外数据`);
-          } else {
-            console.warn(`⚠️ 批次 2 失败: ${sRes2.status}`);
           }
         } catch (e) {
-          console.warn('⚠️ 批次 2 出错，继续使用批次 1 数据', e);
+          console.warn('⚠️ 获取额外状态失败', e);
         }
         
       } else {
         const errorText = await sRes1.text();
-        console.error(`❌ Stats API 失败: ${sRes1.status}`);
-        console.error(`错误详情: ${errorText}`);
+        console.error(`❌ Stats API 失败: ${sRes1.status}`, errorText);
         
-        // 如果第一批失败，尝试最简单的单一类型调用
-        console.log('🔄 尝试最简单的调用: types=engineStates');
+        // 降级到单一类型
         const sRes3 = await fetch('https://api.samsara.com/fleet/vehicles/stats?types=engineStates', { headers });
-        
         if (sRes3.ok) {
           const result3 = await sRes3.json();
           vehicleStats = result3.data || [];
-          console.log(`✅ 简化调用成功: ${vehicleStats.length} 个车辆`);
-        } else {
-          const errorText3 = await sRes3.text();
-          console.error(`❌ 简化调用也失败: ${sRes3.status}`);
-          console.error(`错误详情: ${errorText3}`);
+          console.log(`✅ 简化调用: ${vehicleStats.length} 个车辆`);
         }
       }
-      
-      console.log(`📊 最终获取到 ${vehicleStats.length} 个车辆的状态数据`);
 
       // 6. 获取位置信息 ( locations 接口通常很稳)
       const lRes = await fetch('https://api.samsara.com/fleet/vehicles/locations', { headers });
