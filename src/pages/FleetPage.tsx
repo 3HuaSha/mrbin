@@ -12,11 +12,12 @@ import { formatPhone } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { fetchSamsaraData } from "@/actions/samsara";
-import { getActiveVehicleIds, extractVehicleStatus } from "@/lib/vehicle-status";
+import { getActiveVehicleIds } from "@/lib/vehicle-status";
 
 type Driver = { id: string; name: string; phone: string | null; email: string | null; is_active: boolean };
 type Vehicle = { id: string; name: string; type: "HINO" | "MACK"; plate: string; samsara_id: string | null; max_bin_size: string | null; is_active: boolean };
 type DriverVehicleAssignment = { id: string; driver_id: string; vehicle_id: string; assigned_at: string; notes: string | null };
+type SamsaraDriver = { id: string; name: string; phone: string | null; driver_id: string | null; last_seen_at: string | null };
 
 export function FleetPage() {
   const qc = useQueryClient();
@@ -28,6 +29,7 @@ export function FleetPage() {
   const [vehicleStatusFilter, setVehicleStatusFilter] = useState<"ALL" | "ACTIVE">("ALL");
   const [driverFilter, setDriverFilter] = useState<"ALL" | "ASSIGNED">("ASSIGNED");
   const [assigningDriver, setAssigningDriver] = useState<Driver | null>(null);
+  const [bindingSamsara, setBindingSamsara] = useState<Driver | null>(null);
   const [syncAnalysis, setSyncAnalysis] = useState<{
     totalDrivers: number;
     driversWithRefs: Array<{ name: string; ref: string; source: string; matched: boolean }>;
@@ -58,6 +60,18 @@ export function FleetPage() {
       return data as DriverVehicleAssignment[];
     },
   });
+
+  const { data: samsaraDrivers = [] } = useQuery({
+    queryKey: ["samsara-drivers"],
+    queryFn: async () => {
+      const { data, error } = await (supabase.from as any)("samsara_drivers").select("*").order("name");
+      if (error) throw error;
+      return data as SamsaraDriver[];
+    },
+  });
+
+  const getBoundSamsaraDrivers = (driverId: string) => samsaraDrivers.filter(sd => sd.driver_id === driverId);
+  const unboundSamsaraDrivers = samsaraDrivers.filter(sd => !sd.driver_id);
 
   const getDriverVehicles = (driverId: string) => {
     const driverAssignments = assignments.filter(a => a.driver_id === driverId);
@@ -121,13 +135,12 @@ export function FleetPage() {
       const { vehicles: sVehicles = [], drivers: sDrivers = [], assignments: sAssigns = [], vehicleStats: sStats = [], locations: sLocs = [], debug } = result as any;
       (window as any).__SAMSARA_DEBUG__ = { sVehicles, sDrivers, sAssigns, sStats, sLocs, debug };
 
-      // 1. 同步车辆
+      // 1. 同步车辆 (重建 vehicles 表)
       await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
 
       // 把 locations 的 GPS 时间戳合并到 stats 作为心跳源
-      // (engineState.time 是状态变更时刻不是心跳, GPS 才是持续上报的)
       sLocs.forEach((loc: any) => {
         if (!loc.id) return;
         const stat = sStats.find((s: any) => s.id === loc.id);
@@ -155,14 +168,13 @@ export function FleetPage() {
           type = "MACK";
           size = "40";
         }
-        const isActive = activeVehicleIds.has(v.id);
-        return { 
-          name: v.name, 
-          type, 
-          plate: v.name, 
-          samsara_id: v.id, 
-          max_bin_size: size, 
-          is_active: isActive 
+        return {
+          name: v.name,
+          type,
+          plate: v.name,
+          samsara_id: v.id,
+          max_bin_size: size,
+          is_active: activeVehicleIds.has(v.id),
         };
       });
 
@@ -173,194 +185,134 @@ export function FleetPage() {
       }
       const allVehicles = insertedVehicles || [];
 
-      // 2. 同步司机 - 带重复账户合并逻辑
+      // 2. 同步 samsara_drivers (保留现有 driver_id 绑定关系)
+      // 查出现有的绑定
+      const { data: existingSamsaraDrivers } = await (supabase.from as any)("samsara_drivers").select("id, driver_id");
+      const existingBindings = new Map<string, string | null>();
+      (existingSamsaraDrivers || []).forEach((sd: any) => existingBindings.set(sd.id, sd.driver_id));
+
+      const nowIso = new Date().toISOString();
+      const samsaraDriverRows = sDrivers.filter((sd: any) => sd.id && sd.name).map((sd: any) => ({
+        id: sd.id,
+        name: sd.name,
+        phone: sd.phone || null,
+        driver_id: existingBindings.get(sd.id) ?? null,  // 保留原有绑定
+        last_seen_at: nowIso,
+        is_active_in_samsara: !sd.deactivatedAtTime,
+        updated_at: nowIso,
+      }));
+
+      // upsert 到 samsara_drivers
+      if (samsaraDriverRows.length > 0) {
+        const { error: sdErr } = await (supabase.from as any)("samsara_drivers").upsert(samsaraDriverRows, { onConflict: "id" });
+        if (sdErr) {
+          console.error('[Samsara同步] samsara_drivers upsert 失败:', sdErr);
+          throw sdErr;
+        }
+      }
+
+      // 3. 计算活跃状态 + driver_vehicle_assignments
       await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("profiles").update({ is_active: false }).eq("role", "driver");
-      
-      const dSamsaraIdToInternal = new Map<string, string>();
-      const dNameToInternal = new Map<string, string>();
 
-      // 移除 (1), (2) 等后缀, 如 "Dao(1)" -> "Dao"
-      const normalizeDriverName = (name: string): string => {
-        if (!name) return '';
-        return name.replace(/\s*\(\d+\)\s*$/g, '').trim();
-      };
+      // 找出每辆活跃车的 Samsara 司机 ID
+      // 来源 1: stats 的 OBD 司机
+      // 来源 2: 实时分配接口
+      // 来源 3: 车辆静态分配
+      const activeSamsaraIds = new Set<string>();
+      const samsaraIdToVehicleId = new Map<string, string>(); // samsaraDriverId -> vehicleId (本地 UUID)
 
-      // 从活跃车辆中找到对应的司机
-      const activeDriverIds = new Set<string>();
-      const activeDriverNames = new Set<string>();
+      const vehicleBySamsaraId = new Map<string, any>();
+      allVehicles.forEach((v: any) => { if (v.samsara_id) vehicleBySamsaraId.set(v.samsara_id, v); });
 
       sStats.forEach((stat: any) => {
-        if (activeVehicleIds.has(stat.id) && stat.obdDriver?.driver?.name) {
-          activeDriverNames.add(normalizeDriverName(stat.obdDriver.driver.name));
+        if (activeVehicleIds.has(stat.id) && stat.obdDriver?.driver?.id) {
+          const sdId = stat.obdDriver.driver.id;
+          activeSamsaraIds.add(sdId);
+          const vehicle = vehicleBySamsaraId.get(stat.id);
+          if (vehicle && !samsaraIdToVehicleId.has(sdId)) samsaraIdToVehicleId.set(sdId, vehicle.id);
         }
       });
 
       sAssigns.forEach((a: any) => {
-        if (a.vehicle?.id && activeVehicleIds.has(a.vehicle.id)) {
-          if (a.driver?.id) activeDriverIds.add(a.driver.id);
-          if (a.driver?.name) activeDriverNames.add(normalizeDriverName(a.driver.name));
+        if (a.vehicle?.id && activeVehicleIds.has(a.vehicle.id) && a.driver?.id) {
+          activeSamsaraIds.add(a.driver.id);
+          const vehicle = vehicleBySamsaraId.get(a.vehicle.id);
+          if (vehicle && !samsaraIdToVehicleId.has(a.driver.id)) samsaraIdToVehicleId.set(a.driver.id, vehicle.id);
         }
       });
 
       sDrivers.forEach((sd: any) => {
         const vehicleRef = sd.currentVehicle || sd.staticAssignedVehicle;
         if (vehicleRef?.id && activeVehicleIds.has(vehicleRef.id)) {
-          activeDriverIds.add(sd.id);
-          if (sd.name) activeDriverNames.add(normalizeDriverName(sd.name));
+          activeSamsaraIds.add(sd.id);
+          const vehicle = vehicleBySamsaraId.get(vehicleRef.id);
+          if (vehicle && !samsaraIdToVehicleId.has(sd.id)) samsaraIdToVehicleId.set(sd.id, vehicle.id);
         }
       });
 
       sVehicles.forEach((sv: any) => {
-        if (activeVehicleIds.has(sv.id) && sv.staticAssignedDriver) {
-          activeDriverNames.add(normalizeDriverName(sv.staticAssignedDriver.name));
+        if (activeVehicleIds.has(sv.id) && sv.staticAssignedDriver?.id) {
+          const sdId = sv.staticAssignedDriver.id;
+          activeSamsaraIds.add(sdId);
+          const vehicle = vehicleBySamsaraId.get(sv.id);
+          if (vehicle && !samsaraIdToVehicleId.has(sdId)) samsaraIdToVehicleId.set(sdId, vehicle.id);
         }
       });
 
-      // 兜底: 如果没找到任何活跃司机, 同步所有司机
-      const syncAllDrivers = activeDriverIds.size === 0 && activeDriverNames.size === 0;
+      // 查出当前所有绑定 (上面刚 upsert 过的)
+      const { data: allBindings } = await (supabase.from as any)("samsara_drivers").select("id, driver_id");
+      const bindingsMap = new Map<string, string>();
+      (allBindings || []).forEach((sd: any) => {
+        if (sd.driver_id) bindingsMap.set(sd.id, sd.driver_id);
+      });
 
-      // 同步活跃司机
-      const samsaraDriverNames = new Set<string>();
-
-      for (const sd of sDrivers) {
-        if (!sd.name) continue;
-
-        const originalName = sd.name;
-        const normalizedName = normalizeDriverName(sd.name);
-
-        const isActive = syncAllDrivers || 
-                        activeDriverIds.has(sd.id) || 
-                        activeDriverNames.has(normalizedName);
-
-        if (!isActive) continue;
-
-        samsaraDriverNames.add(normalizedName);
-
-        const { data: existing } = await supabase
-          .from("profiles")
-          .select("id,name")
-          .eq("name", normalizedName)
-          .eq("role", "driver");
-
-        let dId = '';
-
-        if (existing && existing.length > 0) {
-          dId = existing[0].id;
-          await supabase.from("profiles").update({ 
-            phone: sd.phone || null, 
-            is_active: true 
-          }).eq("id", dId);
-        } else {
-          const { data: nw } = await supabase
-            .from("profiles")
-            .insert({ 
-              name: normalizedName, 
-              phone: sd.phone || null, 
-              role: "driver", 
-              is_active: true 
-            })
-            .select()
-            .single();
-          if (nw) dId = nw.id;
-        }
-
-        if (dId) {
-          dSamsaraIdToInternal.set(sd.id, dId);
-          dNameToInternal.set(normalizedName.toUpperCase().trim(), dId);
-          dNameToInternal.set(originalName.toUpperCase().trim(), dId);
-        }
-      }
-
-      // 删除不在 Samsara 中的旧重复账户 (带括号后缀)
-      const { data: allDrivers } = await supabase
-        .from("profiles")
-        .select("id,name")
-        .eq("role", "driver");
-
-      if (allDrivers) {
-        for (const driver of allDrivers) {
-          const normalizedName = normalizeDriverName(driver.name);
-          if (!samsaraDriverNames.has(normalizedName) && driver.name.match(/\(\d+\)$/)) {
-            await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", driver.id);
-            await supabase.from("driver_locations").delete().eq("driver_id", driver.id);
-            await supabase.from("profiles").delete().eq("id", driver.id);
-          }
-        }
-      }
-
-      // 3. 匹配关联 (寻找当前"正在开车"的司机)
-      const pending = new Map<string, string>(); // dId -> vId
-      const clean = (s: string) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      // 激活绑定的本地司机, 并创建 driver_vehicle_assignments
+      const activeLocalDriverIds = new Set<string>();
+      const assignmentInserts: Array<{ driver_id: string; vehicle_id: string }> = [];
       const analysisData: Array<{ name: string; ref: string; source: string; matched: boolean }> = [];
 
-      // 策略 A: 从司机角度寻找车辆
-      sDrivers.forEach((sd: any) => {
-        const dId = dSamsaraIdToInternal.get(sd.id) 
-          || dNameToInternal.get(sd.name.toUpperCase().trim())
-          || dNameToInternal.get(clean(sd.name));
-        if (!dId) return;
+      for (const sdId of activeSamsaraIds) {
+        const localDriverId = bindingsMap.get(sdId);
+        const sd = sDrivers.find((d: any) => d.id === sdId);
+        const vehicleId = samsaraIdToVehicleId.get(sdId);
+        const vehicle = vehicleId ? allVehicles.find((v: any) => v.id === vehicleId) : null;
 
-        let vRef = null;
-        let source = '';
-
-        const assign = sAssigns.find((a: any) => a.driver?.id === sd.id || clean(a.driver?.name) === clean(sd.name));
-        if (assign) { vRef = assign.vehicle; source = 'Samsara分配接口'; }
-
-        if (!vRef?.id) {
-          const stat = sStats.find((s: any) => clean(s.obdDriver?.driver?.name) === clean(sd.name));
-          if (stat) { vRef = { id: stat.id, name: stat.name }; source = '车辆OBD状态'; }
-        }
-
-        if (!vRef?.id) {
-          const profileRef = sd.currentVehicle || sd.staticAssignedVehicle;
-          if (profileRef) { vRef = profileRef; source = 'Samsara司机档案'; }
-        }
-
-        if (vRef) {
-          const vehicle = allVehicles.find(v => (vRef.id && v.samsara_id === vRef.id) || (vRef.name && clean(v.name) === clean(vRef.name)));
-          const matched = !!vehicle;
-          if (matched) {
-            pending.set(dId, vehicle.id);
-            analysisData.push({ name: sd.name, ref: vRef.name || vRef.id, source, matched });
+        if (localDriverId) {
+          activeLocalDriverIds.add(localDriverId);
+          if (vehicle && !assignmentInserts.some(a => a.driver_id === localDriverId)) {
+            assignmentInserts.push({ driver_id: localDriverId, vehicle_id: vehicle.id });
+            analysisData.push({ name: sd?.name || sdId, ref: vehicle.name, source: '已绑定', matched: true });
           }
+        } else {
+          // 未绑定的 Samsara 司机在开活跃车
+          analysisData.push({ name: sd?.name || sdId, ref: vehicle?.name || '-', source: '未绑定本地司机', matched: false });
         }
-      });
-
-      // 策略 B: 从车辆角度寻找司机 (车辆侧静态分配)
-      sVehicles.forEach((sv: any) => {
-        if (sv.staticAssignedDriver) {
-          const dRef = sv.staticAssignedDriver;
-          const dId = dSamsaraIdToInternal.get(dRef.id) 
-            || dNameToInternal.get(dRef.name.toUpperCase().trim())
-            || dNameToInternal.get(clean(dRef.name));
-          const vehicle = allVehicles.find(v => v.samsara_id === sv.id || clean(v.name) === clean(sv.name));
-
-          if (dId && vehicle && !pending.has(dId)) {
-            pending.set(dId, vehicle.id);
-            analysisData.push({ name: dRef.name, ref: vehicle.name, source: '车辆侧静态分配', matched: true });
-          }
-        }
-      });
-
-      const finalInserts = Array.from(pending.entries()).map(([dId, vId]) => ({ driver_id: dId, vehicle_id: vId }));
-      if (finalInserts.length > 0) {
-        await supabase.from("driver_vehicle_assignments").insert(finalInserts);
       }
 
-      setSyncAnalysis({ 
-        totalDrivers: sDrivers.length, 
+      // 激活对应本地司机
+      if (activeLocalDriverIds.size > 0) {
+        await supabase.from("profiles").update({ is_active: true }).in("id", Array.from(activeLocalDriverIds));
+      }
+
+      if (assignmentInserts.length > 0) {
+        await supabase.from("driver_vehicle_assignments").insert(assignmentInserts);
+      }
+
+      setSyncAnalysis({
+        totalDrivers: sDrivers.length,
         driversWithRefs: analysisData,
         debugStatuses: debug
       } as any);
 
-      return { vehicles: allVehicles.length, assignments: finalInserts.length, drivers: sDrivers.length };
+      return { vehicles: allVehicles.length, assignments: assignmentInserts.length, drivers: samsaraDriverRows.length };
     },
     onSuccess: (res) => {
-      toast.success(`同步完成！车辆: ${res.vehicles}, 司机: ${res.drivers}, 活跃分配: ${res.assignments}`);
+      toast.success(`同步完成！车辆: ${res.vehicles}, Samsara 司机: ${res.drivers}, 活跃分配: ${res.assignments}`);
       qc.invalidateQueries({ queryKey: ["vehicles-all"] });
       qc.invalidateQueries({ queryKey: ["drivers-all"] });
       qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] });
+      qc.invalidateQueries({ queryKey: ["samsara-drivers"] });
     },
     onError: (e: Error) => {
       toast.error(`同步失败: ${e.message}`);
@@ -403,8 +355,19 @@ export function FleetPage() {
               <Button size="sm" onClick={() => setAddingDriver(true)}><Plus className="h-4 w-4 mr-1" /> 添加司机</Button>
             </div>
           </div>
+          {unboundSamsaraDrivers.length > 0 && (
+            <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+              ⚠️ 有 {unboundSamsaraDrivers.length} 个 Samsara 账号未绑定到任何本地司机：
+              <span className="font-mono ml-1">
+                {unboundSamsaraDrivers.slice(0, 5).map(sd => sd.name).join(", ")}
+                {unboundSamsaraDrivers.length > 5 && ` 等`}
+              </span>
+            </div>
+          )}
           <div className="space-y-2">
-            {filteredDrivers.map((d) => (
+            {filteredDrivers.map((d) => {
+              const bound = getBoundSamsaraDrivers(d.id);
+              return (
               <div key={d.id} className={cn("bg-card border rounded-lg p-3", !d.is_active && "opacity-50")}>
                 <div className="flex items-center gap-3 mb-2">
                   <div className="h-10 w-10 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center">
@@ -433,12 +396,26 @@ export function FleetPage() {
                   ) : (
                     <div className="text-xs text-muted-foreground">未分配车辆</div>
                   )}
-                  <Button size="sm" variant="outline" className="mt-1" onClick={() => setAssigningDriver(d)}>
-                    <Plus className="h-3 w-3 mr-1" /> 分配车辆
-                  </Button>
+                  {bound.length > 0 && (
+                    <div className="flex flex-wrap gap-1 items-center">
+                      <span className="text-xs text-muted-foreground">Samsara:</span>
+                      {bound.map(sd => (
+                        <Badge key={sd.id} variant="secondary" className="text-[10px]">{sd.name}</Badge>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="mt-1" onClick={() => setAssigningDriver(d)}>
+                      <Plus className="h-3 w-3 mr-1" /> 分配车辆
+                    </Button>
+                    <Button size="sm" variant="outline" className="mt-1" onClick={() => setBindingSamsara(d)}>
+                      <Plus className="h-3 w-3 mr-1" /> Samsara 账号 ({bound.length})
+                    </Button>
+                  </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
@@ -519,6 +496,13 @@ export function FleetPage() {
           vehicles={vehicles}
           assignments={assignments}
           onClose={() => setAssigningDriver(null)} 
+        />
+      )}
+      {bindingSamsara && (
+        <BindSamsaraDialog
+          driver={bindingSamsara}
+          samsaraDrivers={samsaraDrivers}
+          onClose={() => setBindingSamsara(null)}
         />
       )}
       {syncAnalysis && (
@@ -760,6 +744,76 @@ function AssignVehicleDialog({ driver, vehicles, assignments, onClose }: { drive
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button onClick={() => assign.mutate()} disabled={!selectedVehicleId}>确认</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BindSamsaraDialog({ driver, samsaraDrivers, onClose }: { driver: Driver; samsaraDrivers: SamsaraDriver[]; onClose: () => void; }) {
+  const qc = useQueryClient();
+  const bound = samsaraDrivers.filter(sd => sd.driver_id === driver.id);
+  const available = samsaraDrivers.filter(sd => !sd.driver_id || sd.driver_id === driver.id);
+
+  const toggleBinding = useMutation({
+    mutationFn: async ({ samsaraDriverId, bind }: { samsaraDriverId: string; bind: boolean }) => {
+      const { error } = await (supabase.from as any)("samsara_drivers")
+        .update({ driver_id: bind ? driver.id : null, updated_at: new Date().toISOString() })
+        .eq("id", samsaraDriverId);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["samsara-drivers"] }); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>绑定 Samsara 账号 - {driver.name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div className="text-xs text-muted-foreground">
+            一个本地司机可绑定多个 Samsara 账号（处理 Dao(1) / Dao(2) 这类重复账号）
+          </div>
+          {available.length === 0 ? (
+            <div className="text-sm text-muted-foreground text-center py-6">
+              暂无可用的 Samsara 账号，先点"从 Samsara 同步"拉取账号列表
+            </div>
+          ) : (
+            <div className="space-y-1 max-h-[50vh] overflow-y-auto">
+              {available.map(sd => {
+                const isBound = sd.driver_id === driver.id;
+                return (
+                  <div key={sd.id} className={cn(
+                    "flex items-center justify-between border rounded px-3 py-2",
+                    isBound && "bg-primary/5 border-primary"
+                  )}>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{sd.name}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono truncate">ID: {sd.id}</div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={isBound ? "default" : "outline"}
+                      onClick={() => toggleBinding.mutate({ samsaraDriverId: sd.id, bind: !isBound })}
+                      disabled={toggleBinding.isPending}
+                    >
+                      {isBound ? "已绑定" : "绑定"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {bound.length > 0 && (
+            <div className="text-xs text-muted-foreground pt-2 border-t">
+              已绑定 {bound.length} 个：{bound.map(sd => sd.name).join(", ")}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
