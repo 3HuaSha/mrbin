@@ -154,31 +154,90 @@ export function FleetPage() {
 
       console.group('👥 司机同步与合并');
       
-      // 第一步：找出所有有实时车辆分配的司机（真正在工作的）
+      // 第一步：从活跃的车辆（引擎正在运行）中找到司机
+      const activeVehicleIds = new Set<string>(); // Samsara 车辆 ID
       const activeDriverIds = new Set<string>();
       const activeDriverNames = new Set<string>();
       
-      // 从实时分配接口获取活跃司机
-      sAssigns.forEach((a: any) => {
-        if (a.driver?.id) {
-          activeDriverIds.add(a.driver.id);
-          if (a.driver.name) {
-            activeDriverNames.add(normalizeDriverName(a.driver.name));
+      // 从车辆状态中找到引擎正在运行的车辆
+      sStats.forEach((stat: any) => {
+        // 检查引擎状态
+        if (stat.engineStates && Array.isArray(stat.engineStates)) {
+          const latestState = stat.engineStates[stat.engineStates.length - 1];
+          if (latestState?.value === 'Running') {
+            activeVehicleIds.add(stat.id);
+            console.log(`🚗 活跃车辆: ${stat.name || stat.id} (引擎运行中)`);
+            
+            // 如果有 OBD 司机信息
+            if (stat.obdDriver?.driver?.name) {
+              const name = normalizeDriverName(stat.obdDriver.driver.name);
+              activeDriverNames.add(name);
+              console.log(`  └─ 司机: ${stat.obdDriver.driver.name} -> ${name}`);
+            }
           }
         }
       });
       
-      // 从车辆OBD状态获取活跃司机
-      sStats.forEach((s: any) => {
-        if (s.obdDriver?.driver?.name) {
-          activeDriverNames.add(normalizeDriverName(s.obdDriver.driver.name));
+      // 从位置信息中找到最近有移动的车辆（作为补充）
+      const now = Date.now();
+      const oneHourAgo = now - 60 * 60 * 1000; // 1小时前
+      sLocs.forEach((loc: any) => {
+        if (loc.time && new Date(loc.time).getTime() > oneHourAgo) {
+          activeVehicleIds.add(loc.id);
+          console.log(`📍 最近活跃车辆: ${loc.name || loc.id} (最近1小时有位置更新)`);
         }
       });
       
-      console.log(`📊 找到 ${activeDriverIds.size} 个有实时分配的司机`);
+      console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆`);
+      
+      // 第二步：从活跃车辆中找到对应的司机
+      // 方法1: 从实时分配接口
+      sAssigns.forEach((a: any) => {
+        if (a.vehicle?.id && activeVehicleIds.has(a.vehicle.id)) {
+          if (a.driver?.id) {
+            activeDriverIds.add(a.driver.id);
+          }
+          if (a.driver?.name) {
+            const name = normalizeDriverName(a.driver.name);
+            activeDriverNames.add(name);
+            console.log(`📌 实时分配: ${a.driver.name} -> ${name} (车辆: ${a.vehicle.name})`);
+          }
+        }
+      });
+      
+      // 方法2: 从司机档案的车辆分配
+      sDrivers.forEach((sd: any) => {
+        const vehicleRef = sd.currentVehicle || sd.staticAssignedVehicle;
+        if (vehicleRef?.id && activeVehicleIds.has(vehicleRef.id)) {
+          activeDriverIds.add(sd.id);
+          if (sd.name) {
+            const name = normalizeDriverName(sd.name);
+            activeDriverNames.add(name);
+            console.log(`📌 司机档案分配: ${sd.name} -> ${name} (车辆: ${vehicleRef.name})`);
+          }
+        }
+      });
+      
+      // 方法3: 从车辆侧的静态分配
+      sVehicles.forEach((sv: any) => {
+        if (activeVehicleIds.has(sv.id) && sv.staticAssignedDriver) {
+          const name = normalizeDriverName(sv.staticAssignedDriver.name);
+          activeDriverNames.add(name);
+          console.log(`📌 车辆静态分配: ${sv.staticAssignedDriver.name} -> ${name} (车辆: ${sv.name})`);
+        }
+      });
+      
+      console.log(`📊 找到 ${activeDriverIds.size} 个活跃司机ID`);
+      console.log(`📊 找到 ${activeDriverNames.size} 个活跃司机名称`);
       console.log(`📊 活跃司机名单:`, Array.from(activeDriverNames));
       
-      // 第二步：只同步活跃的司机
+      // 如果没有找到任何活跃司机，说明数据源有问题，同步所有司机
+      const syncAllDrivers = activeDriverIds.size === 0 && activeDriverNames.size === 0;
+      if (syncAllDrivers) {
+        console.warn('⚠️ 未找到任何活跃司机，将同步所有司机');
+      }
+      
+      // 第三步：同步活跃的司机
       const samsaraDriverNames = new Set<string>();
       
       for (const sd of sDrivers) {
@@ -187,11 +246,13 @@ export function FleetPage() {
         const originalName = sd.name;
         const normalizedName = normalizeDriverName(sd.name);
         
-        // 检查这个司机是否活跃（有实时分配）
-        const isActive = activeDriverIds.has(sd.id) || activeDriverNames.has(normalizedName);
+        // 检查这个司机是否活跃（对应的车辆正在运行）
+        const isActive = syncAllDrivers || 
+                        activeDriverIds.has(sd.id) || 
+                        activeDriverNames.has(normalizedName);
         
         if (!isActive) {
-          console.log(`⏭️ 跳过非活跃司机: "${originalName}" (没有实时车辆分配)`);
+          console.log(`⏭️ 跳过非活跃司机: "${originalName}" (车辆未运行)`);
           continue;
         }
         
