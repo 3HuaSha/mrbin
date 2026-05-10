@@ -134,9 +134,11 @@ export function FleetPage() {
       sStats.forEach((stat: any) => {
         if (stat.engineStates && Array.isArray(stat.engineStates)) {
           const latestState = stat.engineStates[stat.engineStates.length - 1];
-          if (latestState?.value === 'Running') {
+          // 引擎状态：Off（关闭）, On（运行）, Idle（怠速）
+          // 活跃车辆 = On 或 Idle
+          if (latestState?.value === 'On' || latestState?.value === 'Idle') {
             activeVehicleIds.add(stat.id);
-            console.log(`🚗 引擎运行中: ${stat.name || stat.id}`);
+            console.log(`🚗 引擎运行中: ${stat.name || stat.id} (状态: ${latestState.value})`);
           }
         }
       });
