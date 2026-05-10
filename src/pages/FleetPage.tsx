@@ -134,41 +134,52 @@ export function FleetPage() {
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       console.log('🗑️ 已清空 vehicles / dispatch_assignments / job_steps');
 
-      // 找出所有活跃车辆（引擎 On/Idle 且 1 小时内更新）
+      // 找出所有活跃车辆（引擎 On/Idle 且 1 小时内有任意心跳）
+      // 把 locations 接口的 GPS 时间戳也合并进 stats,作为"最后心跳"信号
+      // （因为 engineState.time 是状态变更时刻,不是心跳;GPS 是持续上报的）
+      sLocs.forEach((loc: any) => {
+        if (!loc.id) return;
+        const stat = sStats.find((s: any) => s.id === loc.id);
+        if (stat && loc.time && !stat.gps?.time) {
+          stat.gps = { ...(stat.gps || {}), time: loc.time, latitude: loc.latitude, longitude: loc.longitude };
+        }
+      });
       const activeVehicleIds = getActiveVehicleIds(sStats);
-      console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆 (引擎 On/Idle 且 1 小时内更新)`);
+      console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆 (引擎 On/Idle 且 1 小时内有心跳)`);
 
       // ---- 活跃判定调试: 列出每辆车的 stats 原始数据和判定结果 ----
       console.group('🔎 [活跃判定调试] 每辆车的 stats 详情');
       const nowMs = Date.now();
+      const ageOf = (t?: string) => t ? `${Math.round((nowMs - new Date(t).getTime()) / 60000)}m` : '-';
       const statsTable = sStats.map((s: any) => {
-        const lastTime = s.engineState?.time || s.engineRpm?.time || s.ecuSpeedMph?.time;
-        const ageMin = lastTime ? Math.round((nowMs - new Date(lastTime).getTime()) / 60000) : null;
         return {
           name: s.name || '-',
-          id: s.id,
           engineState: s.engineState?.value || '-',
-          engineStateTime: s.engineState?.time || '-',
-          ageMin: ageMin === null ? '-' : `${ageMin} 分钟前`,
-          rpm: s.engineRpm?.value ?? '-',
-          speed: s.ecuSpeedMph?.value ?? '-',
+          engineAge: ageOf(s.engineState?.time),
+          gpsAge: ageOf(s.gps?.time),
+          rpmAge: ageOf(s.engineRpm?.time),
+          speedAge: ageOf(s.ecuSpeedMph?.time),
           obdDriver: s.obdDriver?.driver?.name || '-',
           isActive: activeVehicleIds.has(s.id) ? '✅' : '❌',
         };
       });
       console.table(statsTable);
 
-      // 找出 "引擎 On/Idle 但因为超过 1 小时被排除的车" —— 这往往是你说的"在动但没识别"
-      const staleActive = sStats.filter((s: any) => {
+      // 找出 "引擎 On/Idle 但所有心跳都超过 1 小时的车"
+      const stillStale = sStats.filter((s: any) => {
         const v = s.engineState?.value;
-        const t = s.engineState?.time;
-        if ((v !== 'On' && v !== 'Idle') || !t) return false;
-        const age = nowMs - new Date(t).getTime();
-        return age > 60 * 60 * 1000; // 超过 1 小时
+        if (v !== 'On' && v !== 'Idle') return false;
+        if (activeVehicleIds.has(s.id)) return false;
+        return true;
       });
-      if (staleActive.length > 0) {
-        console.warn(`⚠️ [活跃判定] ${staleActive.length} 辆车引擎=On/Idle 但最后更新超过 1 小时,被判为不活跃:`, 
-          staleActive.map((s: any) => ({ name: s.name, state: s.engineState?.value, time: s.engineState?.time })));
+      if (stillStale.length > 0) {
+        console.warn(`⚠️ [活跃判定] ${stillStale.length} 辆车引擎=On/Idle 但所有心跳(engine/gps/rpm/speed)都>1小时:`, 
+          stillStale.map((s: any) => ({
+            name: s.name,
+            state: s.engineState?.value,
+            engineTime: s.engineState?.time,
+            gpsTime: s.gps?.time,
+          })));
       }
 
       // 找出 "stats 里完全没数据的车" —— Samsara 没吐 engineState

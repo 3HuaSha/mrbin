@@ -18,6 +18,11 @@ export interface VehicleStatus {
 
 /**
  * 从 Samsara Stats 数据中提取车辆状态
+ * 
+ * ⚠️ 关键逻辑说明：
+ * Samsara 的 engineState.time 表示"状态最后变更"的时刻，不是"最后心跳"。
+ * 一辆 13:00 启动、16:00 还在跑的车，engineState=On 但 time 仍是 13:00。
+ * 所以判断"是否活跃"要用 **所有信号中最新的 time** 来对比 1 小时窗口。
  */
 export function extractVehicleStatus(stat: any): VehicleStatus {
   const status: VehicleStatus = {
@@ -28,24 +33,33 @@ export function extractVehicleStatus(stat: any): VehicleStatus {
     hasDriver: false,
   };
 
-  // 1. 检查引擎状态 (engineState - 单数)
+  // 收集所有可用时间戳，取最新的作为"最后心跳"
+  const timestamps: number[] = [];
+  const pushTime = (t?: string) => {
+    if (!t) return;
+    const ms = new Date(t).getTime();
+    if (!isNaN(ms)) timestamps.push(ms);
+  };
+  pushTime(stat.engineState?.time);
+  pushTime(stat.engineRpm?.time);
+  pushTime(stat.ecuSpeedMph?.time);
+  pushTime(stat.fuelPercents?.time);
+  pushTime(stat.gps?.time);
+  pushTime(stat.obdDriver?.time);
+
+  const latestMs = timestamps.length ? Math.max(...timestamps) : 0;
+  const nowMs = Date.now();
+  const oneHourInMs = 60 * 60 * 1000;
+  const freshlySeen = latestMs > 0 && (nowMs - latestMs) <= oneHourInMs;
+
+  // 1. 引擎状态
   if (stat.engineState && stat.engineState.value) {
     status.engineState = stat.engineState.value || 'Unknown';
     status.lastUpdate = stat.engineState.time;
-    
-    // 引擎状态：Off（关闭）, On（运行）, Idle（怠速）
-    // 只有 On 或 Idle 且最后更新在 1 小时内才算活跃
-    if (status.engineState === 'On' || status.engineState === 'Idle') {
-      // 检查最后更新时间是否在 1 小时内
-      if (status.lastUpdate) {
-        const lastUpdateTime = new Date(status.lastUpdate).getTime();
-        const now = Date.now();
-        const oneHourInMs = 60 * 60 * 1000;
-        
-        if (now - lastUpdateTime <= oneHourInMs) {
-          status.isActive = true;
-        }
-      }
+
+    // 引擎 On/Idle + 任意心跳在 1 小时内 → 活跃
+    if ((status.engineState === 'On' || status.engineState === 'Idle') && freshlySeen) {
+      status.isActive = true;
     }
   }
 
