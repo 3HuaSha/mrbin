@@ -115,148 +115,47 @@ export function FleetPage() {
 
   const syncSamsara = useMutation({
     mutationFn: async () => {
-      console.group('🔍 Samsara 同步调试详情');
       const result = await fetchSamsaraData();
       if (!result.success) throw new Error(result.error || '获取数据失败');
       
       const { vehicles: sVehicles = [], drivers: sDrivers = [], assignments: sAssigns = [], vehicleStats: sStats = [], locations: sLocs = [], debug } = result as any;
       (window as any).__SAMSARA_DEBUG__ = { sVehicles, sDrivers, sAssigns, sStats, sLocs, debug };
-      
-      console.log('📦 原始数据已存入 window.__SAMSARA_DEBUG__');
-      console.log(`📊 Samsara 返回: 车辆(${sVehicles.length}), 司机(${sDrivers.length}), 分配(${sAssigns.length}), Stats(${sStats.length})`);
-      console.log(`📋 [调试] Samsara 车辆完整名单 (${sVehicles.length} 辆):`);
-      console.table(sVehicles.map((v: any) => ({ name: v.name || '(空)', id: v.id, vin: v.vin || '-', serial: v.serial || '-' })));
 
       // 1. 同步车辆
-      console.group('🚚 车辆同步步骤');
       await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
-      console.log('🗑️ 已清空 vehicles / dispatch_assignments / job_steps');
 
-      // 找出所有活跃车辆
-      // Samsara 的 engineState.time 是"状态变更"时刻不是心跳,所以:
-      // 1) 有新心跳 (gps/rpm/speed ≤1h) 且 engineState=On/Idle → 活跃
-      // 2) 没新心跳但 engineState=On/Idle 且 ≤12h → 活跃 (设备可能上报稀疏)
       // 把 locations 的 GPS 时间戳合并到 stats 作为心跳源
-      console.log(`📍 [Locations] 样本:`, sLocs.slice(0, 2));
+      // (engineState.time 是状态变更时刻不是心跳, GPS 才是持续上报的)
       sLocs.forEach((loc: any) => {
         if (!loc.id) return;
         const stat = sStats.find((s: any) => s.id === loc.id);
         if (!stat) return;
-        // Samsara locations 可能返回:
-        //   顶层: loc.time, loc.latitude
-        //   嵌套: loc.location = { time, latitude, longitude }
-        //   或: loc.gps = { time, ... }
         const locTime = loc.time || loc.location?.time || loc.gps?.time;
         const lat = loc.latitude ?? loc.location?.latitude ?? loc.gps?.latitude;
         const lng = loc.longitude ?? loc.location?.longitude ?? loc.gps?.longitude;
         if (locTime) {
           const existingTime = stat.gps?.time;
-          // 用最新的时间戳
           if (!existingTime || new Date(locTime).getTime() > new Date(existingTime).getTime()) {
             stat.gps = { ...(stat.gps || {}), time: locTime, latitude: lat, longitude: lng };
           }
         }
       });
       const activeVehicleIds = getActiveVehicleIds(sStats);
-      console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆`);
 
-      // ---- 活跃判定调试: 列出每辆车的 stats 原始数据和判定结果 ----
-      console.group('🔎 [活跃判定调试] 每辆车的 stats 详情');
-      const nowMs = Date.now();
-      const ageOf = (t?: string) => t ? `${Math.round((nowMs - new Date(t).getTime()) / 60000)}m` : '-';
-      const statsTable = sStats.map((s: any) => {
-        return {
-          name: s.name || '-',
-          engineState: s.engineState?.value || '-',
-          engineAge: ageOf(s.engineState?.time),
-          gpsAge: ageOf(s.gps?.time),
-          rpmAge: ageOf(s.engineRpm?.time),
-          speedAge: ageOf(s.ecuSpeedMph?.time),
-          obdDriver: s.obdDriver?.driver?.name || '-',
-          isActive: activeVehicleIds.has(s.id) ? '✅' : '❌',
-        };
-      });
-      console.table(statsTable);
-
-      // 找出 "引擎 On/Idle 但所有心跳都超过 1 小时的车"
-      const stillStale = sStats.filter((s: any) => {
-        const v = s.engineState?.value;
-        if (v !== 'On' && v !== 'Idle') return false;
-        if (activeVehicleIds.has(s.id)) return false;
-        return true;
-      });
-      if (stillStale.length > 0) {
-        console.warn(`⚠️ [活跃判定] ${stillStale.length} 辆车引擎=On/Idle 但所有心跳(engine/gps/rpm/speed)都>1小时:`, 
-          stillStale.map((s: any) => ({
-            name: s.name,
-            state: s.engineState?.value,
-            engineTime: s.engineState?.time,
-            gpsTime: s.gps?.time,
-          })));
-      }
-
-      // 找出 "stats 里完全没数据的车" —— Samsara 没吐 engineState
-      const vehiclesInStats = new Set(sStats.map((s: any) => s.id));
-      const vehiclesNotInStats = sVehicles.filter((v: any) => !vehiclesInStats.has(v.id));
-      if (vehiclesNotInStats.length > 0) {
-        console.warn(`⚠️ [活跃判定] ${vehiclesNotInStats.length} 辆车在 /vehicles 有但在 /stats 没返回:`,
-          vehiclesNotInStats.map((v: any) => ({ name: v.name, id: v.id })));
-      }
-      console.groupEnd();
-
-      // ---- 步骤 1a: 过滤名称为空的车 ----
-      const filteredOut = sVehicles.filter((v: any) => !v.name);
-      if (filteredOut.length > 0) {
-        console.warn(`⚠️ [过滤] ${filteredOut.length} 辆车因 name 为空被跳过:`, filteredOut.map((v: any) => v.id));
-      }
-      const namedVehicles = sVehicles.filter((v: any) => v.name);
-      console.log(`✅ [过滤] 有名称的车: ${namedVehicles.length}/${sVehicles.length}`);
-
-      // ---- 步骤 1b: 检测重复 (samsara_id / plate / name) ----
-      const byId = new Map<string, any[]>();
-      const byPlate = new Map<string, any[]>();
-      namedVehicles.forEach((v: any) => {
-        if (!byId.has(v.id)) byId.set(v.id, []);
-        byId.get(v.id)!.push(v);
-        const plate = v.name;
-        if (!byPlate.has(plate)) byPlate.set(plate, []);
-        byPlate.get(plate)!.push(v);
-      });
-
-      const dupIds = [...byId.entries()].filter(([_, arr]) => arr.length > 1);
-      const dupPlates = [...byPlate.entries()].filter(([_, arr]) => arr.length > 1);
-      if (dupIds.length > 0) {
-        console.error(`❌ [重复] 同一 Samsara ID 出现多次:`, dupIds.map(([id, arr]) => ({ id, count: arr.length, names: arr.map(x => x.name) })));
-      }
-      if (dupPlates.length > 0) {
-        console.error(`❌ [重复] 同一 plate/name 出现多次 (会导致 unique 冲突):`, dupPlates.map(([plate, arr]) => ({ plate, count: arr.length, ids: arr.map(x => x.id) })));
-      }
-
-      const vehicleInserts = namedVehicles.map((v: any) => {
+      const vehicleInserts = sVehicles.filter((v: any) => v.name).map((v: any) => {
         const name = v.name.toUpperCase().trim();
-        
-        // 根据名称判断类型
         let type: "HINO" | "MACK" = "MACK";
         let size = "40";
-        
-        // 检查名称中是否包含 "HINO" 或 "MACK"
         if (name.includes("HINO")) {
           type = "HINO";
           size = "20";
         } else if (name.includes("MACK")) {
           type = "MACK";
           size = "40";
-        } else {
-          // 其他类型的车（FLAT, DUMP等），默认为 MACK
-          type = "MACK";
-          size = "40";
         }
-        
-        // 检查这辆车的引擎是否正在运行
         const isActive = activeVehicleIds.has(v.id);
-        
         return { 
           name: v.name, 
           type, 
@@ -267,154 +166,92 @@ export function FleetPage() {
         };
       });
 
-      console.log(`📝 [插入] 准备 insert ${vehicleInserts.length} 行`);
-
       const { data: insertedVehicles, error: vError } = await supabase.from("vehicles").insert(vehicleInserts).select();
       if (vError) {
-        console.error('❌ [插入] Supabase insert 失败:', vError);
-        console.error('❌ [插入] 尝试插入的数据:', vehicleInserts);
+        console.error('[Samsara同步] vehicles insert 失败:', vError, vehicleInserts);
         throw vError;
       }
       const allVehicles = insertedVehicles || [];
 
-      // ---- 步骤 1c: 对比插入前后数量，找出丢失的车 ----
-      console.log(`✅ [插入] Supabase 返回 ${allVehicles.length} 行 (预期 ${vehicleInserts.length})`);
-      if (allVehicles.length !== vehicleInserts.length) {
-        const insertedIds = new Set(allVehicles.map((v: any) => v.samsara_id));
-        const missing = vehicleInserts.filter(v => !insertedIds.has(v.samsara_id));
-        console.error(`❌ [丢失] ${missing.length} 辆车没有进数据库:`, missing);
-      }
-      (window as any).__SAMSARA_DEBUG__.inserted = allVehicles;
-      (window as any).__SAMSARA_DEBUG__.attempted = vehicleInserts;
-      console.groupEnd();
-
       // 2. 同步司机 - 带重复账户合并逻辑
       await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
-      
-      // 先将所有现有司机标记为停用（稍后会重新激活在 Samsara 中的司机）
       await supabase.from("profiles").update({ is_active: false }).eq("role", "driver");
       
       const dSamsaraIdToInternal = new Map<string, string>();
       const dNameToInternal = new Map<string, string>();
 
-      // 名称规范化函数：移除括号后缀，如 "Dao(1)" -> "Dao"
+      // 移除 (1), (2) 等后缀, 如 "Dao(1)" -> "Dao"
       const normalizeDriverName = (name: string): string => {
         if (!name) return '';
-        // 移除 (1), (2) 等后缀
         return name.replace(/\s*\(\d+\)\s*$/g, '').trim();
       };
 
-      console.group('👥 司机同步与合并');
-      
-      // 第一步：从活跃的车辆（引擎正在运行）中找到司机
+      // 从活跃车辆中找到对应的司机
       const activeDriverIds = new Set<string>();
       const activeDriverNames = new Set<string>();
-      
-      // 从车辆状态中找到引擎正在运行的车辆的司机
+
       sStats.forEach((stat: any) => {
-        // 只处理引擎正在运行的车辆
-        if (activeVehicleIds.has(stat.id)) {
-          // 如果有 OBD 司机信息
-          if (stat.obdDriver?.driver?.name) {
-            const name = normalizeDriverName(stat.obdDriver.driver.name);
-            activeDriverNames.add(name);
-            console.log(`🚗 活跃车辆: ${stat.name || stat.id} - 司机: ${stat.obdDriver.driver.name} -> ${name}`);
-          }
+        if (activeVehicleIds.has(stat.id) && stat.obdDriver?.driver?.name) {
+          activeDriverNames.add(normalizeDriverName(stat.obdDriver.driver.name));
         }
       });
-      
-      console.log(`📊 找到 ${activeVehicleIds.size} 辆引擎运行中的车辆`);
-      
-      // 第二步：从活跃车辆中找到对应的司机
-      // 方法1: 从实时分配接口
+
       sAssigns.forEach((a: any) => {
         if (a.vehicle?.id && activeVehicleIds.has(a.vehicle.id)) {
-          if (a.driver?.id) {
-            activeDriverIds.add(a.driver.id);
-          }
-          if (a.driver?.name) {
-            const name = normalizeDriverName(a.driver.name);
-            activeDriverNames.add(name);
-            console.log(`📌 实时分配: ${a.driver.name} -> ${name} (车辆: ${a.vehicle.name})`);
-          }
+          if (a.driver?.id) activeDriverIds.add(a.driver.id);
+          if (a.driver?.name) activeDriverNames.add(normalizeDriverName(a.driver.name));
         }
       });
-      
-      // 方法2: 从司机档案的车辆分配
+
       sDrivers.forEach((sd: any) => {
         const vehicleRef = sd.currentVehicle || sd.staticAssignedVehicle;
         if (vehicleRef?.id && activeVehicleIds.has(vehicleRef.id)) {
           activeDriverIds.add(sd.id);
-          if (sd.name) {
-            const name = normalizeDriverName(sd.name);
-            activeDriverNames.add(name);
-            console.log(`📌 司机档案分配: ${sd.name} -> ${name} (车辆: ${vehicleRef.name})`);
-          }
+          if (sd.name) activeDriverNames.add(normalizeDriverName(sd.name));
         }
       });
-      
-      // 方法3: 从车辆侧的静态分配
+
       sVehicles.forEach((sv: any) => {
         if (activeVehicleIds.has(sv.id) && sv.staticAssignedDriver) {
-          const name = normalizeDriverName(sv.staticAssignedDriver.name);
-          activeDriverNames.add(name);
-          console.log(`📌 车辆静态分配: ${sv.staticAssignedDriver.name} -> ${name} (车辆: ${sv.name})`);
+          activeDriverNames.add(normalizeDriverName(sv.staticAssignedDriver.name));
         }
       });
-      
-      console.log(`📊 找到 ${activeDriverIds.size} 个活跃司机ID`);
-      console.log(`📊 找到 ${activeDriverNames.size} 个活跃司机名称`);
-      console.log(`📊 活跃司机名单:`, Array.from(activeDriverNames));
-      
-      // 如果没有找到任何活跃司机，说明数据源有问题，同步所有司机
+
+      // 兜底: 如果没找到任何活跃司机, 同步所有司机
       const syncAllDrivers = activeDriverIds.size === 0 && activeDriverNames.size === 0;
-      if (syncAllDrivers) {
-        console.warn('⚠️ 未找到任何活跃司机，将同步所有司机');
-      }
-      
-      // 第三步：同步活跃的司机
+
+      // 同步活跃司机
       const samsaraDriverNames = new Set<string>();
-      
+
       for (const sd of sDrivers) {
         if (!sd.name) continue;
-        
+
         const originalName = sd.name;
         const normalizedName = normalizeDriverName(sd.name);
-        
-        // 检查这个司机是否活跃（对应的车辆正在运行）
+
         const isActive = syncAllDrivers || 
                         activeDriverIds.has(sd.id) || 
                         activeDriverNames.has(normalizedName);
-        
-        if (!isActive) {
-          console.log(`⏭️ 跳过非活跃司机: "${originalName}" (车辆未运行)`);
-          continue;
-        }
-        
+
+        if (!isActive) continue;
+
         samsaraDriverNames.add(normalizedName);
-        
-        console.log(`🔍 处理活跃司机: "${originalName}" -> 规范化为 "${normalizedName}"`);
-        
-        // 先尝试用规范化名称查找现有司机
+
         const { data: existing } = await supabase
           .from("profiles")
           .select("id,name")
           .eq("name", normalizedName)
           .eq("role", "driver");
-        
+
         let dId = '';
-        
+
         if (existing && existing.length > 0) {
-          // 找到现有司机，使用该账户并激活
           dId = existing[0].id;
-          console.log(`✅ 找到现有账户: ${existing[0].name} (ID: ${dId})`);
           await supabase.from("profiles").update({ 
             phone: sd.phone || null, 
             is_active: true 
           }).eq("id", dId);
         } else {
-          // 创建新司机，使用规范化后的名称
-          console.log(`➕ 创建新账户: ${normalizedName}`);
           const { data: nw } = await supabase
             .from("profiles")
             .insert({ 
@@ -427,50 +264,38 @@ export function FleetPage() {
             .single();
           if (nw) dId = nw.id;
         }
-        
+
         if (dId) {
-          // 将Samsara ID和原始名称都映射到同一个内部ID
           dSamsaraIdToInternal.set(sd.id, dId);
           dNameToInternal.set(normalizedName.toUpperCase().trim(), dId);
-          // 也映射原始名称（包含括号的），以便后续匹配
           dNameToInternal.set(originalName.toUpperCase().trim(), dId);
-          console.log(`📌 映射: Samsara ID ${sd.id} -> 内部 ID ${dId}`);
         }
       }
-      
-      // 删除不在 Samsara 中的旧司机账户（带括号后缀的重复账户）
+
+      // 删除不在 Samsara 中的旧重复账户 (带括号后缀)
       const { data: allDrivers } = await supabase
         .from("profiles")
         .select("id,name")
         .eq("role", "driver");
-      
+
       if (allDrivers) {
         for (const driver of allDrivers) {
           const normalizedName = normalizeDriverName(driver.name);
-          // 如果这个司机不在 Samsara 中，且名字包含括号后缀，则删除
           if (!samsaraDriverNames.has(normalizedName) && driver.name.match(/\(\d+\)$/)) {
-            console.log(`🗑️ 删除旧的重复账户: ${driver.name}`);
-            // 先删除相关的外键引用
             await supabase.from("driver_vehicle_assignments").delete().eq("driver_id", driver.id);
             await supabase.from("driver_locations").delete().eq("driver_id", driver.id);
-            // 注意：job_steps 和 dispatch_assignments 可能需要保留历史数据，所以只删除分配关系
             await supabase.from("profiles").delete().eq("id", driver.id);
           }
         }
       }
-      
-      console.groupEnd();
 
-      // 3. 匹配关联 (寻找当前“正在开车”的司机)
+      // 3. 匹配关联 (寻找当前"正在开车"的司机)
       const pending = new Map<string, string>(); // dId -> vId
       const clean = (s: string) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       const analysisData: Array<{ name: string; ref: string; source: string; matched: boolean }> = [];
 
-      console.group('🎯 自动关联逻辑');
-      
       // 策略 A: 从司机角度寻找车辆
       sDrivers.forEach((sd: any) => {
-        // 尝试多种方式查找内部ID（包括规范化名称）
         const dId = dSamsaraIdToInternal.get(sd.id) 
           || dNameToInternal.get(sd.name.toUpperCase().trim())
           || dNameToInternal.get(clean(sd.name));
@@ -478,18 +303,15 @@ export function FleetPage() {
 
         let vRef = null;
         let source = '';
-        
-        // 1. 实时分配接口
+
         const assign = sAssigns.find((a: any) => a.driver?.id === sd.id || clean(a.driver?.name) === clean(sd.name));
         if (assign) { vRef = assign.vehicle; source = 'Samsara分配接口'; }
 
-        // 2. OBD (由于 sStatus 400，这里可能暂时拿不到)
         if (!vRef?.id) {
           const stat = sStats.find((s: any) => clean(s.obdDriver?.driver?.name) === clean(sd.name));
           if (stat) { vRef = { id: stat.id, name: stat.name }; source = '车辆OBD状态'; }
         }
 
-        // 3. 静态档案关联
         if (!vRef?.id) {
           const profileRef = sd.currentVehicle || sd.staticAssignedVehicle;
           if (profileRef) { vRef = profileRef; source = 'Samsara司机档案'; }
@@ -505,32 +327,27 @@ export function FleetPage() {
         }
       });
 
-      // 策略 B: 从车辆角度寻找司机 (重要补充：处理车辆侧的静态分配)
+      // 策略 B: 从车辆角度寻找司机 (车辆侧静态分配)
       sVehicles.forEach((sv: any) => {
         if (sv.staticAssignedDriver) {
           const dRef = sv.staticAssignedDriver;
-          // 尝试多种方式查找内部ID（包括规范化名称）
           const dId = dSamsaraIdToInternal.get(dRef.id) 
             || dNameToInternal.get(dRef.name.toUpperCase().trim())
             || dNameToInternal.get(clean(dRef.name));
           const vehicle = allVehicles.find(v => v.samsara_id === sv.id || clean(v.name) === clean(sv.name));
-          
+
           if (dId && vehicle && !pending.has(dId)) {
-            console.log(`✅ [车辆静态分配] 匹配: ${dRef.name} -> ${vehicle.name}`);
             pending.set(dId, vehicle.id);
             analysisData.push({ name: dRef.name, ref: vehicle.name, source: '车辆侧静态分配', matched: true });
           }
         }
       });
 
-      console.groupEnd();
-
       const finalInserts = Array.from(pending.entries()).map(([dId, vId]) => ({ driver_id: dId, vehicle_id: vId }));
       if (finalInserts.length > 0) {
         await supabase.from("driver_vehicle_assignments").insert(finalInserts);
       }
 
-      console.groupEnd();
       setSyncAnalysis({ 
         totalDrivers: sDrivers.length, 
         driversWithRefs: analysisData,
@@ -546,7 +363,6 @@ export function FleetPage() {
       qc.invalidateQueries({ queryKey: ["driver-vehicle-assignments"] });
     },
     onError: (e: Error) => {
-      console.groupEnd();
       toast.error(`同步失败: ${e.message}`);
     }
   });
