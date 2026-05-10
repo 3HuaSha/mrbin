@@ -114,11 +114,41 @@ export function OrdersPage() {
 
   const cancelOrder = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("orders").update({ status: "cancelled" }).eq("id", id);
+      // 收集要一起删的相关订单 id
+      const toDelete = new Set<string>([id]);
+      const order = orders.find(o => o.id === id);
+
+      // 1. 如果是换桶主单(swap), 顺带删 pickup 子单
+      if (order?.type === "swap" && order.linked_order_id) {
+        toDelete.add(order.linked_order_id);
+      }
+      // 2. 如果是 delivery/pickup 被换桶关联, 也删对方
+      if (order?.linked_order_id) {
+        toDelete.add(order.linked_order_id);
+      }
+      // 3. 反向查: 是否有其他订单 linked_order_id 指向要删的这些
+      const { data: linkedOthers } = await supabase
+        .from("orders")
+        .select("id")
+        .in("linked_order_id", Array.from(toDelete));
+      (linkedOthers || []).forEach((o: any) => toDelete.add(o.id));
+
+      const ids = Array.from(toDelete);
+
+      // 4. 先清关联表 (外键不会级联时手动清)
+      await supabase.from("job_steps").delete().in("order_id", ids);
+      await supabase.from("dispatch_assignments").delete().in("order_id", ids);
+
+      // 5. 解除其他订单对这些订单的 linked_order_id 引用, 避免 SET NULL 后孤儿
+      await supabase.from("orders").update({ linked_order_id: null }).in("linked_order_id", ids);
+
+      // 6. 删订单本体
+      const { error } = await supabase.from("orders").delete().in("id", ids);
       if (error) throw error;
+      return ids.length;
     },
-    onSuccess: () => {
-      toast.success("已取消订单");
+    onSuccess: (count) => {
+      toast.success(count > 1 ? `已删除 ${count} 条订单 (含关联子单)` : "已删除订单");
       qc.invalidateQueries({ queryKey: ["orders"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -240,7 +270,7 @@ export function OrdersPage() {
                   onToggle={() => setExpanded(isOpen ? null : main.id)}
                   onEdit={() => setEditing(main)}
                   onCancel={() => {
-                    if (confirm(`取消订单 ${main.order_number}?`)) cancelOrder.mutate(main.id);
+                    if (confirm(`确定删除订单 ${main.order_number}?此操作不可恢复`)) cancelOrder.mutate(main.id);
                   }}
                   typeBadgeClass={tm.className}
                   typeLabel={tm.label}
