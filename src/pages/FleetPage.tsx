@@ -24,6 +24,7 @@ export function FleetPage() {
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<string>("ALL");
+  const [vehicleStatusFilter, setVehicleStatusFilter] = useState<"ALL" | "ACTIVE">("ALL");
   const [driverFilter, setDriverFilter] = useState<"ALL" | "ASSIGNED">("ASSIGNED");
   const [assigningDriver, setAssigningDriver] = useState<Driver | null>(null);
   const [syncAnalysis, setSyncAnalysis] = useState<{
@@ -84,9 +85,18 @@ export function FleetPage() {
 
   const vehicleTypes = ["ALL", ...Array.from(new Set(vehicles.map(v => extractVehiclePrefix(v.name)))).sort()];
 
-  const filteredVehicles = vehicleTypeFilter === "ALL" 
-    ? vehicles 
-    : vehicles.filter(v => extractVehiclePrefix(v.name) === vehicleTypeFilter);
+  const filteredVehicles = vehicles.filter(v => {
+    // 类型筛选
+    if (vehicleTypeFilter !== "ALL" && extractVehiclePrefix(v.name) !== vehicleTypeFilter) {
+      return false;
+    }
+    // 状态筛选（活跃车辆 = 有司机分配的车辆）
+    if (vehicleStatusFilter === "ACTIVE") {
+      const hasDriver = assignments.some(a => a.vehicle_id === v.id);
+      return hasDriver;
+    }
+    return true;
+  });
 
   const toggleDriver = useMutation({
     mutationFn: async (d: Driver) => {
@@ -121,15 +131,26 @@ export function FleetPage() {
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
 
       const vehicleInserts = sVehicles.filter((v: any) => v.name).map((v: any) => {
-        const plate = v.name.toUpperCase().trim();
+        const name = v.name.toUpperCase().trim();
+        
         // 根据名称判断类型
         let type: "HINO" | "MACK" = "MACK";
         let size = "40";
-        if (plate.includes("HINO") || plate.startsWith("BIN") || plate.startsWith("FLAT")) {
+        
+        // 检查名称中是否包含 "HINO" 或 "MACK"
+        if (name.includes("HINO")) {
           type = "HINO";
           size = "20";
+        } else if (name.includes("MACK")) {
+          type = "MACK";
+          size = "40";
+        } else {
+          // 其他类型的车（FLAT, DUMP等），默认为 MACK
+          type = "MACK";
+          size = "40";
         }
-        return { name: v.name, type, plate, samsara_id: v.id, max_bin_size: size, is_active: true };
+        
+        return { name: v.name, type, plate: v.name, samsara_id: v.id, max_bin_size: size, is_active: true };
       });
 
       const { data: insertedVehicles, error: vError } = await supabase.from("vehicles").insert(vehicleInserts).select();
@@ -516,6 +537,22 @@ export function FleetPage() {
                 {type !== "ALL" && ` (${vehicles.filter(v => extractVehiclePrefix(v.name) === type).length})`}
               </Button>
             ))}
+          </div>
+          <div className="mb-3 flex gap-2">
+            <Button
+              size="sm"
+              variant={vehicleStatusFilter === "ALL" ? "default" : "outline"}
+              onClick={() => setVehicleStatusFilter("ALL")}
+            >
+              全部车辆
+            </Button>
+            <Button
+              size="sm"
+              variant={vehicleStatusFilter === "ACTIVE" ? "default" : "outline"}
+              onClick={() => setVehicleStatusFilter("ACTIVE")}
+            >
+              活跃车辆 ({vehicles.filter(v => assignments.some(a => a.vehicle_id === v.id)).length})
+            </Button>
           </div>
           <div className="space-y-2">
             {filteredVehicles.map((v) => (
