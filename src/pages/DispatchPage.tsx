@@ -236,7 +236,13 @@ export function DispatchPage() {
         .eq("business_type", businessType)
         .neq("status", "cancelled").order("created_at");
       if (error) throw error;
-      return (data ?? []) as Order[];
+      // 排班侧隐藏换桶自动生成的 pickup 子单:
+      // 有 linked_order_id 的 pickup 属于某条 swap 订单,不单独出现
+      const mainIds = new Set((data ?? []).filter((o: any) => o.type === "swap").map((o: any) => o.id));
+      return (data ?? []).filter((o: any) => {
+        if (o.type === "pickup" && o.linked_order_id && mainIds.has(o.linked_order_id)) return false;
+        return true;
+      }) as Order[];
     },
   });
   const { data: assignments = [] } = useQuery({

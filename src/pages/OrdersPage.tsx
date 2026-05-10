@@ -377,6 +377,20 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
     },
   });
 
+  // 查找关联的 pickup 子订单的 job_steps (送达后收回/倒垃圾)
+  const { data: pickupChain = [] } = useQuery({
+    queryKey: ["order-pickup-chain", orderId, order.linked_order_id],
+    enabled: !!order.linked_order_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("dispatch_assignments")
+        .select("*, profiles(name), job_steps(*)")
+        .eq("order_id", order.linked_order_id);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
   // 桶类型中文映射
   const binTypeNames: Record<string, string> = {
     'garbage': '垃圾桶',
@@ -390,7 +404,8 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
   return (
     <tr className="bg-accent/20 border-t">
       <td colSpan={12} className="px-6 py-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+        <LifecycleTimeline order={order} selfAssignments={assignments} linkedAssignments={pickupChain} />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mt-4">
           <div>
             <div className="font-semibold mb-2">订单详情</div>
             <dl className="space-y-1 text-muted-foreground">
@@ -473,5 +488,127 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function LifecycleTimeline({ order, selfAssignments, linkedAssignments }: {
+  order: Order;
+  selfAssignments: any[];
+  linkedAssignments: any[];
+}) {
+  // 收集所有相关 job_steps
+  const allSteps: any[] = [];
+  selfAssignments.forEach(a => (a.job_steps || []).forEach((s: any) => allSteps.push({ ...s, _assignment: a })));
+  linkedAssignments.forEach(a => (a.job_steps || []).forEach((s: any) => allSteps.push({ ...s, _assignment: a })));
+
+  // 提取关键节点
+  const deliveredStep = allSteps.find(s =>
+    (s.step_type === "delivery" || s.step_type === "customer_delivery" || s.step_type === "swap") &&
+    s.status === "done"
+  );
+  const pickedUpStep = allSteps.find(s =>
+    (s.step_type === "pickup" || s.step_type === "customer_pickup") &&
+    s.status === "done"
+  );
+  const dumpStep = allSteps.find(s => s.step_type === "dump_site" && s.status === "done");
+
+  const deliveredAt = deliveredStep?.completed_at;
+  const pickedUpAt = pickedUpStep?.completed_at;
+  const dumpedAt = dumpStep?.completed_at;
+
+  // 阶段状态
+  const stage1Done = !!deliveredAt;        // 送达
+  const stage2Done = stage1Done;            // 在场使用 (送达后自然进入)
+  const stage3Done = !!pickedUpAt;         // 回收
+  const stage4Done = !!dumpedAt;           // 称重
+
+  // 如果订单本身就是 pickup/material 类型, 首阶段跳过
+  const isPickupOnly = order.type === "pickup";
+
+  const fmtTime = (iso: string | null | undefined) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  const Stage = ({ active, done, label, time, detail }: {
+    active: boolean; done: boolean; label: string; time?: string | null; detail?: React.ReactNode;
+  }) => (
+    <div className="flex-1 relative">
+      <div className={cn(
+        "flex items-center justify-center w-8 h-8 rounded-full mx-auto text-xs font-bold",
+        done ? "bg-green-500 text-white" : active ? "bg-blue-500 text-white" : "bg-gray-200 text-gray-400"
+      )}>
+        {done ? "✓" : active ? "•" : "○"}
+      </div>
+      <div className="text-center mt-1">
+        <div className={cn("text-xs font-semibold", done ? "text-green-700" : active ? "text-blue-700" : "text-gray-400")}>
+          {label}
+        </div>
+        {time && <div className="text-[10px] text-muted-foreground mt-0.5">{fmtTime(time)}</div>}
+        {detail && <div className="text-[10px] text-muted-foreground mt-0.5">{detail}</div>}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="bg-white border rounded-lg p-4 mb-3">
+      <div className="text-sm font-semibold mb-3">🔄 订单生命周期</div>
+      <div className="flex items-start gap-1 relative">
+        {/* 连接线 */}
+        <div className="absolute top-4 left-8 right-8 h-0.5 bg-gray-200" style={{ zIndex: 0 }} />
+        <div
+          className="absolute top-4 left-8 h-0.5 bg-green-500 transition-all"
+          style={{
+            zIndex: 0,
+            width: `${(stage1Done ? 1 : 0) * 33 + (stage3Done ? 1 : 0) * 33 + (stage4Done ? 1 : 0) * 33}%`,
+            maxWidth: "calc(100% - 64px)"
+          }}
+        />
+
+        <div className="relative flex w-full gap-1" style={{ zIndex: 1 }}>
+          {!isPickupOnly && (
+            <Stage
+              active={!stage1Done}
+              done={stage1Done}
+              label="送达"
+              time={deliveredAt}
+              detail={deliveredStep?._assignment?.profiles?.name ? `司机: ${deliveredStep._assignment.profiles.name}` : undefined}
+            />
+          )}
+          {!isPickupOnly && (
+            <Stage
+              active={stage1Done && !stage3Done}
+              done={stage2Done && stage3Done}
+              label="在场使用"
+              time={null}
+              detail={stage1Done && !stage3Done ? "桶在客户处" : undefined}
+            />
+          )}
+          <Stage
+            active={(isPickupOnly || stage1Done) && !stage3Done}
+            done={stage3Done}
+            label="回收"
+            time={pickedUpAt}
+            detail={pickedUpStep?._assignment?.profiles?.name ? `司机: ${pickedUpStep._assignment.profiles.name}` : undefined}
+          />
+          <Stage
+            active={stage3Done && !stage4Done}
+            done={stage4Done}
+            label="称重"
+            time={dumpedAt}
+            detail={dumpStep ? (
+              <div className="space-y-0.5">
+                {dumpStep.weight_kg != null && <div>{dumpStep.weight_kg} kg</div>}
+                {dumpStep.dump_site && <div className="truncate max-w-[80px] mx-auto">{dumpStep.dump_site}</div>}
+                {dumpStep.weigh_ticket_url && (
+                  <a href={dumpStep.weigh_ticket_url} target="_blank" rel="noreferrer" className="text-primary underline">单据</a>
+                )}
+              </div>
+            ) : undefined}
+          />
+        </div>
+      </div>
+    </div>
   );
 }

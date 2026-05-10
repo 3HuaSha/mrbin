@@ -136,7 +136,7 @@ export function CreateOrderPage() {
         netsuite_order_id: null,
       };
 
-      // 换桶订单: 创建 delivery (新桶) + 在原 delivery 订单号下新增 pickup 记录, 互相关联
+      // 换桶订单: 保持主单 type=swap, 额外创建 pickup 子单沿用旧单号, 互相关联
       if (payload.type === "swap") {
         if (!swapLinkedOrderId) {
           throw new Error("请先选择同地址待回收的桶");
@@ -149,31 +149,31 @@ export function CreateOrderPage() {
           .single();
         if (linkedErr || !linkedOrder) throw new Error("无法找到关联的送桶订单");
 
-        // 1) 创建 delivery 新桶 (type 改为 delivery, 触发器生成新单号)
-        const { data: newDelivery, error: dErr } = await supabase
+        // 1) 创建主换桶单 (type=swap, 触发器自动生成新单号)
+        const { data: newSwap, error: sErr } = await supabase
           .from("orders")
-          .insert({ ...insertPayload, type: "delivery" })
+          .insert({ ...insertPayload, type: "swap" })
           .select("id, order_number, type, address, customer_name")
           .single();
-        if (dErr) throw dErr;
+        if (sErr) throw sErr;
 
-        // 2) 创建 pickup 记录,沿用旧单号 (order_number + type=pickup 复合唯一)
+        // 2) 创建 pickup 子单沿用旧单号 (order_number + type=pickup 复合唯一), 关联主换桶单
         const { data: pickupRow, error: pErr } = await supabase
           .from("orders")
           .insert({
             ...insertPayload,
             type: "pickup",
             order_number: linkedOrder.order_number,
-            linked_order_id: newDelivery.id,
+            linked_order_id: newSwap.id,
           })
           .select("id")
           .single();
         if (pErr) throw pErr;
 
-        // 3) 回填 delivery 的 linked_order_id 指向 pickup
-        await supabase.from("orders").update({ linked_order_id: pickupRow.id }).eq("id", newDelivery.id);
+        // 3) 回填 swap 的 linked_order_id 指向 pickup
+        await supabase.from("orders").update({ linked_order_id: pickupRow.id }).eq("id", newSwap.id);
 
-        return newDelivery;
+        return newSwap;
       }
 
       const { data, error } = await supabase.from("orders").insert(insertPayload).select("id,order_number,type,address,customer_name").single();
