@@ -120,22 +120,53 @@ export function FleetPage() {
       if (!result.success) throw new Error(result.error || '获取数据失败');
       
       const { vehicles: sVehicles = [], drivers: sDrivers = [], assignments: sAssigns = [], vehicleStats: sStats = [], locations: sLocs = [], debug } = result as any;
-      (window as any).__SAMSARA_DEBUG__ = { sVehicles, sDrivers, sAssigns, sStats, sLocs };
+      (window as any).__SAMSARA_DEBUG__ = { sVehicles, sDrivers, sAssigns, sStats, sLocs, debug };
       
       console.log('📦 原始数据已存入 window.__SAMSARA_DEBUG__');
-      console.log(`📊 统计: 车辆/资产(${sVehicles.length}), 司机(${sDrivers.length}), 分配(${sAssigns.length}), Stats(${sStats.length})`);
+      console.log(`📊 Samsara 返回: 车辆(${sVehicles.length}), 司机(${sDrivers.length}), 分配(${sAssigns.length}), Stats(${sStats.length})`);
+      console.log(`📋 [调试] Samsara 车辆完整名单 (${sVehicles.length} 辆):`);
+      console.table(sVehicles.map((v: any) => ({ name: v.name || '(空)', id: v.id, vin: v.vin || '-', serial: v.serial || '-' })));
 
-      // 1. 同步车辆与资产
+      // 1. 同步车辆
+      console.group('🚚 车辆同步步骤');
       await supabase.from("job_steps").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("dispatch_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
+      console.log('🗑️ 已清空 vehicles / dispatch_assignments / job_steps');
 
       // 找出所有活跃车辆（引擎 On/Idle 且 1 小时内更新）
       const activeVehicleIds = getActiveVehicleIds(sStats);
-      
       console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆 (引擎 On/Idle 且 1 小时内更新)`);
 
-      const vehicleInserts = sVehicles.filter((v: any) => v.name).map((v: any) => {
+      // ---- 步骤 1a: 过滤名称为空的车 ----
+      const filteredOut = sVehicles.filter((v: any) => !v.name);
+      if (filteredOut.length > 0) {
+        console.warn(`⚠️ [过滤] ${filteredOut.length} 辆车因 name 为空被跳过:`, filteredOut.map((v: any) => v.id));
+      }
+      const namedVehicles = sVehicles.filter((v: any) => v.name);
+      console.log(`✅ [过滤] 有名称的车: ${namedVehicles.length}/${sVehicles.length}`);
+
+      // ---- 步骤 1b: 检测重复 (samsara_id / plate / name) ----
+      const byId = new Map<string, any[]>();
+      const byPlate = new Map<string, any[]>();
+      namedVehicles.forEach((v: any) => {
+        if (!byId.has(v.id)) byId.set(v.id, []);
+        byId.get(v.id)!.push(v);
+        const plate = v.name;
+        if (!byPlate.has(plate)) byPlate.set(plate, []);
+        byPlate.get(plate)!.push(v);
+      });
+
+      const dupIds = [...byId.entries()].filter(([_, arr]) => arr.length > 1);
+      const dupPlates = [...byPlate.entries()].filter(([_, arr]) => arr.length > 1);
+      if (dupIds.length > 0) {
+        console.error(`❌ [重复] 同一 Samsara ID 出现多次:`, dupIds.map(([id, arr]) => ({ id, count: arr.length, names: arr.map(x => x.name) })));
+      }
+      if (dupPlates.length > 0) {
+        console.error(`❌ [重复] 同一 plate/name 出现多次 (会导致 unique 冲突):`, dupPlates.map(([plate, arr]) => ({ plate, count: arr.length, ids: arr.map(x => x.id) })));
+      }
+
+      const vehicleInserts = namedVehicles.map((v: any) => {
         const name = v.name.toUpperCase().trim();
         
         // 根据名称判断类型
@@ -168,9 +199,26 @@ export function FleetPage() {
         };
       });
 
+      console.log(`📝 [插入] 准备 insert ${vehicleInserts.length} 行`);
+
       const { data: insertedVehicles, error: vError } = await supabase.from("vehicles").insert(vehicleInserts).select();
-      if (vError) throw vError;
+      if (vError) {
+        console.error('❌ [插入] Supabase insert 失败:', vError);
+        console.error('❌ [插入] 尝试插入的数据:', vehicleInserts);
+        throw vError;
+      }
       const allVehicles = insertedVehicles || [];
+
+      // ---- 步骤 1c: 对比插入前后数量，找出丢失的车 ----
+      console.log(`✅ [插入] Supabase 返回 ${allVehicles.length} 行 (预期 ${vehicleInserts.length})`);
+      if (allVehicles.length !== vehicleInserts.length) {
+        const insertedIds = new Set(allVehicles.map((v: any) => v.samsara_id));
+        const missing = vehicleInserts.filter(v => !insertedIds.has(v.samsara_id));
+        console.error(`❌ [丢失] ${missing.length} 辆车没有进数据库:`, missing);
+      }
+      (window as any).__SAMSARA_DEBUG__.inserted = allVehicles;
+      (window as any).__SAMSARA_DEBUG__.attempted = vehicleInserts;
+      console.groupEnd();
 
       // 2. 同步司机 - 带重复账户合并逻辑
       await supabase.from("driver_vehicle_assignments").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);

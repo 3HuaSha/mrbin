@@ -10,14 +10,33 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
 
     try {
       console.log('🚀 开始从 Samsara 抓取全量数据...');
-      
-      // 1. 获取车辆
-      const vRes = await fetch('https://api.samsara.com/fleet/vehicles?limit=512', { headers });
-      const vehicles = vRes.ok ? (await vRes.json()).data : [];
 
-      // 2. 获取资产
-      const assetRes = await fetch('https://api.samsara.com/fleet/assets?limit=512', { headers });
-      const assets = assetRes.ok ? (await assetRes.json()).data : [];
+      // 1. 获取车辆（带分页，防止 >512 时被截断）
+      const vehicles: any[] = [];
+      let vAfter: string | undefined;
+      let vStatus = 0;
+      let vPages = 0;
+      do {
+        const url = `https://api.samsara.com/fleet/vehicles?limit=512${vAfter ? `&after=${encodeURIComponent(vAfter)}` : ''}`;
+        const vRes = await fetch(url, { headers });
+        vStatus = vRes.status;
+        if (!vRes.ok) {
+          const errText = await vRes.text();
+          console.error(`❌ [Vehicles API] 第 ${vPages + 1} 页失败 (${vStatus}):`, errText);
+          break;
+        }
+        const body = await vRes.json();
+        const pageData = body.data || [];
+        vehicles.push(...pageData);
+        vPages++;
+        console.log(`📄 [Vehicles API] 第 ${vPages} 页: ${pageData.length} 辆, hasNextPage=${body.pagination?.hasNextPage}`);
+        vAfter = body.pagination?.hasNextPage ? body.pagination.endCursor : undefined;
+      } while (vAfter);
+
+      console.log(`📊 [Vehicles API] 共抓取 ${vehicles.length} 辆车（${vPages} 页）`);
+      console.log(`📋 [Vehicles API] 车辆名单:`, vehicles.map((v: any) => `${v.name || '(无名)'} [${v.id}]`).join(', '));
+
+      // 不再同步 assets（Samsara 所有车都在 vehicles 里）
 
       // 3. 获取司机
       const dRes = await fetch('https://api.samsara.com/fleet/drivers?limit=512&includeDeactivated=true', { headers });
@@ -90,13 +109,15 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
 
       return {
         success: true,
-        vehicles: [...vehicles, ...assets],
+        vehicles,
         drivers,
         assignments,
         vehicleStats,
         locations,
         debug: {
-          vStatus: vRes.status,
+          vStatus,
+          vPages,
+          vCount: vehicles.length,
           aStatus: aRes.status,
           sStatus: sRes1.status,
           lStatus: lRes.status,
