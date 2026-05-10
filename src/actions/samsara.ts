@@ -34,12 +34,24 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         console.warn(`[Assignments API Error] Status: ${aRes.status}`);
       }
 
-      // 5. 获取车辆实时状态 (修正 400 错误：尝试更通用的 types)
-      const sRes = await fetch('https://api.samsara.com/fleet/vehicles/stats?types=obdDriver,fuelPerc,engineStates', { headers });
+      // 5. 获取车辆实时状态 - 使用更全面的 stats 类型
+      // 包括引擎状态、OBD司机、燃油、速度、里程等
+      const statsTypes = [
+        'engineStates',      // 引擎状态 (Off, On, Idle)
+        'obdDriver',         // OBD 司机信息
+        'fuelPercents',      // 燃油百分比
+        'ecuSpeedMph',       // ECU 速度
+        'obdOdometerMeters', // 里程表
+        'engineRpm',         // 发动机转速
+        'gps'                // GPS 位置
+      ].join(',');
+      
+      const sRes = await fetch(`https://api.samsara.com/fleet/vehicles/stats?types=${statsTypes}`, { headers });
       let vehicleStats = [];
       if (sRes.ok) {
         const result = await sRes.json();
         vehicleStats = result.data || [];
+        console.log(`✅ 获取到 ${vehicleStats.length} 个车辆的实时状态`);
       } else {
         console.warn(`[Stats API Error] Status: ${sRes.status}`);
       }

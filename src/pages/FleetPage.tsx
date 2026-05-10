@@ -12,6 +12,7 @@ import { formatPhone } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { fetchSamsaraData } from "@/actions/samsara";
+import { getActiveVehicleIds, extractVehicleStatus } from "@/lib/vehicle-status";
 
 type Driver = { id: string; name: string; phone: string | null; email: string | null; is_active: boolean };
 type Vehicle = { id: string; name: string; type: "HINO" | "MACK"; plate: string; samsara_id: string | null; max_bin_size: string | null; is_active: boolean };
@@ -130,20 +131,23 @@ export function FleetPage() {
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
 
       // 先找出所有引擎正在运行的车辆（用于车辆和司机同步）
-      const activeVehicleIds = new Set<string>();
+      const activeVehicleIds = getActiveVehicleIds(sStats);
+      
+      // 详细记录每辆活跃车辆的状态
       sStats.forEach((stat: any) => {
-        if (stat.engineStates && Array.isArray(stat.engineStates)) {
-          const latestState = stat.engineStates[stat.engineStates.length - 1];
-          // 引擎状态：Off（关闭）, On（运行）, Idle（怠速）
-          // 活跃车辆 = On 或 Idle
-          if (latestState?.value === 'On' || latestState?.value === 'Idle') {
-            activeVehicleIds.add(stat.id);
-            console.log(`🚗 引擎运行中: ${stat.name || stat.id} (状态: ${latestState.value})`);
-          }
+        const status = extractVehicleStatus(stat);
+        if (status.isActive) {
+          const details = [];
+          details.push(`状态: ${status.engineState}`);
+          if (status.rpm) details.push(`${status.rpm} RPM`);
+          if (status.speed) details.push(`${status.speed} mph`);
+          if (status.hasDriver) details.push(`司机: ${status.driverName}`);
+          
+          console.log(`🚗 活跃车辆: ${status.name || status.id} (${details.join(', ')})`);
         }
       });
       
-      console.log(`📊 找到 ${activeVehicleIds.size} 辆引擎运行中的车辆`);
+      console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆`);
 
       const vehicleInserts = sVehicles.filter((v: any) => v.name).map((v: any) => {
         const name = v.name.toUpperCase().trim();
