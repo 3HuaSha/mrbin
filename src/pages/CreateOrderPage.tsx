@@ -157,21 +157,24 @@ export function CreateOrderPage() {
           .single();
         if (sErr) throw sErr;
 
-        // 2) 创建 pickup 子单沿用旧单号 (order_number + type=pickup 复合唯一), 关联主换桶单
+        // 2) upsert pickup 子单沿用旧单号 (如果之前失败过残留一行,这里会复用)
         const { data: pickupRow, error: pErr } = await supabase
           .from("orders")
-          .insert({
+          .upsert({
             ...insertPayload,
             type: "pickup",
             order_number: linkedOrder.order_number,
             linked_order_id: newSwap.id,
-          })
+            status: "pending",
+          }, { onConflict: "order_number,type" })
           .select("id")
           .single();
         if (pErr) throw pErr;
 
-        // 3) 回填 swap 的 linked_order_id 指向 pickup
+        // 3) 新 swap 和 pickup 互相指向
         await supabase.from("orders").update({ linked_order_id: pickupRow.id }).eq("id", newSwap.id);
+        // 4) 老 delivery 标记已进入回收流程, 下次换桶查询时会排除它
+        await supabase.from("orders").update({ linked_order_id: pickupRow.id }).eq("id", swapLinkedOrderId);
 
         return newSwap;
       }
