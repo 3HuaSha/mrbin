@@ -55,7 +55,10 @@ export const fetchSamsaraData = createServerFn({ method: "GET" })
         
         if (vehicleStats.length > 0) {
           const first = vehicleStats[0];
-          console.log(`📊 示例车辆: ${first.name || first.id}`);
+          console.log(`📊 示例车辆完整数据:`, JSON.stringify(first, null, 2));
+          console.log(`  - ID: ${first.id}`);
+          console.log(`  - Name: ${first.name}`);
+          console.log(`  - 所有字段: ${Object.keys(first).join(', ')}`);
           console.log(`  - engineStates: ${first.engineStates ? first.engineStates.length + ' 条' : '无'}`);
           console.log(`  - obdDriver: ${first.obdDriver ? '有' : '无'}`);
           console.log(`  - engineRpm: ${first.engineRpm ? first.engineRpm.length + ' 条' : '无'}`);
