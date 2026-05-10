@@ -694,18 +694,18 @@ function createOrderIconWithLabel(order: any, orderETA?: any): string {
     });
   }
 
-  // 宽度按最宽那行计算
-  const charW = (s: string) => s.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 14 : 7), 0);
+  // 宽度按最宽那行计算 (padding 收紧, 避免空白)
+  const charW = (s: string) => s.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 13 : 6.5), 0);
   const mainW = charW(mainText);
   const addrW = charW(addrText);
-  const badgeWidth = Math.max(mainW, addrW) + 18;
-  const badgeWidthClamped = Math.min(Math.max(badgeWidth, 90), 180);
-  const svgWidth = badgeWidthClamped + (etaText ? 46 : 6);
+  const badgeWidth = Math.max(mainW, addrW) + 12;
+  const badgeWidthClamped = Math.min(Math.max(badgeWidth, 60), 170);
+  const svgWidth = badgeWidthClamped + (etaText ? 42 : 6);
 
-  // 行高: 主行 22, 地址行 16, HINO 条 14
-  const mainH = 22;
-  const addrH = addrText ? 16 : 0;
-  const hinoH = hasHinoFlag ? 14 : 0;
+  // 行高收紧: 主行 20, 地址行 14, HINO 条 13
+  const mainH = 20;
+  const addrH = addrText ? 14 : 0;
+  const hinoH = hasHinoFlag ? 13 : 0;
   const gap = 1;
   const stackH = mainH + (addrH ? addrH + gap : 0) + (hinoH ? hinoH + gap : 0);
   const svgHeight = stackH + 4 + 10; // + 连接线 + 图钉
@@ -720,43 +720,43 @@ function createOrderIconWithLabel(order: any, orderETA?: any): string {
 <svg xmlns='http://www.w3.org/2000/svg' width='${svgWidth}' height='${svgHeight}' viewBox='0 0 ${svgWidth} ${svgHeight}'>
   <defs>
     <filter id='s' x='-20%' y='-20%' width='140%' height='140%'>
-      <feDropShadow dx='0' dy='1' stdDeviation='1.5' flood-opacity='0.35'/>
+      <feDropShadow dx='0' dy='1' stdDeviation='1' flood-opacity='0.3'/>
     </filter>
   </defs>
   <!-- 主徽章 -->
-  <rect x='${badgeX}' y='0' width='${badgeWidthClamped}' height='${mainH}' rx='11'
-        fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5' filter='url(#s)'/>
-  <text x='${pinCx}' y='15' text-anchor='middle' font-size='12' font-weight='bold' fill='${scheme.text}'
+  <rect x='${badgeX}' y='0' width='${badgeWidthClamped}' height='${mainH}' rx='10'
+        fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.2' filter='url(#s)'/>
+  <text x='${pinCx}' y='14' text-anchor='middle' font-size='11' font-weight='bold' fill='${scheme.text}'
         font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${escapeXml(mainText)}</text>
 
   ${addrText ? `
   <!-- 地址行 -->
-  <rect x='${badgeX}' y='${addrY}' width='${badgeWidthClamped}' height='${addrH}' rx='7'
-        fill='${scheme.addr}' stroke='${scheme.border}' stroke-width='1'/>
-  <text x='${pinCx}' y='${addrY + 11}' text-anchor='middle' font-size='10' font-weight='600' fill='${scheme.border}'
+  <rect x='${badgeX}' y='${addrY}' width='${badgeWidthClamped}' height='${addrH}' rx='6'
+        fill='${scheme.addr}' stroke='${scheme.border}' stroke-width='0.8'/>
+  <text x='${pinCx}' y='${addrY + 10}' text-anchor='middle' font-size='9' font-weight='600' fill='${scheme.border}'
         font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${escapeXml(addrText)}</text>
   ` : ''}
 
   ${hasHinoFlag ? `
   <!-- HINO 警告条 -->
-  <rect x='${badgeX}' y='${hinoY}' width='${badgeWidthClamped}' height='${hinoH}' rx='6'
-        fill='#FFE082' stroke='#F57F17' stroke-width='1'/>
-  <text x='${pinCx}' y='${hinoY + 10}' text-anchor='middle' font-size='9' font-weight='bold' fill='#BF360C'
+  <rect x='${badgeX}' y='${hinoY}' width='${badgeWidthClamped}' height='${hinoH}' rx='5'
+        fill='#FFE082' stroke='#F57F17' stroke-width='0.8'/>
+  <text x='${pinCx}' y='${hinoY + 9}' text-anchor='middle' font-size='8.5' font-weight='bold' fill='#BF360C'
         font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>⚠ HINO 专用</text>
   ` : ''}
 
   ${etaText ? `
   <!-- ETA 右上角小徽章 -->
-  <rect x='${badgeX + badgeWidthClamped + 4}' y='2' width='38' height='18' rx='9'
-        fill='#FFD54F' stroke='#F57F17' stroke-width='1' filter='url(#s)'/>
-  <text x='${badgeX + badgeWidthClamped + 23}' y='15' text-anchor='middle' font-size='10' font-weight='bold' fill='#333'
+  <rect x='${badgeX + badgeWidthClamped + 3}' y='1' width='36' height='16' rx='8'
+        fill='#FFD54F' stroke='#F57F17' stroke-width='0.8' filter='url(#s)'/>
+  <text x='${badgeX + badgeWidthClamped + 21}' y='13' text-anchor='middle' font-size='9.5' font-weight='bold' fill='#333'
         font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${etaText}</text>
   ` : ''}
 
   <!-- 连接线 + 图钉 -->
-  <line x1='${pinCx}' y1='${pinY}' x2='${pinCx}' y2='${pinY + 4}' stroke='${scheme.border}' stroke-width='2'/>
-  <circle cx='${pinCx}' cy='${pinY + 9}' r='5' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.5'/>
-  <circle cx='${pinCx}' cy='${pinY + 9}' r='2' fill='${scheme.text}'/>
+  <line x1='${pinCx}' y1='${pinY}' x2='${pinCx}' y2='${pinY + 3}' stroke='${scheme.border}' stroke-width='1.5'/>
+  <circle cx='${pinCx}' cy='${pinY + 8}' r='4.5' fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.2'/>
+  <circle cx='${pinCx}' cy='${pinY + 8}' r='1.8' fill='${scheme.text}'/>
 </svg>`.trim();
 
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
@@ -789,10 +789,10 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
   const hasHinoFlag = /\bhino\b/i.test(order.customer_notes || '');
   const hasETA = !!(orderETA && orderETA.status === 'OK');
 
-  const charW = (s: string) => s.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 14 : 7), 0);
-  const badgeWidth = Math.min(Math.max(Math.max(charW(mainText), charW(addrText)) + 18, 90), 180);
-  const width = badgeWidth + (hasETA ? 46 : 6);
-  const height = 22 + (addrText ? 17 : 0) + (hasHinoFlag ? 15 : 0) + 14;
+  const charW = (s: string) => s.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 13 : 6.5), 0);
+  const badgeWidth = Math.min(Math.max(Math.max(charW(mainText), charW(addrText)) + 12, 60), 170);
+  const width = badgeWidth + (hasETA ? 42 : 6);
+  const height = 20 + (addrText ? 15 : 0) + (hasHinoFlag ? 14 : 0) + 12;
 
   marker.setIcon({
     url: iconUrl,
