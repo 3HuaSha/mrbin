@@ -22,7 +22,12 @@ export interface VehicleStatus {
  * ⚠️ 关键逻辑说明：
  * Samsara 的 engineState.time 表示"状态最后变更"的时刻，不是"最后心跳"。
  * 一辆 13:00 启动、16:00 还在跑的车，engineState=On 但 time 仍是 13:00。
- * 所以判断"是否活跃"要用 **所有信号中最新的 time** 来对比 1 小时窗口。
+ * 
+ * 判定策略（满足任一条件即为活跃）：
+ *  A) engineState=On/Idle 且 任意心跳(engine/gps/rpm/speed) ≤ 1 小时 → 活跃
+ *  B) engineState=On/Idle 且 状态变更 ≤ 12 小时 → 活跃
+ *     （兜底：车机上报稀疏时，只要 Samsara 最近一次状态是 On/Idle 就当在跑，
+ *      因为 Samsara 一旦检测到停车会发 Off 事件）
  */
 export function extractVehicleStatus(stat: any): VehicleStatus {
   const status: VehicleStatus = {
@@ -33,33 +38,43 @@ export function extractVehicleStatus(stat: any): VehicleStatus {
     hasDriver: false,
   };
 
-  // 收集所有可用时间戳，取最新的作为"最后心跳"
+  // 收集所有可用心跳时间戳，取最新的
+  // 注意: engineState.time 不算心跳 (它是状态变更时刻)
   const timestamps: number[] = [];
   const pushTime = (t?: string) => {
     if (!t) return;
     const ms = new Date(t).getTime();
     if (!isNaN(ms)) timestamps.push(ms);
   };
-  pushTime(stat.engineState?.time);
   pushTime(stat.engineRpm?.time);
   pushTime(stat.ecuSpeedMph?.time);
   pushTime(stat.fuelPercents?.time);
   pushTime(stat.gps?.time);
   pushTime(stat.obdDriver?.time);
 
-  const latestMs = timestamps.length ? Math.max(...timestamps) : 0;
+  const latestHeartbeatMs = timestamps.length ? Math.max(...timestamps) : 0;
   const nowMs = Date.now();
-  const oneHourInMs = 60 * 60 * 1000;
-  const freshlySeen = latestMs > 0 && (nowMs - latestMs) <= oneHourInMs;
+  const ONE_HOUR = 60 * 60 * 1000;
+  const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+  const freshHeartbeat = latestHeartbeatMs > 0 && (nowMs - latestHeartbeatMs) <= ONE_HOUR;
 
   // 1. 引擎状态
   if (stat.engineState && stat.engineState.value) {
     status.engineState = stat.engineState.value || 'Unknown';
     status.lastUpdate = stat.engineState.time;
 
-    // 引擎 On/Idle + 任意心跳在 1 小时内 → 活跃
-    if ((status.engineState === 'On' || status.engineState === 'Idle') && freshlySeen) {
-      status.isActive = true;
+    const isRunningState = status.engineState === 'On' || status.engineState === 'Idle';
+    if (isRunningState) {
+      if (freshHeartbeat) {
+        // A) 有新心跳 → 活跃
+        status.isActive = true;
+      } else if (status.lastUpdate) {
+        // B) 无新心跳但状态变更 ≤ 12 小时 → 活跃
+        const stateAge = nowMs - new Date(status.lastUpdate).getTime();
+        if (stateAge <= TWELVE_HOURS) {
+          status.isActive = true;
+        }
+      }
     }
   }
 

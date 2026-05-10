@@ -134,18 +134,33 @@ export function FleetPage() {
       await supabase.from("vehicles").delete().neq("id", "00000000-0000-0000-0000-000000000000" as any);
       console.log('🗑️ 已清空 vehicles / dispatch_assignments / job_steps');
 
-      // 找出所有活跃车辆（引擎 On/Idle 且 1 小时内有任意心跳）
-      // 把 locations 接口的 GPS 时间戳也合并进 stats,作为"最后心跳"信号
-      // （因为 engineState.time 是状态变更时刻,不是心跳;GPS 是持续上报的）
+      // 找出所有活跃车辆
+      // Samsara 的 engineState.time 是"状态变更"时刻不是心跳,所以:
+      // 1) 有新心跳 (gps/rpm/speed ≤1h) 且 engineState=On/Idle → 活跃
+      // 2) 没新心跳但 engineState=On/Idle 且 ≤12h → 活跃 (设备可能上报稀疏)
+      // 把 locations 的 GPS 时间戳合并到 stats 作为心跳源
+      console.log(`📍 [Locations] 样本:`, sLocs.slice(0, 2));
       sLocs.forEach((loc: any) => {
         if (!loc.id) return;
         const stat = sStats.find((s: any) => s.id === loc.id);
-        if (stat && loc.time && !stat.gps?.time) {
-          stat.gps = { ...(stat.gps || {}), time: loc.time, latitude: loc.latitude, longitude: loc.longitude };
+        if (!stat) return;
+        // Samsara locations 可能返回:
+        //   顶层: loc.time, loc.latitude
+        //   嵌套: loc.location = { time, latitude, longitude }
+        //   或: loc.gps = { time, ... }
+        const locTime = loc.time || loc.location?.time || loc.gps?.time;
+        const lat = loc.latitude ?? loc.location?.latitude ?? loc.gps?.latitude;
+        const lng = loc.longitude ?? loc.location?.longitude ?? loc.gps?.longitude;
+        if (locTime) {
+          const existingTime = stat.gps?.time;
+          // 用最新的时间戳
+          if (!existingTime || new Date(locTime).getTime() > new Date(existingTime).getTime()) {
+            stat.gps = { ...(stat.gps || {}), time: locTime, latitude: lat, longitude: lng };
+          }
         }
       });
       const activeVehicleIds = getActiveVehicleIds(sStats);
-      console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆 (引擎 On/Idle 且 1 小时内有心跳)`);
+      console.log(`📊 找到 ${activeVehicleIds.size} 辆活跃车辆`);
 
       // ---- 活跃判定调试: 列出每辆车的 stats 原始数据和判定结果 ----
       console.group('🔎 [活跃判定调试] 每辆车的 stats 详情');
