@@ -351,6 +351,10 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
       if (markersRef.current[id]) {
         const marker = markersRef.current[id];
         if (marker !== "pending") {
+           // 确保重新挂到地图上 (业务类型切换后可能被 setMap(null) 过)
+           if (marker.getMap && !marker.getMap()) {
+             marker.setMap(mapInstance.current);
+           }
            updateOrderIcon(marker, order, assignments, drivers, orderETA);
         }
         newMarkers[id] = marker;
@@ -446,9 +450,10 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     Object.keys(markersRef.current).forEach(key => {
       // 跳过固定地点标记（以manual_开头）
       if (key.startsWith('manual_')) return;
-      
+
       if (markersRef.current[key] && markersRef.current[key] !== "pending" && !newMarkers[key]) {
         markersRef.current[key].setMap(null);
+        delete markersRef.current[key];  // 同步清掉 ref, 避免下次复用到已从地图移除的死对象
       }
     });
     
