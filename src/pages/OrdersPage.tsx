@@ -477,16 +477,6 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
   // 时间轴用: "linkedOrder" 代表对方状态, 取第一个外部关联的 delivery/swap
   const timelineLinkedOrder = externalLinkedOrders.find(o => o.type === "delivery" || o.type === "swap") ?? null;
 
-  // 桶类型中文映射
-  const binTypeNames: Record<string, string> = {
-    'garbage': '垃圾桶',
-    'brick': '砖桶',
-    'soil': '土桶',
-    'cement': '水泥桶',
-    'asphalt': '沥青桶'
-  };
-  const binTypeName = primary.bin_type ? binTypeNames[primary.bin_type] || primary.bin_type : '—';
-
   return (
     <tr className="bg-accent/20 border-t">
       <td colSpan={12} className="px-6 py-4">
@@ -499,44 +489,6 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
         {(primary.type === "pickup" || primary.type === "swap") && !primary.linked_order_id && (
           <LinkPickerPanel order={primary} />
         )}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mt-4">
-          <div>
-            <div className="font-semibold mb-2">订单详情</div>
-            <dl className="space-y-1 text-muted-foreground">
-              <div><span className="text-foreground">桶类型:</span> {binTypeName}</div>
-              <div><span className="text-foreground">备注:</span> {primary.customer_notes || "—"}</div>
-              <div><span className="text-foreground">NetSuite:</span> {primary.netsuite_order_id || "—"}</div>
-            </dl>
-          </div>
-          <div>
-            <div className="font-semibold mb-2">排班 ({assignments.length})</div>
-            {assignments.length === 0 ? (
-              <div className="text-muted-foreground">尚未分配,请到排班看板。</div>
-            ) : (
-              assignments.map((a: any) => (
-                <div key={a.id} className="rounded-md border bg-card p-3 mb-2">
-                  <div className="text-sm">
-                    司机: <b>{a.profiles?.name}</b> · 车辆: <b>{a.vehicles?.name} ({a.vehicles?.type})</b>
-                    {a.bins?.bin_number && <> · 桶: <b>{a.bins.bin_number}</b></>}
-                  </div>
-                  <ol className="mt-2 space-y-1">
-                    {(a.job_steps || []).sort((x: any, y: any) => x.step_number - y.step_number).map((s: any) => (
-                      <li key={s.id} className="text-xs flex items-center gap-2">
-                        <Badge variant="outline" className="text-[10px]">{s.step_number}</Badge>
-                        <span className="text-muted-foreground">{s.location}</span>
-                        <Badge className={cn("text-[10px]", s.status === "done" ? "bg-status-done/15 text-status-done" : s.status === "in_progress" ? "bg-status-progress/15 text-status-progress" : "bg-muted")}>
-                          {s.status}
-                        </Badge>
-                        {s.photo_url && <a href={s.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">{s.pickup_photo_url ? "新桶" : "照片"}</a>}
-                        {s.pickup_photo_url && <a href={s.pickup_photo_url} target="_blank" rel="noreferrer" className="text-primary underline">旧桶</a>}
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
       </td>
     </tr>
   );
