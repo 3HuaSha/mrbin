@@ -164,7 +164,7 @@ export function DriverHomePage() {
       </header>
 
       <div className="px-4 pt-4 space-y-3">
-        {!isInstalled && !dismissInstallHint && (canInstall || isIOS) && (
+        {!isInstalled && !dismissInstallHint && (
           <div className="bg-primary text-primary-foreground rounded-lg p-3 flex items-start gap-2">
             <div className="shrink-0 mt-0.5">
               {isIOS ? <Share2 className="h-5 w-5" /> : <Download className="h-5 w-5" />}
@@ -172,9 +172,11 @@ export function DriverHomePage() {
             <div className="flex-1 text-xs leading-relaxed">
               <div className="font-semibold text-sm mb-0.5">把司机端装到主屏幕</div>
               {isIOS ? (
-                <span>点右下角 Safari 分享按钮 → 添加到主屏幕，图标跟 App 一样。</span>
-              ) : (
+                <span>Safari 底部分享按钮 → 添加到主屏幕，图标跟 App 一样。</span>
+              ) : canInstall ? (
                 <span>装上后从桌面图标直接打开，全屏无浏览器栏。</span>
+              ) : (
+                <span>Chrome 右上角菜单 → 安装应用（或"添加到主屏幕"）。</span>
               )}
             </div>
             {canInstall && !isIOS && (

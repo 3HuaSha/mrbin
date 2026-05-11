@@ -15,6 +15,7 @@ const mimeTypes = {
   '.mjs': 'application/javascript',
   '.css': 'text/css',
   '.json': 'application/json',
+  '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -71,9 +72,17 @@ const server = createServer(async (req, res) => {
     // 1. /assets/* 路径
     // 2. favicon.ico
     // 3. 其他可能的静态资源
-    if (pathname.startsWith('/assets/') || 
-        pathname === '/favicon.ico' ||
-        pathname.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|webp)$/)) {
+    // 4. PWA 必需的根级文件 (manifest / service worker / 图标)
+    const isPwaAsset =
+      pathname === '/manifest.webmanifest' ||
+      pathname === '/driver-sw.js' ||
+      pathname.startsWith('/icons/');
+    if (
+      pathname.startsWith('/assets/') ||
+      pathname === '/favicon.ico' ||
+      isPwaAsset ||
+      pathname.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|webp|webmanifest)$/)
+    ) {
       const served = await serveStaticFile(pathname, res);
       if (served) {
         return;
