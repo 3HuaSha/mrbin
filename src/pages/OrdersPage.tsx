@@ -244,6 +244,7 @@ export function OrdersPage() {
             {groupedRows.map(({ main, child }) => {
               const tm = typeMeta(main.type);
               const isOpen = expanded === main.id;
+              const isChildOpen = !!child && expanded === child.id;
               return (
                 <FragmentRow
                   key={main.id}
@@ -251,7 +252,9 @@ export function OrdersPage() {
                   childOrder={child}
                   businessType={businessType}
                   open={isOpen}
+                  childOpen={isChildOpen}
                   onToggle={() => setExpanded(isOpen ? null : main.id)}
+                  onToggleChild={() => setExpanded(isChildOpen ? null : (child?.id ?? null))}
                   onEdit={() => setEditing(main)}
                   onCancel={() => {
                     if (confirm(`确定删除订单 ${main.order_number}?此操作不可恢复`)) cancelOrder.mutate(main.id);
@@ -271,9 +274,12 @@ export function OrdersPage() {
 }
 
 function FragmentRow({
-  order, childOrder, businessType, open, onToggle, onEdit, onCancel, typeBadgeClass, typeLabel,
+  order, childOrder, businessType, open, childOpen, onToggle, onToggleChild, onEdit, onCancel, typeBadgeClass, typeLabel,
 }: {
-  order: Order; childOrder?: Order; businessType: BusinessType; open: boolean; onToggle: () => void; onEdit: () => void; onCancel: () => void;
+  order: Order; childOrder?: Order; businessType: BusinessType;
+  open: boolean; childOpen: boolean;
+  onToggle: () => void; onToggleChild: () => void;
+  onEdit: () => void; onCancel: () => void;
   typeBadgeClass: string; typeLabel: string;
 }) {
   // 桶类型中文映射
@@ -353,11 +359,11 @@ function FragmentRow({
           </div>
         </td>
       </tr>
-      {/* 换桶子行: 对应的收桶订单 (缩进, 小字, 浅色) */}
+      {/* 换桶子行: 对应的收桶订单 (缩进, 小字, 浅色, 可点击展开) */}
       {childOrder && (
-        <tr className="border-t bg-amber-50/40">
+        <tr className="border-t bg-amber-50/40 cursor-pointer hover:bg-amber-50" onClick={onToggleChild}>
           <td className="px-3 py-1 pl-8">
-            <span className="text-xs text-amber-700">↳</span>
+            {childOpen ? <ChevronDown className="h-3.5 w-3.5 text-amber-700" /> : <ChevronRight className="h-3.5 w-3.5 text-amber-700" />}
           </td>
           <td className="px-3 py-1 font-mono text-[11px] text-amber-800">{childOrder.order_number}</td>
           {businessType === 'garbage' && (
@@ -381,13 +387,12 @@ function FragmentRow({
           <td className="px-3 py-1 max-w-[240px] truncate text-xs text-muted-foreground">{childOrder.address}</td>
           <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.customer_name}</td>
           <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.customer_phone}</td>
-          <td className="px-3 py-1">
-            <Badge className={cn("text-[10px]", ORDER_STATUS_CLASS[childOrder.status])}>{ORDER_STATUS_LABEL[childOrder.status]}</Badge>
-          </td>
+          <td className="px-3 py-1"></td>
           <td className="px-3 py-1"></td>
         </tr>
       )}
       {open && <OrderDetailRow orderId={order.id} order={order} />}
+      {childOpen && childOrder && <OrderDetailRow orderId={childOrder.id} order={childOrder} />}
     </>
   );
 }
@@ -405,7 +410,22 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
     },
   });
 
-  // 查找关联的 pickup 子订单的 job_steps (送达后收回/倒垃圾)
+  // 查找关联订单 (旧 delivery 或对应 pickup/swap) 的状态 + job_steps
+  // 用途: 时间轴能正确显示对方订单的送达/回收状态 (包括导入的历史单没有 job_steps 但 status=done 的情况)
+  const { data: linkedOrder } = useQuery({
+    queryKey: ["linked-order-full", order.linked_order_id],
+    enabled: !!order.linked_order_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("id, type, status, service_date")
+        .eq("id", order.linked_order_id!)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+  });
+
   const { data: pickupChain = [] } = useQuery({
     queryKey: ["order-pickup-chain", orderId, order.linked_order_id],
     enabled: !!order.linked_order_id,
@@ -432,7 +452,12 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
   return (
     <tr className="bg-accent/20 border-t">
       <td colSpan={12} className="px-6 py-4">
-        <LifecycleTimeline order={order} selfAssignments={assignments} linkedAssignments={pickupChain} />
+        <LifecycleTimeline
+          order={order}
+          linkedOrder={linkedOrder ?? null}
+          selfAssignments={assignments}
+          linkedAssignments={pickupChain}
+        />
         {(order.type === "pickup" || order.type === "swap") && (
           <LinkPickerPanel order={order} />
         )}
@@ -522,8 +547,9 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
   );
 }
 
-function LifecycleTimeline({ order, selfAssignments, linkedAssignments }: {
+function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignments }: {
   order: Order;
+  linkedOrder: { id: string; type: string; status: string; service_date: string } | null;
   selfAssignments: any[];
   linkedAssignments: any[];
 }) {
@@ -547,14 +573,24 @@ function LifecycleTimeline({ order, selfAssignments, linkedAssignments }: {
   const pickedUpAt = pickedUpStep?.completed_at;
   const dumpedAt = dumpStep?.completed_at;
 
-  // 阶段状态
-  // 送达: 有 step 完成记录 或者 订单已标记完成 (覆盖历史导入单, 它们没 step 记录)
-  const stage1Done = !!deliveredAt || (order.status === "done" && order.type !== "pickup");
-  const stage3Done = !!pickedUpAt;         // 回收
-  const stage4Done = !!dumpedAt;           // 称重
+  // 阶段状态 (要把当前订单和对方关联订单一起考虑, 让主单和子单看到的时间轴一致)
+  //
+  // 送达: 满足任一 => 亮绿
+  //   a) 有 customer_delivery/swap step 已完成
+  //   b) 当前订单本身是 delivery 且 status=done (覆盖历史导入单, 它们没 step 记录)
+  //   c) 关联订单是 delivery 且 status=done/in_progress (比如 pickup/swap 订单关联了旧送桶单)
+  //
+  // 回收: customer_pickup step 已完成
+  // 称重: dump_site step 已完成
+  const linkedIsDoneDelivery = !!linkedOrder && linkedOrder.type === "delivery" && (linkedOrder.status === "done" || linkedOrder.status === "in_progress");
+  const selfIsDoneDelivery = order.type === "delivery" && order.status === "done";
+  const stage1Done = !!deliveredAt || selfIsDoneDelivery || linkedIsDoneDelivery;
+  const stage3Done = !!pickedUpAt;
+  const stage4Done = !!dumpedAt;
 
-  // 如果订单本身就是 pickup/material 类型, 首阶段跳过
-  const isPickupOnly = order.type === "pickup";
+  // 如果这条订单本身是 pickup 且没有关联 delivery, 时间轴首个点显示"送达"还是跳过?
+  // 保守: 除非关联了 delivery 才显示送达节点
+  const showDelivered = order.type !== "pickup" || linkedIsDoneDelivery;
 
   const fmtTime = (iso: string | null | undefined) => {
     if (!iso) return null;
@@ -598,7 +634,7 @@ function LifecycleTimeline({ order, selfAssignments, linkedAssignments }: {
         />
 
         <div className="relative flex w-full gap-1" style={{ zIndex: 1 }}>
-          {!isPickupOnly && (
+          {showDelivered && (
             <Stage
               active={false}
               done={stage1Done}
