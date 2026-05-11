@@ -84,8 +84,7 @@ export function DriverStepPage() {
   const canComplete = () => {
     if (!step) return false;
     if (step.requires_photo && !photoUrl) return false;
-    if (step.requires_bin_number && !binNumber.trim()) return false;
-    if (isSwapDelivery && !oldBinNumber.trim()) return false;
+    // 桶号改为非强制 (staff 可在订单页后期补绑或司机补报)
     if (step.requires_weigh_ticket && !weighTicketUrl) return false;
     if (step.requires_weight && !weight) return false;
     if (step.step_type === "dump_site" && !dumpSite.trim()) return false;
@@ -209,14 +208,14 @@ export function DriverStepPage() {
 
           {step.requires_bin_number && (
             <div>
-              <Label>{isSwapDelivery ? "放入的新桶号 *" : "桶号 *"}</Label>
+              <Label>{isSwapDelivery ? "放入的新桶号 (可选)" : "桶号 (可选)"}</Label>
               <Input value={binNumber} onChange={(e) => setBinNumber(e.target.value.toUpperCase())} className="h-12 mt-1 text-base" placeholder="B-20-01" />
             </div>
           )}
 
           {isSwapDelivery && (
             <div>
-              <Label>取出的旧桶号 *</Label>
+              <Label>取出的旧桶号 (可选)</Label>
               <Input value={oldBinNumber} onChange={(e) => setOldBinNumber(e.target.value.toUpperCase())} className="h-12 mt-1 text-base" placeholder="B-20-02" />
             </div>
           )}

@@ -306,7 +306,14 @@ function FragmentRow({
         <td className="px-3 py-2">
           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </td>
-        <td className="px-3 py-2 font-mono text-xs">{order.order_number}</td>
+        <td className="px-3 py-2 font-mono text-xs">
+          {order.order_number}
+          {(order.type === "pickup" || order.type === "swap") && !order.linked_order_id && (
+            <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-amber-100 text-amber-700 text-[9px] px-1 py-0.5 font-normal">
+              未关联
+            </span>
+          )}
+        </td>
         {businessType === 'garbage' && (
           <>
             <td className="px-3 py-2">
@@ -426,6 +433,9 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
     <tr className="bg-accent/20 border-t">
       <td colSpan={12} className="px-6 py-4">
         <LifecycleTimeline order={order} selfAssignments={assignments} linkedAssignments={pickupChain} />
+        {(order.type === "pickup" || order.type === "swap") && (
+          <LinkPickerPanel order={order} />
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mt-4">
           <div>
             <div className="font-semibold mb-2">订单详情</div>
@@ -621,6 +631,131 @@ function LifecycleTimeline({ order, selfAssignments, linkedAssignments }: {
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+// 收桶/换桶订单的"关联送桶单"面板: 可以手动绑定或解绑对应的 delivery
+function LinkPickerPanel({ order }: { order: Order }) {
+  const qc = useQueryClient();
+
+  // 已关联: 拉对方订单展示
+  const { data: linked } = useQuery({
+    queryKey: ["linked-order", order.linked_order_id],
+    enabled: !!order.linked_order_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("id, order_number, type, address, service_date, customer_name, bin_size")
+        .eq("id", order.linked_order_id!)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // 未关联: 按地址 + 尺寸搜索同地址未回收的 delivery 候选
+  const { data: candidates = [] } = useQuery({
+    queryKey: ["link-candidates", order.address, order.bin_size, order.id],
+    enabled: !order.linked_order_id && !!order.bin_size && order.address.length >= 3,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("id, order_number, address, bin_size, service_date, customer_name, linked_order_id")
+        .eq("type", "delivery")
+        .ilike("address", `%${order.address.trim()}%`)
+        .eq("bin_size", order.bin_size!)
+        .is("linked_order_id", null)
+        .order("service_date", { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const bind = useMutation({
+    mutationFn: async (deliveryId: string) => {
+      // 双向关联: 当前订单 -> delivery, delivery -> 当前订单
+      const { error: e1 } = await supabase.from("orders").update({ linked_order_id: deliveryId }).eq("id", order.id);
+      if (e1) throw e1;
+      const { error: e2 } = await supabase.from("orders").update({ linked_order_id: order.id }).eq("id", deliveryId);
+      if (e2) throw e2;
+    },
+    onSuccess: () => {
+      toast.success("已关联");
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["linked-order"] });
+      qc.invalidateQueries({ queryKey: ["link-candidates"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const unbind = useMutation({
+    mutationFn: async () => {
+      if (!order.linked_order_id) return;
+      const otherId = order.linked_order_id;
+      const { error: e1 } = await supabase.from("orders").update({ linked_order_id: null }).eq("id", order.id);
+      if (e1) throw e1;
+      const { error: e2 } = await supabase.from("orders").update({ linked_order_id: null }).eq("id", otherId);
+      if (e2) throw e2;
+    },
+    onSuccess: () => {
+      toast.success("已解除关联");
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["linked-order"] });
+      qc.invalidateQueries({ queryKey: ["link-candidates"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (order.linked_order_id) {
+    return (
+      <div className="bg-green-50 border-2 border-green-200 rounded-lg p-3 mb-3 flex items-center justify-between">
+        <div className="text-sm">
+          <span className="font-semibold text-green-800">✓ 已关联送桶单</span>
+          {linked && (
+            <span className="ml-2 font-mono text-xs text-green-700">
+              {linked.order_number} · {linked.service_date} · {linked.customer_name}
+            </span>
+          )}
+        </div>
+        <Button size="sm" variant="outline" onClick={() => unbind.mutate()} disabled={unbind.isPending}>
+          解除关联
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-3 mb-3">
+      <div className="text-sm font-semibold text-amber-800 mb-2">
+        ⚠️ 未关联送桶单 · 可手动绑定
+      </div>
+      {candidates.length === 0 ? (
+        <div className="text-xs text-amber-700 italic">
+          未找到同地址 {order.bin_size}yd 的未回收桶。确认地址/尺寸, 或保持未关联。
+        </div>
+      ) : (
+        <div className="space-y-1 max-h-40 overflow-y-auto">
+          {candidates.map((c: any) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => bind.mutate(c.id)}
+              disabled={bind.isPending}
+              className="w-full flex items-center justify-between px-3 py-2 rounded border-2 bg-white border-gray-200 hover:border-blue-400 text-left transition-all"
+            >
+              <div className="min-w-0">
+                <div className="font-mono font-bold text-sm">{c.order_number}</div>
+                <div className="text-[10px] text-gray-500 truncate">
+                  {c.service_date} · {c.customer_name} · {c.bin_size}yd · {c.address}
+                </div>
+              </div>
+              <span className="text-xs font-bold text-blue-600">绑定 →</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
