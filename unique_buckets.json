@@ -1,0 +1,1007 @@
+[
+  {
+    "bucketNumber": "14-15",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "92 Granada Crescent, Scarborough, ON M1B 2H5",
+    "orders": [
+      "SOT12551"
+    ]
+  },
+  {
+    "bucketNumber": "20-17",
+    "binSize": "20YD 垃圾桶(换）",
+    "currentAddress": "Unit 2, 560 Denison St, Markham, ON L3R 2M8",
+    "orders": [
+      "SOT10215"
+    ]
+  },
+  {
+    "bucketNumber": "20-52",
+    "binSize": "拉40YD, 送20YD垃圾桶",
+    "currentAddress": "1423 Rougemount Dr, Pickering, ON L1V 1N2",
+    "orders": [
+      "S0T10343"
+    ]
+  },
+  {
+    "bucketNumber": "20-22",
+    "binSize": "20YD垃圾桶  (換)",
+    "currentAddress": "58 Scarboro Ave, Scarborough, ON M1C 1M3",
+    "orders": [
+      "S0T10287",
+      "SOT12901"
+    ]
+  },
+  {
+    "bucketNumber": "L20-17",
+    "binSize": "20YD 垃圾桶",
+    "currentAddress": "9 Boynton Cir, Markham, ON L6C 1A8",
+    "orders": [
+      "SOT10246"
+    ]
+  },
+  {
+    "bucketNumber": "20-49",
+    "binSize": "20YD 垃圾桶 (清雪)",
+    "currentAddress": "162 Bullock Dr, Markham, ON L3P 1W2",
+    "orders": [
+      "SOT10431",
+      "SOT12899"
+    ]
+  },
+  {
+    "bucketNumber": "L20-05",
+    "binSize": "20YD 垃圾桶 (清雪)",
+    "currentAddress": "250 Church St, Keswick, ON L4P 1K1",
+    "orders": [
+      "SOT10432",
+      "SOT12330"
+    ]
+  },
+  {
+    "bucketNumber": "14-83",
+    "binSize": "拉20YD垃圾桶，送14YD垃圾桶",
+    "currentAddress": "12441 Woodbine Ave Stouffville ON L4A 2K5",
+    "orders": [
+      "SOT10627"
+    ]
+  },
+  {
+    "bucketNumber": "14-25",
+    "binSize": "14YD 垃圾桶",
+    "currentAddress": "11 Shadbolt Ct, Unionville, ON L3R 1W3",
+    "orders": [
+      "S0T10668",
+      "SOT12702"
+    ]
+  },
+  {
+    "bucketNumber": "NO-BUCKET-NUMBER",
+    "binSize": "20YD 移桶",
+    "currentAddress": "23 Ponymill Dr, Scarborough, ON M1V 2X9",
+    "orders": [
+      "SOT10843",
+      "SOT12761",
+      "D09683",
+      "SOT12967",
+      "SOT12965",
+      "SOT12984",
+      "SOT12987",
+      "SOT12989",
+      "D09682",
+      "SOT12999",
+      "SOT13021",
+      "SOT13022",
+      "SOT13023"
+    ]
+  },
+  {
+    "bucketNumber": "40-11",
+    "binSize": "40YD垃圾桶  (換)",
+    "currentAddress": "33 Jeremy Dr, Unionville, ON L3R 2K7",
+    "orders": [
+      "SOT10916"
+    ]
+  },
+  {
+    "bucketNumber": "30-01",
+    "binSize": "30YD垃圾桶  (換)",
+    "currentAddress": "Unit 11, 45A West Wilmot St, Richmond Hill, ON L4B 2P3",
+    "orders": [
+      "SOT12003"
+    ]
+  },
+  {
+    "bucketNumber": "14-63",
+    "binSize": "14YD 磚桶",
+    "currentAddress": "120 Van Kirk Drive Brampton",
+    "orders": [
+      "SOT12082",
+      "SOT12083",
+      "SOT12084",
+      "SOT12814"
+    ]
+  },
+  {
+    "bucketNumber": "20-26",
+    "binSize": "20YD垃圾桶  (換)",
+    "currentAddress": "189 Milner Ave, Toronto, ON M1S 4N4",
+    "orders": [
+      "SOT12055"
+    ]
+  },
+  {
+    "bucketNumber": "40-16",
+    "binSize": "换40YD垃圾桶",
+    "currentAddress": "73 Marsh St, Ridgetown, ON N0P 2C0",
+    "orders": [
+      "SOT12053"
+    ]
+  },
+  {
+    "bucketNumber": "L20-16",
+    "binSize": "20YD垃圾桶  (換)",
+    "currentAddress": "2559 Islington Ave, Etobicoke, ON M9V 2X2",
+    "orders": [
+      "SOT12146"
+    ]
+  },
+  {
+    "bucketNumber": "20-18",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "59 Granger Ave, Scarborough, ON M1K 3K9",
+    "orders": [
+      "SOT12175"
+    ]
+  },
+  {
+    "bucketNumber": "20-16",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "567 Davis Dr, Newmarket, ON L3Y 2P5",
+    "orders": [
+      "SOT12199"
+    ]
+  },
+  {
+    "bucketNumber": "L20-14",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "1 Heritage Woods Manor, Markham, ON L6C 3H1",
+    "orders": [
+      "SOT12219"
+    ]
+  },
+  {
+    "bucketNumber": "14-54",
+    "binSize": "拉14YD水泥桶，送14YD土桶+2YD GRAVEL",
+    "currentAddress": "77 Nash Dr, North York, ON M3M 2L6",
+    "orders": [
+      "D09607",
+      "SOT12722"
+    ]
+  },
+  {
+    "bucketNumber": "14-64",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "192 Glendora Ave, North York, ON M2N 2W5",
+    "orders": [
+      "SOT12200"
+    ]
+  },
+  {
+    "bucketNumber": "L20-04",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "87 Steelcase Rd W, Markham, ON L3R 2S5",
+    "orders": [
+      "SOT12352"
+    ]
+  },
+  {
+    "bucketNumber": "20-24",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "111 Manitoba St, Whitchurch-Stouffville, ON L4A 4Y2",
+    "orders": [
+      "SOT12364"
+    ]
+  },
+  {
+    "bucketNumber": "14-20",
+    "binSize": "换14YD磚桶",
+    "currentAddress": "Unit 2, 560 Denison St, Markham, ON L3R 2M8",
+    "orders": [
+      "D09621"
+    ]
+  },
+  {
+    "bucketNumber": "40-05",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "1 Ahorn Grove, Markham, ON L6C 1C8",
+    "orders": [
+      "SOT12405"
+    ]
+  },
+  {
+    "bucketNumber": "14-03",
+    "binSize": "換14YD磚桶",
+    "currentAddress": "Unit 26, 80 Bass Pro Mills Dr, Concord, ON L4K 5W9",
+    "orders": [
+      "D09626"
+    ]
+  },
+  {
+    "bucketNumber": "20-02",
+    "binSize": "20YD 垃圾桶",
+    "currentAddress": "21 Clarkhill St, North York, ON M2R 2G6",
+    "orders": [
+      "SOT12450"
+    ]
+  },
+  {
+    "bucketNumber": "20-50",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "20 Mcindoos Cemetery Rd, Woodville, ON K0M 2T0",
+    "orders": [
+      "SOT12453"
+    ]
+  },
+  {
+    "bucketNumber": "14-65",
+    "binSize": "換14YD垃圾桶",
+    "currentAddress": "34 Priory Dr, Whitby, ON L1P 2A9",
+    "orders": [
+      "SOT12469"
+    ]
+  },
+  {
+    "bucketNumber": "40-07",
+    "binSize": "40YD 垃圾桶",
+    "currentAddress": "29 Donna Ct, North York, ON M2M 2C9",
+    "orders": [
+      "SOT12500"
+    ]
+  },
+  {
+    "bucketNumber": "14-59",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "92 Arran Crescent, Woodbridge, ON L4L 1G6",
+    "orders": [
+      "SOT12510"
+    ]
+  },
+  {
+    "bucketNumber": "20-30",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "1123 Leslie St, North York, ON M3C 2K5",
+    "orders": [
+      "SOT12511"
+    ]
+  },
+  {
+    "bucketNumber": "14-68",
+    "binSize": "14YD 垃圾桶",
+    "currentAddress": "30 Alanadale Ave, Markham, ON L3P 1S3",
+    "orders": [
+      "SOT12498"
+    ]
+  },
+  {
+    "bucketNumber": "14-85",
+    "binSize": "換14YD 磚桶",
+    "currentAddress": "59 Granger Ave, Scarborough, ON M1K 3K9",
+    "orders": [
+      "D09635"
+    ]
+  },
+  {
+    "bucketNumber": "20-19",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "66 Rancliffe Rd, Oakville, ON L6H 1B2",
+    "orders": [
+      "SOT12543"
+    ]
+  },
+  {
+    "bucketNumber": "20-47",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "17 Silk Ct, Richmond Hill, ON L4B 4A4",
+    "orders": [
+      "SOT12566"
+    ]
+  },
+  {
+    "bucketNumber": "20-12",
+    "binSize": "20YD GARBAGE BIN",
+    "currentAddress": "61 Willett Crescent, Richmond Hill, ON L4C 7W2",
+    "orders": [
+      "SOT12537"
+    ]
+  },
+  {
+    "bucketNumber": "40-19",
+    "binSize": "40YD垃圾桶",
+    "currentAddress": "74 Miles St, Milton, ON L9T 1E6",
+    "orders": [
+      "SOT12571"
+    ]
+  },
+  {
+    "bucketNumber": "14-08",
+    "binSize": "14YD GARBAGE BIN",
+    "currentAddress": "27 Hartwell Pl, Markham, ON L6C 2K3",
+    "orders": [
+      "SOT12559"
+    ]
+  },
+  {
+    "bucketNumber": "20-09",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "229 Mavrinac Blvd, Aurora, ON L4G 7T6",
+    "orders": [
+      "SOT12595"
+    ]
+  },
+  {
+    "bucketNumber": "20-28",
+    "binSize": "20YD 垃圾桶",
+    "currentAddress": "6 Montesano Crescent, Richmond Hill, ON L4B 4M9",
+    "orders": [
+      "SOT12580"
+    ]
+  },
+  {
+    "bucketNumber": "40-01",
+    "binSize": "40YD垃圾桶",
+    "currentAddress": "465 Milner Ave #5 Scarborough, ON M1B 2K4",
+    "orders": [
+      "SOT12616"
+    ]
+  },
+  {
+    "bucketNumber": "14-07",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "51 Milky Way Dr, Richmond Hill, ON L4C 4M9",
+    "orders": [
+      "SOT12623"
+    ]
+  },
+  {
+    "bucketNumber": "20-29",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "32 Donna Ct, North York, ON M2M 2C8",
+    "orders": [
+      "SOT12620"
+    ]
+  },
+  {
+    "bucketNumber": "L20-02",
+    "binSize": "換20YD垃圾桶(鐵)",
+    "currentAddress": "1123 Leslie St, North York, ON M3C 2K5",
+    "orders": [
+      "SOT12649"
+    ]
+  },
+  {
+    "bucketNumber": "20-20",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "851 Woodland Acres Crescent, Maple, ON L6A 1G2",
+    "orders": [
+      "SOT12628"
+    ]
+  },
+  {
+    "bucketNumber": "20-27",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "21 Wozniak Cres, Markham, ON L6E 0L4",
+    "orders": [
+      "SOT12627"
+    ]
+  },
+  {
+    "bucketNumber": "14-82",
+    "binSize": "換14YD垃圾桶",
+    "currentAddress": "Unit 21, 1655 Sismet Rd, Mississauga, ON L4W 1Z4",
+    "orders": [
+      "SOT12662"
+    ]
+  },
+  {
+    "bucketNumber": "14-45",
+    "binSize": "14YD 垃圾桶",
+    "currentAddress": "3477 Kennedy Rd, Scarborough, ON M1V 4Y3",
+    "orders": [
+      "SOT12655"
+    ]
+  },
+  {
+    "bucketNumber": "14-26",
+    "binSize": "換14YD垃圾桶",
+    "currentAddress": "50 Tiffield Rd, Toronto, ON M1V 5B7",
+    "orders": [
+      "SOT12629"
+    ]
+  },
+  {
+    "bucketNumber": "40-13",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "3880 Edgerton Rd, Blackstock, ON L0B 1B0",
+    "orders": [
+      "SOT12664"
+    ]
+  },
+  {
+    "bucketNumber": "40-20",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "336 8TH LINE Rd S DUMMER, Douro-Dummer, ON K0L 2V0",
+    "orders": [
+      "SOT12668"
+    ]
+  },
+  {
+    "bucketNumber": "L20-19",
+    "binSize": "20YD 垃圾桶",
+    "currentAddress": "199 Ridgewood Rd, Scarborough, ON M1C 2X3",
+    "orders": [
+      "SOT12663"
+    ]
+  },
+  {
+    "bucketNumber": "40-08",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "578 Woodland Acres Crescent, Vaughan, ON L6A 1G2",
+    "orders": [
+      "SOT12625"
+    ]
+  },
+  {
+    "bucketNumber": "14-58",
+    "binSize": "換14YD垃圾桶",
+    "currentAddress": "195 Milner Ave., Scarborough, ON M1S 3R1",
+    "orders": [
+      "SOT12673"
+    ]
+  },
+  {
+    "bucketNumber": "20-38",
+    "binSize": "换20YD垃圾桶",
+    "currentAddress": "32 Ashwarren Rd, North York, ON M3J 1Z7",
+    "orders": [
+      "SOT12689"
+    ]
+  },
+  {
+    "bucketNumber": "20-43",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "16 Wimpole Dr, North York, ON M2L 2K9",
+    "orders": [
+      "SOT12665"
+    ]
+  },
+  {
+    "bucketNumber": "20-48",
+    "binSize": "EXCHANGE 20YD GARBAGE BIN",
+    "currentAddress": "5467 19th Ave, Markham, ON L3P 3J3",
+    "orders": [
+      "SOT12667"
+    ]
+  },
+  {
+    "bucketNumber": "L20-07",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "2 Forson Ct, Markham, ON L6C 1A9",
+    "orders": [
+      "SOT12694"
+    ]
+  },
+  {
+    "bucketNumber": "20-44",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "32 Sisina Ave, Markham, ON L6C 0H6",
+    "orders": [
+      "SOT12692"
+    ]
+  },
+  {
+    "bucketNumber": "14-69",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "58 Scarboro Ave, Scarborough, ON M1C 1M3",
+    "orders": [
+      "SOT12672"
+    ]
+  },
+  {
+    "bucketNumber": "14-04",
+    "binSize": "14YD SOIL BIN",
+    "currentAddress": "74 Montrave Ave, Oshawa, ON L1J 4R7",
+    "orders": [
+      "D09651"
+    ]
+  },
+  {
+    "bucketNumber": "20-39",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "3905 Keele St, North York, ON M3J 1N6",
+    "orders": [
+      "SOT12707"
+    ]
+  },
+  {
+    "bucketNumber": "20-08",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "UNIT2, 3 Keensford Ct, Ajax, ON L1Z 0K4",
+    "orders": [
+      "SOT12708"
+    ]
+  },
+  {
+    "bucketNumber": "20-01",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "2 Doulton Ct, Markham, ON L3R 8N8",
+    "orders": [
+      "SOT12711"
+    ]
+  },
+  {
+    "bucketNumber": "40-24",
+    "binSize": "換40YD 垃圾桶",
+    "currentAddress": "55 Milne Ave, Toronto, ON M1L 1K1",
+    "orders": [
+      "SOT12712"
+    ]
+  },
+  {
+    "bucketNumber": "20-41",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "371 Woodsworth Rd, North York, ON M2L 2T8",
+    "orders": [
+      "SOT12717"
+    ]
+  },
+  {
+    "bucketNumber": "40-15",
+    "binSize": "換40YD 垃圾桶",
+    "currentAddress": "67 Jacob Keffer Pkwy, Vaughan, ON L4K 5N8",
+    "orders": [
+      "SOT12735"
+    ]
+  },
+  {
+    "bucketNumber": "14-41",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "70 Copperwood Square, Scarborough, ON M1V 2C1",
+    "orders": [
+      "SOT12706"
+    ]
+  },
+  {
+    "bucketNumber": "L20-20",
+    "binSize": "20YD 垃圾桶",
+    "currentAddress": "17 Leno Mills Ave, Richmond Hill, ON L4S 1J3",
+    "orders": [
+      "SOT12733"
+    ]
+  },
+  {
+    "bucketNumber": "20-05",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "26 Orlon Crescent, Richmond Hill, ON L4C 6S5",
+    "orders": [
+      "SOT12719"
+    ]
+  },
+  {
+    "bucketNumber": "20-32",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "48 Homestead Rd, Scarborough, ON M1E 3R9",
+    "orders": [
+      "SOT12740"
+    ]
+  },
+  {
+    "bucketNumber": "40-10",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "67 Jacob Keffer Pkwy, Vaughan, ON L4K 5N8",
+    "orders": [
+      "SOT12774"
+    ]
+  },
+  {
+    "bucketNumber": "40-12",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "2967 Kennedy Rd, Toronto, ON M1V 1S9",
+    "orders": [
+      "SOT12755"
+    ]
+  },
+  {
+    "bucketNumber": "20-06",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "23 Boynton Cir, Markham, ON L6C 1A8",
+    "orders": [
+      "SOT12760",
+      "SOT12776"
+    ]
+  },
+  {
+    "bucketNumber": "20-15",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "242 Lawrence Ave, Richmond Hill, ON L4C 1Z6",
+    "orders": [
+      "SOT12770"
+    ]
+  },
+  {
+    "bucketNumber": "14-29",
+    "binSize": "換14YD 磚桶",
+    "currentAddress": "67 Jacob Keffer Pkwy, Vaughan, ON L4K 5N8",
+    "orders": [
+      "SOT12780"
+    ]
+  },
+  {
+    "bucketNumber": "14-17",
+    "binSize": "14YD SOIL BIN",
+    "currentAddress": "1795 Reach St, Port Perry, ON L9L 1P2",
+    "orders": [
+      "SOT12802"
+    ]
+  },
+  {
+    "bucketNumber": "30-10（旧）",
+    "binSize": "换30YD垃圾桶",
+    "currentAddress": "Unit 3, 560 Denison St, Markham, ON L3R 2M8",
+    "orders": [
+      "SOT12779"
+    ]
+  },
+  {
+    "bucketNumber": "40-21",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "3550 Sideline 24, Pickering, ON L0H 1J0",
+    "orders": [
+      "SOT12782"
+    ]
+  },
+  {
+    "bucketNumber": "20-25",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "85 Citizen Ct, Markham, ON L6G 1A8",
+    "orders": [
+      "SOT12804"
+    ]
+  },
+  {
+    "bucketNumber": "20-23",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "3 Towne Ct, Unionville, ON L3R 1X4",
+    "orders": [
+      "SOT12803"
+    ]
+  },
+  {
+    "bucketNumber": "20-37",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "263 Glebemount Ave, East York, ON M4C 3T7",
+    "orders": [
+      "SOT12812"
+    ]
+  },
+  {
+    "bucketNumber": "14-81",
+    "binSize": "換14YD垃圾桶",
+    "currentAddress": "26 Crimson Millway, North York, ON M2L 1T6",
+    "orders": [
+      "SOT12754"
+    ]
+  },
+  {
+    "bucketNumber": "14-76",
+    "binSize": "換14YD垃圾桶",
+    "currentAddress": "46 Apollo Dr, North York, ON M3B 1T9",
+    "orders": [
+      "SOT12763"
+    ]
+  },
+  {
+    "bucketNumber": "20-42",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "49 Eastwood Crescent, Markham, ON L3P 6A1",
+    "orders": [
+      "SOT12807"
+    ]
+  },
+  {
+    "bucketNumber": "14-43",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "62 Buckhorn Ave, Richmond Hill, ON L4C 0G4",
+    "orders": [
+      "SOT12823"
+    ]
+  },
+  {
+    "bucketNumber": "30-02",
+    "binSize": "换30YD垃圾桶",
+    "currentAddress": "226 Steelcase Rd W, Markham, ON L3R 1B3",
+    "orders": [
+      "SOT12846"
+    ]
+  },
+  {
+    "bucketNumber": "40-14",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "60 Emblem Ct, Scarborough, ON M1S 1B1",
+    "orders": [
+      "SOT12809"
+    ]
+  },
+  {
+    "bucketNumber": "20-45",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "128 Millcliff Cir, Aurora, ON L4G 7N8",
+    "orders": [
+      "SOT12854"
+    ]
+  },
+  {
+    "bucketNumber": "14-30",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "2119 Pineview Dr, Oakville, ON L6H 5M5",
+    "orders": [
+      "SOT12824"
+    ]
+  },
+  {
+    "bucketNumber": "L20-06",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "37 Meadow Ridge Ct, Maple, ON L6A 0C3",
+    "orders": [
+      "SOT12756"
+    ]
+  },
+  {
+    "bucketNumber": "20-07",
+    "binSize": "20YD 垃圾桶",
+    "currentAddress": "52 Shady Hollow Dr, Scarborough, ON M1V 2X4",
+    "orders": [
+      "SOT12815"
+    ]
+  },
+  {
+    "bucketNumber": "L20-21",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "1386 Tottenham Rd, Tottenham, ON L0G 1W0",
+    "orders": [
+      "SOT12860"
+    ]
+  },
+  {
+    "bucketNumber": "14-72",
+    "binSize": "14YD土桶",
+    "currentAddress": "1221 Grandview St N, Oshawa, ON L1K 2S9",
+    "orders": [
+      "D09664"
+    ]
+  },
+  {
+    "bucketNumber": "14-62",
+    "binSize": "14YD GARBAGE BIN",
+    "currentAddress": "16 Wheaton Grove, Scarborough, ON M1J 3L5",
+    "orders": [
+      "SOT12885"
+    ]
+  },
+  {
+    "bucketNumber": "14-92",
+    "binSize": "14YD GARBAGE BIN",
+    "currentAddress": "241 East St, Holland Landing, ON L9N 1K8",
+    "orders": [
+      "SOT12884"
+    ]
+  },
+  {
+    "bucketNumber": "20-11",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "337 Greenfield Ave, North York, ON M2N 3E7",
+    "orders": [
+      "SOT12859"
+    ]
+  },
+  {
+    "bucketNumber": "20-53",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "Unit 369,200 Silver Star Blvd, Scarborough, ON M1V 5H4",
+    "orders": [
+      "SOT12892"
+    ]
+  },
+  {
+    "bucketNumber": "20-04",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "Unit 6, 560 Denison St, Markham, ON L3R 1B8",
+    "orders": [
+      "SOT12888"
+    ]
+  },
+  {
+    "bucketNumber": "20-03",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "138 Olive Ave, North York, ON M2N 4P1",
+    "orders": [
+      "SOT12895"
+    ]
+  },
+  {
+    "bucketNumber": "14-66",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "1280 Klondike Dr, Oshawa, ON L1L 0T2",
+    "orders": [
+      "SOT12887"
+    ]
+  },
+  {
+    "bucketNumber": "40-02",
+    "binSize": "40YD 垃圾桶",
+    "currentAddress": "250 Don Hillock Dr, Aurora, ON L4G 0G9",
+    "orders": [
+      "SOT12891"
+    ]
+  },
+  {
+    "bucketNumber": "40-26",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "200 Romina Dr., Concord, ON L4K 4Z7",
+    "orders": [
+      "SOT12890"
+    ]
+  },
+  {
+    "bucketNumber": "40-25",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "574 Green Ln E, East Gwillimbury, ON L9N 0E1",
+    "orders": [
+      "SOT12893"
+    ]
+  },
+  {
+    "bucketNumber": "40-22",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "860 Denison St Unit 3, Markham, ON L3R 4H1",
+    "orders": [
+      "SOT12898"
+    ]
+  },
+  {
+    "bucketNumber": "14-37",
+    "binSize": "送14YD垃圾桶, 拉14YD磚桶",
+    "currentAddress": "607 Mississauga Crescent, Mississauga, ON L5H 1Z9",
+    "orders": [
+      "SOT12905"
+    ]
+  },
+  {
+    "bucketNumber": "20-10",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "1532 Glenhill Crescent, Mississauga, ON L5H 3C5",
+    "orders": [
+      "SOT12897"
+    ]
+  },
+  {
+    "bucketNumber": "14-52",
+    "binSize": "EXCHANGE 14YD ASPHALT BIN",
+    "currentAddress": "740 York Mills Rd, North York, ON M3B 1W8",
+    "orders": [
+      "SOT12903"
+    ]
+  },
+  {
+    "bucketNumber": "20-14",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "49 Seiffer Crescent, Richmond Hill, ON L4E 0J1",
+    "orders": [
+      "SOT12896"
+    ]
+  },
+  {
+    "bucketNumber": "20-34",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "9 Mosedale Crescent, North York, ON M2J 3A3",
+    "orders": [
+      "SOT12906"
+    ]
+  },
+  {
+    "bucketNumber": "14-78",
+    "binSize": "換14YD垃圾桶",
+    "currentAddress": "2639 Eaglesham Path, Oshawa, ON L1L 0M7",
+    "orders": [
+      "SOT12968"
+    ]
+  },
+  {
+    "bucketNumber": "30-02（旧）",
+    "binSize": "換20YD垃圾桶",
+    "currentAddress": "150 Clark Blvd, Brampton, ON L6T 4Y8",
+    "orders": [
+      "SOT12983"
+    ]
+  },
+  {
+    "bucketNumber": "20-35",
+    "binSize": "20YD垃圾桶",
+    "currentAddress": "38 Pebblehill Square, Scarborough, ON M1S 2P7",
+    "orders": [
+      "SOT12986"
+    ]
+  },
+  {
+    "bucketNumber": "40-23",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "2065 Midland Ave, Scarborough, ON M1P 4P8",
+    "orders": [
+      "SOT12979"
+    ]
+  },
+  {
+    "bucketNumber": "40-03",
+    "binSize": "換40YD垃圾桶",
+    "currentAddress": "2065 Midland Ave, Scarborough, ON M1P 4P8",
+    "orders": [
+      "SOT12981"
+    ]
+  },
+  {
+    "bucketNumber": "14-14",
+    "binSize": "14YD垃圾桶",
+    "currentAddress": "24 Bunty Ln, North York, ON M2K 1W6",
+    "orders": [
+      "SOT12982"
+    ]
+  },
+  {
+    "bucketNumber": "20-36",
+    "binSize": "拉14YD垃圾桶，送20YD垃圾桶",
+    "currentAddress": "34 Odessa Crescent, Markham, ON L6C 2T3",
+    "orders": [
+      "SOT12969"
+    ]
+  },
+  {
+    "bucketNumber": "14-70",
+    "binSize": "換14YD垃圾桶",
+    "currentAddress": "205 Cranbrooke Ave, Toronto, ON M5M 1M8",
+    "orders": [
+      "SOT12966"
+    ]
+  },
+  {
+    "bucketNumber": "14-75",
+    "binSize": "換14YD垃圾桶",
+    "currentAddress": "Unit 17, 270 West Beaver Creek Rd, Richmond Hill, ON L4B 3Z1",
+    "orders": [
+      "SOT12988"
+    ]
+  },
+  {
+    "bucketNumber": "14-06",
+    "binSize": "4YD GRAVEL + 14YD 土桶",
+    "currentAddress": "41 Parkhill Dr, Gormley, ON L4A 2G1",
+    "orders": [
+      "D09681"
+    ]
+  },
+  {
+    "bucketNumber": "14-24",
+    "binSize": "EXCHANGE 14YD SOIL BIN",
+    "currentAddress": "102 Fenelon Dr, North York, ON M3A 3K6",
+    "orders": [
+      "D09680"
+    ]
+  },
+  {
+    "bucketNumber": "14-35",
+    "binSize": "14YD 垃圾桶",
+    "currentAddress": "10050 Warden Ave., Markham, ON L6C 1Y8",
+    "orders": [
+      "SOT12992"
+    ]
+  }
+]

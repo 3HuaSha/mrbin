@@ -36,6 +36,9 @@ const empty = (preserveType?: OrderType) => ({
   customer_contact: "", // 合并姓名和电话
   address: "",
   customer_notes: "",
+  // 订单号：空字符串时由数据库触发器自动生成 KD-YYYYMMDD-XXX
+  use_manual_order_number: false,
+  manual_order_number: "",
 });
 
 export function CreateOrderPage() {
@@ -122,7 +125,8 @@ export function CreateOrderPage() {
       }
       
       const insertPayload = {
-        order_number: "", // 触发器自动生成
+        // 手动输入模式下使用用户输入，否则传空字符串由触发器生成 KD-YYYYMMDD-XXX
+        order_number: payload.use_manual_order_number ? payload.manual_order_number.trim() : "",
         type: payload.type,
         bin_size: payload.type === "material" ? null : payload.bin_size,
         bin_type: payload.type === "material" ? null : payload.bin_type,
@@ -135,6 +139,23 @@ export function CreateOrderPage() {
         customer_notes: payload.customer_notes.trim() || null,
         netsuite_order_id: null,
       };
+
+      // 手动单号: 提前检查是否与同类型订单重复（数据库约束是 (order_number, type) 复合唯一）
+      if (payload.use_manual_order_number) {
+        const manual = payload.manual_order_number.trim();
+        if (!manual) throw new Error("请输入订单号或关闭手动输入");
+        const checkType = payload.type === "swap" ? "swap" : payload.type;
+        const { data: dup, error: dupErr } = await supabase
+          .from("orders")
+          .select("id")
+          .eq("order_number", manual)
+          .eq("type", checkType)
+          .limit(1);
+        if (dupErr) throw dupErr;
+        if (dup && dup.length > 0) {
+          throw new Error(`订单号 ${manual} 已存在，请换一个`);
+        }
+      }
 
       // 换桶订单: 保持主单 type=swap, 额外创建 pickup 子单沿用旧单号, 互相关联
       if (payload.type === "swap") {
@@ -208,6 +229,9 @@ export function CreateOrderPage() {
     const e2: Record<string, boolean> = {};
     if (!form.address.trim()) e2.address = true;
     if (!form.customer_contact.trim()) e2.customer_contact = true;
+    if (form.use_manual_order_number && !form.manual_order_number.trim()) {
+      e2.manual_order_number = true;
+    }
     setErrors(e2);
     if (Object.keys(e2).length) return;
     if (form.type === "swap" && !swapLinkedOrderId) {
@@ -260,6 +284,47 @@ export function CreateOrderPage() {
                   <div>{t.label}</div>
                 </button>
               ))}
+            </div>
+
+            {/* 订单号：默认自动生成，可切换为手动输入 */}
+            <div className="mt-4 pt-3 border-t-2 border-dashed border-gray-200">
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-sm font-bold text-gray-700">
+                  订单号
+                </Label>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={form.use_manual_order_number}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        use_manual_order_number: e.target.checked,
+                        manual_order_number: e.target.checked ? form.manual_order_number : "",
+                      })
+                    }
+                    className="h-4 w-4 accent-orange-500"
+                  />
+                  <span className="text-xs font-bold text-gray-700">手动输入单号</span>
+                </label>
+              </div>
+              {form.use_manual_order_number ? (
+                <Input
+                  value={form.manual_order_number}
+                  onChange={(e) =>
+                    setForm({ ...form, manual_order_number: e.target.value })
+                  }
+                  placeholder="输入订单号，例如 KD-20260510-001 或 SOT123"
+                  className={cn(
+                    "h-10 text-sm rounded-lg border-2 font-mono",
+                    errors.manual_order_number && "border-red-500"
+                  )}
+                />
+              ) : (
+                <div className="text-xs text-gray-500 italic bg-gray-50 rounded-lg px-3 py-2 border border-dashed">
+                  将自动生成订单号：KD-{form.service_date.replace(/-/g, "")}-XXX
+                </div>
+              )}
             </div>
           </div>
 
