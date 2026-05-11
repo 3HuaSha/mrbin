@@ -4,10 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Lock, CheckCircle2, ArrowRight, LogOut, Truck, MapPin } from "lucide-react";
+import { Lock, CheckCircle2, ArrowRight, LogOut, Truck, MapPin, Download, Share2, X } from "lucide-react";
 import { STEP_TYPE_EMOJI, STEP_TYPE_LABEL, todayISO, typeMeta } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { usePWA } from "@/hooks/use-pwa";
 
 type StepRow = {
   id: string;
@@ -37,6 +38,8 @@ export function DriverHomePage() {
   const [date, setDate] = useState(todayISO());
   const [gpsActive, setGpsActive] = useState(false);
   const { session, loading, profile, hasRole } = useCurrentUser();
+  const { canInstall, isInstalled, isIOS, promptInstall } = usePWA();
+  const [dismissInstallHint, setDismissInstallHint] = useState(false);
 
   // 未登录或不是司机 -> 登录页
   useEffect(() => {
@@ -161,6 +164,41 @@ export function DriverHomePage() {
       </header>
 
       <div className="px-4 pt-4 space-y-3">
+        {!isInstalled && !dismissInstallHint && (canInstall || isIOS) && (
+          <div className="bg-primary text-primary-foreground rounded-lg p-3 flex items-start gap-2">
+            <div className="shrink-0 mt-0.5">
+              {isIOS ? <Share2 className="h-5 w-5" /> : <Download className="h-5 w-5" />}
+            </div>
+            <div className="flex-1 text-xs leading-relaxed">
+              <div className="font-semibold text-sm mb-0.5">把司机端装到主屏幕</div>
+              {isIOS ? (
+                <span>点右下角 Safari 分享按钮 → 添加到主屏幕，图标跟 App 一样。</span>
+              ) : (
+                <span>装上后从桌面图标直接打开，全屏无浏览器栏。</span>
+              )}
+            </div>
+            {canInstall && !isIOS && (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-7 px-2 text-xs"
+                onClick={async () => {
+                  await promptInstall();
+                }}
+              >
+                安装
+              </Button>
+            )}
+            <button
+              className="shrink-0 p-1 text-primary-foreground/70 hover:text-primary-foreground"
+              aria-label="关闭"
+              onClick={() => setDismissInstallHint(true)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         <div className="bg-card rounded-lg border p-3 flex gap-2 items-center">
           <input
             type="date"

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Fill entire 512x512 with safe zone (center 80%) for maskable icons -->
+  <rect width="512" height="512" fill="#0f172a"/>
+  <g transform="translate(64 64) scale(0.75)">
+    <rect width="512" height="512" rx="0" fill="#0f172a"/>
+    <g fill="#ffffff">
+      <rect x="96" y="200" width="220" height="140" rx="14"/>
+      <path d="M316 232 h56 l44 52 v56 h-100 z"/>
+      <rect x="328" y="244" width="52" height="36" rx="4" fill="#38bdf8"/>
+    </g>
+    <circle cx="160" cy="356" r="28" fill="#ffffff"/>
+    <circle cx="160" cy="356" r="12" fill="#0f172a"/>
+    <circle cx="360" cy="356" r="28" fill="#ffffff"/>
+    <circle cx="360" cy="356" r="12" fill="#0f172a"/>
+    <rect x="120" y="140" width="72" height="64" rx="6" fill="#22c55e"/>
+    <rect x="120" y="140" width="72" height="10" fill="#16a34a"/>
+  </g>
+</svg>

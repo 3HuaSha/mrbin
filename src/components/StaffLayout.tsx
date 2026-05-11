@@ -3,7 +3,6 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ClipboardList,
   LayoutGrid,
-  ListChecks,
   PackageCheck,
   PlusSquare,
   Truck,
@@ -114,13 +113,6 @@ export function StaffLayout() {
             <div className="font-semibold text-sidebar-foreground">{profile?.name ?? "—"}</div>
             <div className="opacity-70">{roleLabel}</div>
           </div>
-          <Link
-            to="/driver"
-            className="flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground transition-colors"
-          >
-            <ListChecks className="h-4 w-4" />
-            司机端入口
-          </Link>
           <Button
             onClick={handleLogout}
             variant="ghost"
