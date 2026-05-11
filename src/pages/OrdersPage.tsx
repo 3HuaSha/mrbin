@@ -398,46 +398,84 @@ function FragmentRow({
 }
 
 function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
+  // 归一化规则: 同一 order_number 下所有记录看作同一条"订单链"
+  // - 独立送桶单 SOT123 -> 链 = { SOT123-delivery }
+  // - 换桶场景: SOT123-delivery (老送桶) + SOT123-pickup (换桶生成的子单, 指向新 swap KD-xx)
+  //   换桶主单 KD-xx-swap 仍然独立存在, 但用户点的如果是 SOT123 (不论 delivery 还是 pickup),
+  //   看到的详情应该把整条链的信息聚合进来
+  const { data: chain = [] } = useQuery({
+    queryKey: ["order-chain", order.order_number],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("order_number", order.order_number);
+      if (error) throw error;
+      return (data ?? []) as Order[];
+    },
+  });
+
+  // 决定"展示主视角": 同号链里优先 delivery, 其次 swap, 最后 pickup
+  const primary: Order = (() => {
+    if (chain.length === 0) return order;
+    const byPriority = ["delivery", "swap", "pickup"] as const;
+    for (const t of byPriority) {
+      const found = chain.find(o => o.type === t);
+      if (found) return found;
+    }
+    return chain[0];
+  })();
+
+  // 链里所有订单 id, 用来一次性拉齐所有相关排班
+  const chainIds = chain.length ? chain.map(o => o.id) : [order.id];
+
   const { data: assignments = [] } = useQuery({
-    queryKey: ["order-assignments", orderId],
+    queryKey: ["chain-assignments", chainIds.join(",")],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("dispatch_assignments")
-        .select("*, profiles(name), vehicles(name, type), bins(bin_number), job_steps(*)")
-        .eq("order_id", orderId);
+        .select("*, profiles(name), vehicles(name, type), bins(bin_number), orders(order_number, type), job_steps(*)")
+        .in("order_id", chainIds);
       if (error) throw error;
       return data ?? [];
     },
   });
 
-  // 查找关联订单 (旧 delivery 或对应 pickup/swap) 的状态 + job_steps
-  // 用途: 时间轴能正确显示对方订单的送达/回收状态 (包括导入的历史单没有 job_steps 但 status=done 的情况)
-  const { data: linkedOrder } = useQuery({
-    queryKey: ["linked-order-full", order.linked_order_id],
-    enabled: !!order.linked_order_id,
+  // 如果链里某条记录通过 linked_order_id 指向一个不同 order_number 的订单 (比如 pickup 子单 -> 新 swap 单),
+  // 就把那个外部关联也拉进来, 它的排班和 job_steps 也要算入时间轴
+  const externalLinkedIds = chain
+    .map(o => o.linked_order_id)
+    .filter((id): id is string => !!id && !chainIds.includes(id));
+  const externalIdKey = externalLinkedIds.join(",");
+
+  const { data: externalLinkedOrders = [] } = useQuery({
+    queryKey: ["external-linked-orders", externalIdKey],
+    enabled: externalLinkedIds.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("orders")
         .select("id, type, status, service_date")
-        .eq("id", order.linked_order_id!)
-        .single();
+        .in("id", externalLinkedIds);
       if (error) throw error;
-      return data;
+      return (data ?? []) as Array<{ id: string; type: string; status: string; service_date: string }>;
     },
   });
 
-  const { data: pickupChain = [] } = useQuery({
-    queryKey: ["order-pickup-chain", orderId, order.linked_order_id],
-    enabled: !!order.linked_order_id,
+  const { data: externalAssignments = [] } = useQuery({
+    queryKey: ["external-linked-assignments", externalIdKey],
+    enabled: externalLinkedIds.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("dispatch_assignments")
         .select("*, profiles(name), job_steps(*)")
-        .eq("order_id", order.linked_order_id);
+        .in("order_id", externalLinkedIds);
       if (error) throw error;
       return data ?? [];
     },
   });
+
+  // 时间轴用: "linkedOrder" 代表对方状态, 取第一个外部关联的 delivery/swap
+  const timelineLinkedOrder = externalLinkedOrders.find(o => o.type === "delivery" || o.type === "swap") ?? null;
 
   // 桶类型中文映射
   const binTypeNames: Record<string, string> = {
@@ -447,27 +485,27 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
     'cement': '水泥桶',
     'asphalt': '沥青桶'
   };
-  const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '—';
+  const binTypeName = primary.bin_type ? binTypeNames[primary.bin_type] || primary.bin_type : '—';
 
   return (
     <tr className="bg-accent/20 border-t">
       <td colSpan={12} className="px-6 py-4">
         <LifecycleTimeline
-          order={order}
-          linkedOrder={linkedOrder ?? null}
+          order={primary}
+          linkedOrder={timelineLinkedOrder}
           selfAssignments={assignments}
-          linkedAssignments={pickupChain}
+          linkedAssignments={externalAssignments}
         />
-        {(order.type === "pickup" || order.type === "swap") && (
-          <LinkPickerPanel order={order} />
+        {(primary.type === "pickup" || primary.type === "swap") && !primary.linked_order_id && (
+          <LinkPickerPanel order={primary} />
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mt-4">
           <div>
             <div className="font-semibold mb-2">订单详情</div>
             <dl className="space-y-1 text-muted-foreground">
               <div><span className="text-foreground">桶类型:</span> {binTypeName}</div>
-              <div><span className="text-foreground">备注:</span> {order.customer_notes || "—"}</div>
-              <div><span className="text-foreground">NetSuite:</span> {order.netsuite_order_id || "—"}</div>
+              <div><span className="text-foreground">备注:</span> {primary.customer_notes || "—"}</div>
+              <div><span className="text-foreground">NetSuite:</span> {primary.netsuite_order_id || "—"}</div>
             </dl>
           </div>
           <div>
@@ -671,26 +709,12 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
   );
 }
 
+
 // 收桶/换桶订单的"关联送桶单"面板: 可以手动绑定或解绑对应的 delivery
 function LinkPickerPanel({ order }: { order: Order }) {
   const qc = useQueryClient();
 
-  // 已关联: 拉对方订单展示
-  const { data: linked } = useQuery({
-    queryKey: ["linked-order", order.linked_order_id],
-    enabled: !!order.linked_order_id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("orders")
-        .select("id, order_number, type, address, service_date, customer_name, bin_size")
-        .eq("id", order.linked_order_id!)
-        .single();
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  // 未关联: 按地址 + 尺寸搜索同地址未回收的 delivery 候选
+  // 按地址 + 尺寸搜索同地址未回收的 delivery 候选
   const { data: candidates = [] } = useQuery({
     queryKey: ["link-candidates", order.address, order.bin_size, order.id],
     enabled: !order.linked_order_id && !!order.bin_size && order.address.length >= 3,
@@ -720,47 +744,11 @@ function LinkPickerPanel({ order }: { order: Order }) {
     onSuccess: () => {
       toast.success("已关联");
       qc.invalidateQueries({ queryKey: ["orders"] });
-      qc.invalidateQueries({ queryKey: ["linked-order"] });
+      qc.invalidateQueries({ queryKey: ["order-chain"] });
       qc.invalidateQueries({ queryKey: ["link-candidates"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
-
-  const unbind = useMutation({
-    mutationFn: async () => {
-      if (!order.linked_order_id) return;
-      const otherId = order.linked_order_id;
-      const { error: e1 } = await supabase.from("orders").update({ linked_order_id: null }).eq("id", order.id);
-      if (e1) throw e1;
-      const { error: e2 } = await supabase.from("orders").update({ linked_order_id: null }).eq("id", otherId);
-      if (e2) throw e2;
-    },
-    onSuccess: () => {
-      toast.success("已解除关联");
-      qc.invalidateQueries({ queryKey: ["orders"] });
-      qc.invalidateQueries({ queryKey: ["linked-order"] });
-      qc.invalidateQueries({ queryKey: ["link-candidates"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  if (order.linked_order_id) {
-    return (
-      <div className="bg-green-50 border-2 border-green-200 rounded-lg p-3 mb-3 flex items-center justify-between">
-        <div className="text-sm">
-          <span className="font-semibold text-green-800">✓ 已关联送桶单</span>
-          {linked && (
-            <span className="ml-2 font-mono text-xs text-green-700">
-              {linked.order_number} · {linked.service_date} · {linked.customer_name}
-            </span>
-          )}
-        </div>
-        <Button size="sm" variant="outline" onClick={() => unbind.mutate()} disabled={unbind.isPending}>
-          解除关联
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-3 mb-3">
