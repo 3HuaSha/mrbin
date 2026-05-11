@@ -45,15 +45,10 @@ export function OrdersPage() {
   const qc = useQueryClient();
   const [businessType, setBusinessType] = useBusinessType();
   const [from, setFrom] = useState(todayISO());
-  const [to, setTo] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 14);
-    return d.toISOString().slice(0, 10);
-  });
+  const [to, setTo] = useState(todayISO());
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [hideDone, setHideDone] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<Order | null>(null);
 
@@ -78,7 +73,6 @@ export function OrdersPage() {
 
   const filtered = useMemo(() => {
     let list = orders;
-    if (hideDone) list = list.filter(o => o.status !== "done" && o.status !== "cancelled");
     if (search.trim()) {
       const s = search.toLowerCase();
       list = list.filter(
@@ -89,7 +83,7 @@ export function OrdersPage() {
       );
     }
     return list;
-  }, [orders, search, hideDone]);
+  }, [orders, search]);
 
   // 换桶: 把 pickup 挂在对应 delivery 下面作为子行, 不单独出现在列表顶层
   const groupedRows = useMemo(() => {
@@ -209,16 +203,6 @@ export function OrdersPage() {
             />
           </div>
         </div>
-        <div className="flex items-end">
-          <Button
-            size="sm"
-            variant={hideDone ? "default" : "outline"}
-            onClick={() => setHideDone(!hideDone)}
-            className="mt-1"
-          >
-            {hideDone ? "✓ 只看活跃" : "显示全部"}
-          </Button>
-        </div>
       </div>
 
       <div className="bg-card border rounded-lg overflow-hidden">
@@ -309,9 +293,16 @@ function FragmentRow({
   };
   const brickOrderTypeLabel = order.brick_order_type ? brickOrderTypeLabels[order.brick_order_type] || order.brick_order_type : '—';
 
+  // 状态相关的行背景色: done -> 浅绿, cancelled -> 灰 (区分于活跃订单)
+  const rowBgClass = order.status === "done"
+    ? "bg-green-50 hover:bg-green-100"
+    : order.status === "cancelled"
+    ? "bg-gray-100 text-gray-400 hover:bg-gray-200"
+    : "hover:bg-accent/40";
+
   return (
     <>
-      <tr className="border-t hover:bg-accent/40 cursor-pointer" onClick={onToggle}>
+      <tr className={cn("border-t cursor-pointer", rowBgClass)} onClick={onToggle}>
         <td className="px-3 py-2">
           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </td>
@@ -547,8 +538,8 @@ function LifecycleTimeline({ order, selfAssignments, linkedAssignments }: {
   const dumpedAt = dumpStep?.completed_at;
 
   // 阶段状态
-  const stage1Done = !!deliveredAt;        // 送达
-  const stage2Done = stage1Done;            // 在场使用 (送达后自然进入)
+  // 送达: 有 step 完成记录 或者 订单已标记完成 (覆盖历史导入单, 它们没 step 记录)
+  const stage1Done = !!deliveredAt || (order.status === "done" && order.type !== "pickup");
   const stage3Done = !!pickedUpAt;         // 回收
   const stage4Done = !!dumpedAt;           // 称重
 
@@ -591,7 +582,7 @@ function LifecycleTimeline({ order, selfAssignments, linkedAssignments }: {
           className="absolute top-4 left-8 h-0.5 bg-green-500 transition-all"
           style={{
             zIndex: 0,
-            width: `${(stage1Done ? 1 : 0) * 33 + (stage3Done ? 1 : 0) * 33 + (stage4Done ? 1 : 0) * 33}%`,
+            width: `${(stage1Done ? 1 : 0) * 50 + (stage3Done ? 1 : 0) * 25 + (stage4Done ? 1 : 0) * 25}%`,
             maxWidth: "calc(100% - 64px)"
           }}
         />
@@ -599,31 +590,22 @@ function LifecycleTimeline({ order, selfAssignments, linkedAssignments }: {
         <div className="relative flex w-full gap-1" style={{ zIndex: 1 }}>
           {!isPickupOnly && (
             <Stage
-              active={!stage1Done}
+              active={false}
               done={stage1Done}
               label="送达"
               time={deliveredAt}
               detail={deliveredStep?._assignment?.profiles?.name ? `司机: ${deliveredStep._assignment.profiles.name}` : undefined}
             />
           )}
-          {!isPickupOnly && (
-            <Stage
-              active={stage1Done && !stage3Done}
-              done={stage2Done && stage3Done}
-              label="在场使用"
-              time={null}
-              detail={stage1Done && !stage3Done ? "桶在客户处" : undefined}
-            />
-          )}
           <Stage
-            active={(isPickupOnly || stage1Done) && !stage3Done}
+            active={false}
             done={stage3Done}
             label="回收"
             time={pickedUpAt}
             detail={pickedUpStep?._assignment?.profiles?.name ? `司机: ${pickedUpStep._assignment.profiles.name}` : undefined}
           />
           <Stage
-            active={stage3Done && !stage4Done}
+            active={false}
             done={stage4Done}
             label="称重"
             time={dumpedAt}
