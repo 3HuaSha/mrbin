@@ -26,11 +26,13 @@ type Step = {
   weigh_ticket_url: string | null;
   weight_kg: number | null;
   dump_site: string | null;
-  assignment_id: string;
+  assignment_id: string | null;
+  node_type: 'order' | 'step';
+  notes: string | null;
   dispatch_assignments: {
-    orders: { order_number: string; type: string; address: string; customer_name: string; customer_phone: string; customer_notes: string | null };
+    orders: { order_number: string; type: string; address: string; customer_name: string; customer_phone: string; customer_notes: string | null } | null;
     bins: { bin_number: string } | null;
-  };
+  } | null;
 };
 
 export function DriverStepPage() {
@@ -66,7 +68,9 @@ export function DriverStepPage() {
     }
   }, [step, binNumber]);
 
-  const isSwapDelivery = step?.dispatch_assignments?.orders?.type === "swap" && step?.step_type === "customer_delivery";
+  const order = step?.dispatch_assignments?.orders ?? null;
+  const isManualStep = step?.node_type === 'step' || !order;
+  const isSwapDelivery = order?.type === "swap" && step?.step_type === "customer_delivery";
 
   const handleUpload = async (file: File, kind: "photo" | "weigh") => {
     setUploading(kind);
@@ -109,7 +113,7 @@ export function DriverStepPage() {
         action: "step_complete",
         entity_type: "job_step",
         entity_id: stepId,
-        entity_label: `${step?.dispatch_assignments?.orders?.order_number ?? ""} 步骤${step?.step_number ?? ""}`,
+        entity_label: `${order?.order_number ?? "手动"} 步骤${step?.step_number ?? ""}`,
         details: {
           step_type: step?.step_type,
           bin: binNumber || undefined,
@@ -126,8 +130,7 @@ export function DriverStepPage() {
 
   if (isLoading || !step) return <div className="p-6 text-center text-muted-foreground">加载中…</div>;
 
-  const order = step.dispatch_assignments.orders;
-  const isCustomerStep = step.step_type === "customer_delivery" || step.step_type === "customer_pickup";
+  const isCustomerStep = !isManualStep && (step.step_type === "customer_delivery" || step.step_type === "customer_pickup");
 
   return (
     <div className="min-h-screen bg-background pb-32">
@@ -151,7 +154,7 @@ export function DriverStepPage() {
           <Navigation className="h-5 w-5" /> 在 Google Maps 中导航
         </a>
 
-        {isCustomerStep && (
+        {isCustomerStep && order && (
           <div className="bg-card border rounded-xl p-4 space-y-2">
             <div className="font-semibold">{order.customer_name}</div>
             <a href={`tel:${order.customer_phone}`} className="flex items-center gap-2 text-primary font-medium">
@@ -162,6 +165,13 @@ export function DriverStepPage() {
                 📝 {order.customer_notes}
               </div>
             )}
+          </div>
+        )}
+
+        {isManualStep && step.notes && (
+          <div className="bg-card border rounded-xl p-4">
+            <div className="text-xs text-muted-foreground mb-1">备注</div>
+            <div className="text-sm whitespace-pre-wrap">📝 {step.notes}</div>
           </div>
         )}
 
