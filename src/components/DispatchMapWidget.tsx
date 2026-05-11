@@ -207,7 +207,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
     };
     
     fetchData();
-    const id = setInterval(fetchData, 60000); // 60s 轮询,降低 API 压力
+    const id = setInterval(fetchData, 30000); // 30s 轮询
     return () => { active = false; clearInterval(id); };
   }, []);
 
