@@ -266,6 +266,7 @@ export type Database = {
           old_bin_number_reported: string | null
           order_id: string | null
           photo_url: string | null
+          pickup_photo_url: string | null
           requires_bin_number: boolean | null
           requires_photo: boolean | null
           requires_weigh_ticket: boolean | null
@@ -292,6 +293,7 @@ export type Database = {
           old_bin_number_reported?: string | null
           order_id?: string | null
           photo_url?: string | null
+          pickup_photo_url?: string | null
           requires_bin_number?: boolean | null
           requires_photo?: boolean | null
           requires_weigh_ticket?: boolean | null
@@ -318,6 +320,7 @@ export type Database = {
           old_bin_number_reported?: string | null
           order_id?: string | null
           photo_url?: string | null
+          pickup_photo_url?: string | null
           requires_bin_number?: boolean | null
           requires_photo?: boolean | null
           requires_weigh_ticket?: boolean | null

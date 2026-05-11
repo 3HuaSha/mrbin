@@ -527,7 +527,8 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
                         <Badge className={cn("text-[10px]", s.status === "done" ? "bg-status-done/15 text-status-done" : s.status === "in_progress" ? "bg-status-progress/15 text-status-progress" : "bg-muted")}>
                           {s.status}
                         </Badge>
-                        {s.photo_url && <a href={s.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">照片</a>}
+                        {s.photo_url && <a href={s.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">{s.pickup_photo_url ? "新桶" : "照片"}</a>}
+                        {s.pickup_photo_url && <a href={s.pickup_photo_url} target="_blank" rel="noreferrer" className="text-primary underline">旧桶</a>}
                       </li>
                     ))}
                   </ol>
@@ -605,11 +606,21 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
     (s.step_type === "pickup" || s.step_type === "customer_pickup") &&
     s.status === "done"
   );
+  // 换桶场景：司机在 customer_delivery 同时完成了"送新桶+收旧桶"，用 pickup_photo_url / old_bin_number_reported 作为回收证据
+  const swapPickupEvidence = allSteps.find(s =>
+    (s.step_type === "customer_delivery" || s.step_type === "swap") &&
+    s.status === "done" &&
+    (s.pickup_photo_url || s.old_bin_number_reported)
+  );
   const dumpStep = allSteps.find(s => s.step_type === "dump_site" && s.status === "done");
 
   const deliveredAt = deliveredStep?.completed_at;
-  const pickedUpAt = pickedUpStep?.completed_at;
+  const pickedUpAt = pickedUpStep?.completed_at ?? swapPickupEvidence?.completed_at;
   const dumpedAt = dumpStep?.completed_at;
+
+  // 送达照片（新桶）和回收照片（旧桶）
+  const deliveredPhotoUrl = deliveredStep?.photo_url;
+  const pickedUpPhotoUrl = pickedUpStep?.photo_url ?? swapPickupEvidence?.pickup_photo_url;
 
   // 阶段状态 (要把当前订单和对方关联订单一起考虑, 让主单和子单看到的时间轴一致)
   //
@@ -678,7 +689,14 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
               done={stage1Done}
               label="送达"
               time={deliveredAt}
-              detail={deliveredStep?._assignment?.profiles?.name ? `司机: ${deliveredStep._assignment.profiles.name}` : undefined}
+              detail={(deliveredStep?._assignment?.profiles?.name || deliveredPhotoUrl) ? (
+                <div className="space-y-0.5">
+                  {deliveredStep?._assignment?.profiles?.name && <div>司机: {deliveredStep._assignment.profiles.name}</div>}
+                  {deliveredPhotoUrl && (
+                    <a href={deliveredPhotoUrl} target="_blank" rel="noreferrer" className="text-primary underline">照片</a>
+                  )}
+                </div>
+              ) : undefined}
             />
           )}
           <Stage
@@ -686,7 +704,16 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
             done={stage3Done}
             label="回收"
             time={pickedUpAt}
-            detail={pickedUpStep?._assignment?.profiles?.name ? `司机: ${pickedUpStep._assignment.profiles.name}` : undefined}
+            detail={(pickedUpStep?._assignment?.profiles?.name || swapPickupEvidence?._assignment?.profiles?.name || pickedUpPhotoUrl) ? (
+              <div className="space-y-0.5">
+                {(pickedUpStep?._assignment?.profiles?.name || swapPickupEvidence?._assignment?.profiles?.name) && (
+                  <div>司机: {pickedUpStep?._assignment?.profiles?.name ?? swapPickupEvidence?._assignment?.profiles?.name}</div>
+                )}
+                {pickedUpPhotoUrl && (
+                  <a href={pickedUpPhotoUrl} target="_blank" rel="noreferrer" className="text-primary underline">照片</a>
+                )}
+              </div>
+            ) : undefined}
           />
           <Stage
             active={false}

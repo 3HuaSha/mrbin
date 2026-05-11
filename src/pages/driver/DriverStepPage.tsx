@@ -41,12 +41,13 @@ export function DriverStepPage() {
   const qc = useQueryClient();
   const audit = useAudit();
   const [photoUrl, setPhotoUrl] = useState("");
+  const [pickupPhotoUrl, setPickupPhotoUrl] = useState("");
   const [binNumber, setBinNumber] = useState("");
   const [oldBinNumber, setOldBinNumber] = useState("");
   const [weighTicketUrl, setWeighTicketUrl] = useState("");
   const [weight, setWeight] = useState("");
   const [dumpSite, setDumpSite] = useState("");
-  const [uploading, setUploading] = useState<null | "photo" | "weigh">(null);
+  const [uploading, setUploading] = useState<null | "photo" | "pickup_photo" | "weigh">(null);
 
   const { data: step, isLoading } = useQuery({
     queryKey: ["job-step", stepId],
@@ -72,7 +73,7 @@ export function DriverStepPage() {
   const isManualStep = step?.node_type === 'step' || !order;
   const isSwapDelivery = order?.type === "swap" && step?.step_type === "customer_delivery";
 
-  const handleUpload = async (file: File, kind: "photo" | "weigh") => {
+  const handleUpload = async (file: File, kind: "photo" | "pickup_photo" | "weigh") => {
     setUploading(kind);
     const ext = file.name.split(".").pop() || "jpg";
     const path = `${stepId}/${kind}-${Date.now()}.${ext}`;
@@ -81,6 +82,7 @@ export function DriverStepPage() {
     if (error) { toast.error(error.message); return; }
     const { data } = supabase.storage.from("driver-uploads").getPublicUrl(path);
     if (kind === "photo") setPhotoUrl(data.publicUrl);
+    else if (kind === "pickup_photo") setPickupPhotoUrl(data.publicUrl);
     else setWeighTicketUrl(data.publicUrl);
     toast.success("上传成功");
   };
@@ -99,6 +101,7 @@ export function DriverStepPage() {
     mutationFn: async () => {
       const update: Record<string, unknown> = { status: "done" };
       if (photoUrl) update.photo_url = photoUrl;
+      if (pickupPhotoUrl) update.pickup_photo_url = pickupPhotoUrl;
       if (binNumber) update.bin_number_reported = binNumber.trim();
       if (oldBinNumber) update.old_bin_number_reported = oldBinNumber.trim();
       if (weighTicketUrl) update.weigh_ticket_url = weighTicketUrl;
@@ -178,43 +181,113 @@ export function DriverStepPage() {
         <div className="bg-card border rounded-xl p-4 space-y-4">
           <div className="font-semibold text-sm">需要完成</div>
 
-          {/* 所有步骤都显示拍照上传 */}
-          <div>
-            <Label className="text-base font-semibold">📷 拍照上传 {step.requires_photo && '*'}</Label>
-            <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
-              {uploading === "photo" ? (
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  <span className="text-sm text-muted-foreground">上传中...</span>
-                </div>
-              ) : photoUrl ? (
-                <div className="flex flex-col items-center gap-2 w-full">
-                  <div className="text-status-done font-semibold text-base flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5" />
-                    照片已上传
+          {/* 拍照上传: swap 的 customer_delivery 需要分别拍"送新桶"和"收旧桶"两张；其他步骤一张即可 */}
+          {isSwapDelivery ? (
+            <>
+              <div>
+                <Label className="text-base font-semibold">📷 送新桶照片 {step.requires_photo && '*'}</Label>
+                <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
+                  {uploading === "photo" ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <span className="text-sm text-muted-foreground">上传中...</span>
+                    </div>
+                  ) : photoUrl ? (
+                    <div className="flex flex-col items-center gap-2 w-full">
+                      <div className="text-status-done font-semibold text-base flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5" />
+                        新桶照片已上传
+                      </div>
+                      <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <Camera className="h-10 w-10 text-primary" />
+                      <span className="font-medium text-base">点击拍摄新桶</span>
+                      <span className="text-xs text-muted-foreground">送到客户的桶</span>
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
+                </label>
+                {photoUrl && (
+                  <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
+                    <img src={photoUrl} alt="新桶预览" className="w-full h-auto max-h-[300px] object-contain" />
                   </div>
-                  <span className="text-xs text-muted-foreground">点击重新拍照</span>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-2">
-                  <Camera className="h-10 w-10 text-primary" />
-                  <span className="font-medium text-base">点击拍照</span>
-                  <span className="text-xs text-muted-foreground">或选择相册图片</span>
+                )}
+              </div>
+
+              <div>
+                <Label className="text-base font-semibold">📷 收旧桶照片 (可选)</Label>
+                <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
+                  {uploading === "pickup_photo" ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <span className="text-sm text-muted-foreground">上传中...</span>
+                    </div>
+                  ) : pickupPhotoUrl ? (
+                    <div className="flex flex-col items-center gap-2 w-full">
+                      <div className="text-status-done font-semibold text-base flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5" />
+                        旧桶照片已上传
+                      </div>
+                      <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <Camera className="h-10 w-10 text-primary" />
+                      <span className="font-medium text-base">点击拍摄旧桶</span>
+                      <span className="text-xs text-muted-foreground">从客户收走的桶</span>
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "pickup_photo")} />
+                </label>
+                {pickupPhotoUrl && (
+                  <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
+                    <img src={pickupPhotoUrl} alt="旧桶预览" className="w-full h-auto max-h-[300px] object-contain" />
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div>
+              <Label className="text-base font-semibold">📷 拍照上传 {step.requires_photo && '*'}</Label>
+              <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
+                {uploading === "photo" ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <span className="text-sm text-muted-foreground">上传中...</span>
+                  </div>
+                ) : photoUrl ? (
+                  <div className="flex flex-col items-center gap-2 w-full">
+                    <div className="text-status-done font-semibold text-base flex items-center gap-2">
+                      <CheckCircle2 className="h-5 w-5" />
+                      照片已上传
+                    </div>
+                    <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <Camera className="h-10 w-10 text-primary" />
+                    <span className="font-medium text-base">点击拍照</span>
+                    <span className="text-xs text-muted-foreground">或选择相册图片</span>
+                  </div>
+                )}
+                <input type="file" accept="image/*" capture="environment" className="hidden"
+                  onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
+              </label>
+              {photoUrl && (
+                <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
+                  <img
+                    src={photoUrl}
+                    alt="预览"
+                    className="w-full h-auto max-h-[300px] object-contain"
+                  />
                 </div>
               )}
-              <input type="file" accept="image/*" capture="environment" className="hidden"
-                onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
-            </label>
-            {photoUrl && (
-              <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
-                <img 
-                  src={photoUrl} 
-                  alt="预览" 
-                  className="w-full h-auto max-h-[300px] object-contain"
-                />
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {step.requires_bin_number && (
             <div>
