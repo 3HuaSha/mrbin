@@ -110,6 +110,8 @@ export function FleetMapPage() {
     index: number; // 在该司机列表中的位置
   };
   const [draftManualSteps, setDraftManualSteps] = useState<DraftManualStep[]>([]);
+  // 已存在的手动步骤要删除的 id (拖到地图上 = 删除)
+  const [deleteStepIds, setDeleteStepIds] = useState<string[]>([]);
 
   // 弹窗: 拖 3445/12441 到司机时需要选择动作和桶大小
   const [locationDropDialog, setLocationDropDialog] = useState<{
@@ -120,7 +122,7 @@ export function FleetMapPage() {
   const [dialogStepType, setDialogStepType] = useState("");
   const [dialogBinSize, setDialogBinSize] = useState("");
 
-  const hasDraft = Object.keys(draft).length > 0 || draftManualSteps.length > 0;
+  const hasDraft = Object.keys(draft).length > 0 || draftManualSteps.length > 0 || deleteStepIds.length > 0;
 
   const toggleDriver = (id: string) => {
     const next = new Set(expandedDrivers);
@@ -352,9 +354,9 @@ export function FleetMapPage() {
   const driverJobSteps = useMemo(() => {
     const map: Record<string, JobStep[]> = {};
 
-    // 1. 手动步骤先放进去
+    // 1. 手动步骤先放进去 (排除已标记删除的)
     jobSteps.forEach(step => {
-      if (step.node_type === 'step') {
+      if (step.node_type === 'step' && !deleteStepIds.includes(step.id)) {
         (map[step.driver_id] ??= []).push(step);
       }
     });
@@ -410,7 +412,7 @@ export function FleetMapPage() {
     // 4. 每个司机的列表按 step_number 排序 (订单在本来的位置, 手动步骤夹在中间)
     Object.values(map).forEach(arr => arr.sort((a, b) => a.step_number - b.step_number));
     return map;
-  }, [jobSteps, merged.assigned, orderById, date, draftManualSteps]);
+  }, [jobSteps, merged.assigned, orderById, date, draftManualSteps, deleteStepIds]);
 
   // 本地拖拽: 更新 draft. 不立即写库.
   //   driverId = null → 取消分配
@@ -458,6 +460,7 @@ export function FleetMapPage() {
   const discardDraft = () => {
     setDraft({});
     setDraftManualSteps([]);
+    setDeleteStepIds([]);
     setDropPosition(null);
     toast.message("已撤销未同步的改动");
   };
@@ -669,17 +672,28 @@ export function FleetMapPage() {
         if (msErr) throw msErr;
       }
 
-      return { created: toInsert.length, deleted: toDelete.length, reordered: toReorder.length, manualSteps: draftManualSteps.length };
+      // 5. 删除手动步骤 (拖到地图上的)
+      if (deleteStepIds.length > 0) {
+        const { error: delErr } = await supabase
+          .from("job_steps")
+          .delete()
+          .in("id", deleteStepIds);
+        if (delErr) throw delErr;
+      }
+
+      return { created: toInsert.length, deleted: toDelete.length, reordered: toReorder.length, manualSteps: draftManualSteps.length, deletedSteps: deleteStepIds.length };
     },
     onSuccess: (res) => {
       setDraft({});
       setDraftManualSteps([]);
+      setDeleteStepIds([]);
       setDropPosition(null);
       const parts: string[] = [];
       if (res.created) parts.push(`新增 ${res.created}`);
       if (res.deleted) parts.push(`取消 ${res.deleted}`);
       if (res.reordered) parts.push(`重排 ${res.reordered}`);
-      if (res.manualSteps) parts.push(`手动步骤 ${res.manualSteps}`);
+      if (res.manualSteps) parts.push(`手动步骤 +${res.manualSteps}`);
+      if (res.deletedSteps) parts.push(`删除步骤 ${res.deletedSteps}`);
       toast.success(`同步成功: ${parts.join(" · ") || "无改动"}`);
       qc.invalidateQueries({ queryKey: ["map-job-steps"] });
       qc.invalidateQueries({ queryKey: ["map-all-orders"] });
@@ -1043,8 +1057,20 @@ export function FleetMapPage() {
                               // 手动步骤节点卡片 (不作为可插入位置)
                               const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
                               const isDraftStep = step.id.startsWith('draft-step-');
+                              const isMarkedForDelete = deleteStepIds.includes(step.id);
+                              // 已标记删除的不显示
+                              if (isMarkedForDelete) return;
                               items.push(
-                                <div key={step.id} className={`relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg ${isDraftStep ? "ring-1 ring-amber-400" : ""}`}>
+                                <div
+                                  key={step.id}
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.setData("text/plain", `step:${step.id}`);
+                                    e.dataTransfer.effectAllowed = "move";
+                                  }}
+                                  onDragEnd={() => {}}
+                                  className={`relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg cursor-grab active:cursor-grabbing ${isDraftStep ? "ring-1 ring-amber-400" : ""}`}
+                                >
                                   {isDraftStep && (
                                     <div className="absolute top-1 right-1 text-[8px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-1">
                                       待同步
@@ -1085,7 +1111,7 @@ export function FleetMapPage() {
           </div>
         </Card>
 
-        {/* 右侧地图 - 拖到地图上 = 取消分配 */}
+        {/* 右侧地图 - 拖到地图上 = 取消分配 / 删除步骤 */}
         <div
           className="flex-1 overflow-hidden relative"
           onDragOver={(e) => {
@@ -1096,9 +1122,26 @@ export function FleetMapPage() {
           }}
           onDrop={(e) => {
             e.preventDefault();
-            const orderId = e.dataTransfer.getData("text/plain");
-            if (!orderId) return;
-            // 查一下这个订单原本就是未分配的话就什么都不干
+            const raw = e.dataTransfer.getData("text/plain");
+            if (!raw) return;
+
+            // 手动步骤拖到地图 → 删除
+            if (raw.startsWith("step:")) {
+              const stepId = raw.slice(5);
+              // 如果是 draft 步骤, 直接从数组移除
+              if (stepId.startsWith("draft-step-")) {
+                setDraftManualSteps(prev => prev.filter(s => s.id !== stepId));
+                toast.message("已移除待同步步骤");
+              } else {
+                // 已存在的步骤, 标记为待删除
+                setDeleteStepIds(prev => prev.includes(stepId) ? prev : [...prev, stepId]);
+                toast.message("已标记删除步骤 (待同步)");
+              }
+              return;
+            }
+
+            // 订单拖到地图 → 取消分配
+            const orderId = raw;
             const serverCurrent = serverAssignments.find(a => a.order_id === orderId);
             const draftCurrent = draft[orderId];
             const currentlyAssigned = draftCurrent
