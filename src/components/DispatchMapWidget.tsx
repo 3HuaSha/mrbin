@@ -9,23 +9,35 @@ const KENNEDY_DEPOT = { lat: 43.7568, lng: -79.2865, label: "Kennedy Depot" };
 export function DispatchMapWidget({
   drivers, orders = [], assignments = [], driverETAs = {}, businessType = 'garbage',
   unassignedOrderIds = [],
+  draggableOrderIds,
   onDragHoverDriver,
+  onDragHoverPosition,
   onAssignOrder,
+  onUnassignOrder,
   driverDropZoneAttr = "data-fleet-driver-drop",
+  dropPositionAttr = "data-fleet-drop-position",
 }: { 
   drivers: any[], 
   orders?: any[], 
   assignments?: any[],
   driverETAs?: Record<string, any>,
   businessType?: 'garbage' | 'brick',
-  /** 未分配订单 id 列表, 在地图上可拖拽 */
+  /** 未分配订单 id 列表, 地图上会用不同样式标识 */
   unassignedOrderIds?: string[],
+  /** 允许拖拽的订单 id 列表 (默认等于 unassignedOrderIds) */
+  draggableOrderIds?: string[],
   /** 拖拽时悬停在哪个司机上的回调 */
   onDragHoverDriver?: (driverId: string | null) => void,
-  /** 释放到司机上时的回调: (orderId, driverId) */
-  onAssignOrder?: (orderId: string, driverId: string) => void,
-  /** 司机行的 data-* 属性名, 用于命中检测 */
+  /** 拖拽时命中的司机+插入位置 (从 [data-fleet-drop-position] 解析), 空位置表示放末尾 */
+  onDragHoverPosition?: (pos: { driverId: string; index: number } | null) => void,
+  /** 释放到司机上时的回调: (orderId, driverId, insertionIndex?) */
+  onAssignOrder?: (orderId: string, driverId: string, index?: number) => void,
+  /** 释放到地图空白 (非司机、非位置指示) 时的回调: 取消分配 */
+  onUnassignOrder?: (orderId: string) => void,
+  /** 司机行的 data-* 属性名 */
   driverDropZoneAttr?: string,
+  /** 位置指示的 data-* 属性名, 值格式: `${driverId}:${index}` */
+  dropPositionAttr?: string,
 }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
@@ -48,6 +60,11 @@ export function DispatchMapWidget({
     () => new Set(unassignedOrderIds),
     [unassignedOrderIds]
   );
+  // 可拖拽订单 id 集合 (默认等于未分配 + 已分配, 即 draggableOrderIds 全部)
+  const draggableOrderSet = useMemo(
+    () => new Set(draggableOrderIds ?? unassignedOrderIds),
+    [draggableOrderIds, unassignedOrderIds]
+  );
 
   // 全局 mousemove 捕获: Google Maps 的 marker drag 不暴露 DOM 事件
   // 我们需要知道释放时鼠标在屏幕上哪里, 才能用 elementFromPoint 判断落在哪个司机卡片上
@@ -62,15 +79,31 @@ export function DispatchMapWidget({
     return () => window.removeEventListener("mousemove", onMove);
   }, []);
 
-  // 查找鼠标下方的司机 drop zone, 返回 driver_id 或 null
-  const findDriverAtCursor = (): string | null => {
+  // 查找鼠标下方的命中项: 返回 { driverId, index? }
+  //   - 优先命中 [data-fleet-drop-position] → 可以精确指定插入索引
+  //   - 否则命中 [data-fleet-driver-drop]   → 表示"放末尾"
+  //   - 都没命中 → null
+  const findDropTargetAtCursor = (): { driverId: string; index?: number } | null => {
     const mouse = lastMouseRef.current;
     if (!mouse) return null;
     const el = document.elementFromPoint(mouse.x, mouse.y);
     if (!el) return null;
+
+    // 先查精确插入位置
+    const posEl = (el as HTMLElement).closest(`[${dropPositionAttr}]`);
+    if (posEl) {
+      const raw = posEl.getAttribute(dropPositionAttr) || "";
+      const [driverId, idxStr] = raw.split(":");
+      if (driverId) {
+        return { driverId, index: Number(idxStr) || 0 };
+      }
+    }
+    // 退化到司机卡片命中
     const zone = (el as HTMLElement).closest(`[${driverDropZoneAttr}]`);
     if (!zone) return null;
-    return zone.getAttribute(driverDropZoneAttr);
+    const driverId = zone.getAttribute(driverDropZoneAttr);
+    if (!driverId) return null;
+    return { driverId };
   };
   
   // 获取车辆分配信息（包含车辆的 type 字段）
@@ -380,10 +413,14 @@ export function DispatchMapWidget({
     // 绘制订单
     const geocoder = new (window as any).google.maps.Geocoder();
 
-    // 为订单 marker 绑定拖拽处理 (仅在订单未分配时生效)
-    // - dragstart: 记录当前拖拽的订单, 提高 zIndex, 改光标
-    // - drag:      根据鼠标位置计算悬停司机, 回调 onDragHoverDriver 做高亮
-    // - dragend:   判断落点, 若命中司机则调用 onAssignOrder; 否则把 marker 弹回原位
+    // 为订单 marker 绑定拖拽处理 (未分配 + 已分配订单都可拖)
+    // - dragstart: 记录当前拖拽订单, 提高 zIndex
+    // - drag:      找鼠标下方目标 (司机 / 精确位置), 回调让 UI 做高亮
+    // - dragend:   释放时决定动作:
+    //              * 命中司机 (有索引) → onAssignOrder(orderId, driverId, index)
+    //              * 命中司机 (无索引) → onAssignOrder(orderId, driverId) 放末尾
+    //              * 未命中 → onUnassignOrder(orderId) (把已分配订单拖到空白 = 取消分配)
+    //              marker 永远弹回原位 (位置显示仍然是订单地址)
     const attachOrderDragHandlers = (marker: any, order: any) => {
       if (marker._dragHandlersAttached) return;
       marker._dragHandlersAttached = true;
@@ -395,27 +432,39 @@ export function DispatchMapWidget({
       });
 
       marker.addListener("drag", () => {
-        const driverId = findDriverAtCursor();
+        const target = findDropTargetAtCursor();
+        const driverId = target?.driverId ?? null;
         if (driverId !== hoverDriverRef.current) {
           hoverDriverRef.current = driverId;
           onDragHoverDriver?.(driverId);
         }
+        if (target?.driverId && target.index !== undefined) {
+          onDragHoverPosition?.({ driverId: target.driverId, index: target.index });
+        } else {
+          onDragHoverPosition?.(null);
+        }
       });
 
       marker.addListener("dragend", () => {
-        const driverId = findDriverAtCursor();
-        // 清除高亮
+        const target = findDropTargetAtCursor();
         onDragHoverDriver?.(null);
+        onDragHoverPosition?.(null);
         hoverDriverRef.current = null;
         currentDraggingOrderRef.current = null;
-        // 弹回原位 (不论是否成功分配, marker 位置应该还是订单地址)
+        // 弹回原位
         if (marker._originalPos) {
           marker.setPosition(marker._originalPos);
         }
         marker.setZIndex(500);
 
-        if (driverId && onAssignOrder) {
-          onAssignOrder(order.id, driverId);
+        if (target?.driverId) {
+          onAssignOrder?.(order.id, target.driverId, target.index);
+        } else {
+          // 没命中司机 → 如果订单原本是已分配的, 就取消分配
+          const wasUnassigned = unassignedOrderSet.has(order.id);
+          if (!wasUnassigned) {
+            onUnassignOrder?.(order.id);
+          }
         }
       });
     };
@@ -448,7 +497,7 @@ export function DispatchMapWidget({
            }
            updateOrderIcon(marker, order, assignments, drivers, orderETA, unassignedOrderSet.has(order.id));
            // 动态更新 draggable: 分配后不能再拖, 未分配可拖
-           const shouldBeDraggable = unassignedOrderSet.has(order.id) && !!onAssignOrder;
+           const shouldBeDraggable = draggableOrderSet.has(order.id) && (!!onAssignOrder || !!onUnassignOrder);
            if (marker.getDraggable && marker.getDraggable() !== shouldBeDraggable) {
              marker.setDraggable(shouldBeDraggable);
            }
@@ -471,7 +520,7 @@ export function DispatchMapWidget({
           if (status === "OK" && results?.[0]) {
             const pos = results[0].geometry.location;
             
-            const isDraggable = unassignedOrderSet.has(order.id) && !!onAssignOrder;
+            const isDraggable = draggableOrderSet.has(order.id) && (!!onAssignOrder || !!onUnassignOrder);
             const marker = new (window as any).google.maps.Marker({
               map: mapInstance.current,
               position: pos,
@@ -484,7 +533,7 @@ export function DispatchMapWidget({
               marker._originalPos = { lat: pos.lat(), lng: pos.lng() };
             }
             
-            updateOrderIcon(marker, order, assignments, drivers, orderETA, isDraggable);
+            updateOrderIcon(marker, order, assignments, drivers, orderETA, unassignedOrderSet.has(order.id));
             attachOrderDragHandlers(marker, order);
             
             marker.addListener('click', () => {
@@ -573,7 +622,7 @@ export function DispatchMapWidget({
       }
     });
 
-  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments, driverETAs, businessType, unassignedOrderSet, onAssignOrder, onDragHoverDriver, driverDropZoneAttr]);
+  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments, driverETAs, businessType, unassignedOrderSet, draggableOrderSet, onAssignOrder, onUnassignOrder, onDragHoverDriver, onDragHoverPosition, driverDropZoneAttr, dropPositionAttr]);
 
   // 5. 绘制ETA路线
   useEffect(() => {

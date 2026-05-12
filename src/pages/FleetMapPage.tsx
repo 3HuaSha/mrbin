@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { todayISO, typeMeta } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2 } from "lucide-react";
+import { Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateCcw } from "lucide-react";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
@@ -16,6 +16,8 @@ import { useBusinessType } from "@/lib/business-type-storage";
 
 // 司机卡片放置区域的 data-* 标识, DispatchMapWidget 会根据它判断拖拽释放位置
 export const DRIVER_DROP_ZONE_ATTR = "data-fleet-driver-drop";
+// 司机任务列表里的插入位置指示条 data-* 标识
+export const DROP_POSITION_ATTR = "data-fleet-drop-position";
 
 type Driver = { id: string; name: string };
 
@@ -80,7 +82,19 @@ export function FleetMapPage() {
   const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>({});
   const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set());
   const [businessType, setBusinessType] = useBusinessType();
+  // 当前被拖拽悬停的司机 (地图告诉我们)
   const [dropHoverDriverId, setDropHoverDriverId] = useState<string | null>(null);
+  // 指定的插入位置 (driverId + index)，null 表示插到最后
+  const [dropPosition, setDropPosition] = useState<{ driverId: string; index: number } | null>(null);
+
+  // 本地草稿: 记录每个订单当前应该属于哪个司机 + 在该司机列表中的位置
+  // key = order.id
+  //   driverId = null  → 未分配 (若原本有分配，同步时需要删 dispatch_assignments)
+  //   driverId = 'xxx' → 分配给这位司机
+  //   index            → 在该司机订单任务列表中的顺序 (0 开头)
+  type DraftEntry = { orderId: string; driverId: string | null; index: number };
+  const [draft, setDraft] = useState<Record<string, DraftEntry>>({});
+  const hasDraft = Object.keys(draft).length > 0;
 
   const toggleDriver = (id: string) => {
     const next = new Set(expandedDrivers);
@@ -88,6 +102,17 @@ export function FleetMapPage() {
     else next.add(id);
     setExpandedDrivers(next);
   };
+
+  // 拖拽悬停时自动展开司机, 这样用户可以看到任务卡片间的插入位置
+  useEffect(() => {
+    if (!dropHoverDriverId) return;
+    setExpandedDrivers(prev => {
+      if (prev.has(dropHoverDriverId)) return prev;
+      const next = new Set(prev);
+      next.add(dropHoverDriverId);
+      return next;
+    });
+  }, [dropHoverDriverId]);
 
   const { data: drivers = [] } = useQuery({
     queryKey: ["drivers-assigned"],
@@ -175,14 +200,51 @@ export function FleetMapPage() {
     return Array.from(uniqueOrders.values());
   }, [jobSteps, allDayOrders]);
 
-  // 按司机分组任务步骤
+  // 按司机分组任务步骤 (已应用本地 draft: 订单节点部分)
+  //   - 手动步骤 (node_type='step') 保持服务器数据
+  //   - 订单节点 (node_type='order') 根据 merged.assigned 重新生成, 保证和地图一致
   const driverJobSteps = useMemo(() => {
     const map: Record<string, JobStep[]> = {};
-    for (const step of jobSteps) {
-      (map[step.driver_id] ??= []).push(step);
-    }
+
+    // 1. 手动步骤先放进去
+    jobSteps.forEach(step => {
+      if (step.node_type === 'step') {
+        (map[step.driver_id] ??= []).push(step);
+      }
+    });
+
+    // 2. 订单节点按 merged 重新生成 (假 JobStep, 只需足够渲染)
+    Object.entries(merged.assigned).forEach(([driverId, orderIds]) => {
+      const arr = map[driverId] ??= [];
+      orderIds.forEach((orderId, idx) => {
+        const order = orderById.get(orderId);
+        if (!order) return;
+        // 找原始 step 来复用 id/状态 (若有)
+        const originalStep = jobSteps.find(
+          s => s.node_type === 'order' && s.order_id === orderId && s.driver_id === driverId
+        );
+        arr.push({
+          id: originalStep?.id ?? `draft-${driverId}-${orderId}`,
+          driver_id: driverId,
+          scheduled_date: date,
+          step_number: idx + 1,
+          order_id: orderId,
+          assignment_id: originalStep?.assignment_id ?? null,
+          node_type: 'order',
+          location: order.address,
+          step_type: originalStep?.step_type ?? 'customer_delivery',
+          bin_id: originalStep?.bin_id ?? null,
+          notes: originalStep?.notes ?? null,
+          status: originalStep?.status ?? 'locked',
+          orders: order,
+        } as JobStep);
+      });
+    });
+
+    // 3. 每个司机的列表按 step_number 排序 (订单在本来的位置, 手动步骤夹在中间)
+    Object.values(map).forEach(arr => arr.sort((a, b) => a.step_number - b.step_number));
     return map;
-  }, [jobSteps]);
+  }, [jobSteps, merged.assigned, orderById, date]);
 
   const { data: vehicleAssignments = [] } = useQuery({
     queryKey: ["driver-vehicle-assignments-map"],
@@ -206,8 +268,8 @@ export function FleetMapPage() {
     });
   }, [drivers, vehicleAssignments, businessType]);
   
-  // 为了兼容地图组件，仍然需要 assignments
-  const assignments = useMemo(() => {
+  // 服务器持久化数据: assignments 基于 jobSteps (order 节点) 生成
+  const serverAssignments = useMemo(() => {
     return jobSteps
       .filter(step => step.node_type === 'order' && step.assignment_id)
       .map(step => ({
@@ -219,93 +281,278 @@ export function FleetMapPage() {
       }));
   }, [jobSteps]);
 
-  // 已分配的订单 ID (用于在地图上标识哪些订单未分配 → 可拖拽)
-  const assignedOrderIds = useMemo(
-    () => new Set(assignments.map(a => a.order_id)),
-    [assignments]
-  );
+  // 订单 id → 订单完整对象 (给地图和任务列表共用的快速查找)
+  const orderById = useMemo(() => {
+    const m = new Map<string, Order>();
+    allDayOrders.forEach(o => m.set(o.id, o));
+    serverAssignments.forEach(a => { if (a.orders) m.set(a.order_id, a.orders as Order); });
+    return m;
+  }, [allDayOrders, serverAssignments]);
 
-  // 未分配订单: 当日订单中尚未进入 dispatch_assignments 的
+  // 把服务器状态 + 本地 draft 叠加, 得到当前"应当显示"的司机任务排列
+  // 返回: { assigned: Record<driverId, orderId[]>, unassigned: orderId[] }
+  const merged = useMemo(() => {
+    // 初始: 用服务器的分配铺底 (按 sequence 排序)
+    const perDriver = new Map<string, { orderId: string; seq: number }[]>();
+    const assignedSet = new Set<string>();
+    serverAssignments
+      .slice()
+      .sort((a, b) => a.sequence - b.sequence)
+      .forEach(a => {
+        const arr = perDriver.get(a.driver_id) ?? [];
+        arr.push({ orderId: a.order_id, seq: a.sequence });
+        perDriver.set(a.driver_id, arr);
+        assignedSet.add(a.order_id);
+      });
+
+    // 然后逐条应用 draft 覆盖
+    Object.values(draft).forEach(d => {
+      // 先把它从所有司机列表里抠出去
+      perDriver.forEach((arr, dId) => {
+        const idx = arr.findIndex(x => x.orderId === d.orderId);
+        if (idx >= 0) arr.splice(idx, 1);
+      });
+      assignedSet.delete(d.orderId);
+      // 再按 draft 要求放回
+      if (d.driverId) {
+        const arr = perDriver.get(d.driverId) ?? [];
+        const clampedIdx = Math.max(0, Math.min(d.index, arr.length));
+        arr.splice(clampedIdx, 0, { orderId: d.orderId, seq: -1 });
+        perDriver.set(d.driverId, arr);
+        assignedSet.add(d.orderId);
+      }
+    });
+
+    // 输出整理
+    const assigned: Record<string, string[]> = {};
+    perDriver.forEach((arr, dId) => {
+      assigned[dId] = arr.map(x => x.orderId);
+    });
+    const unassigned = allDayOrders
+      .filter(o => !assignedSet.has(o.id) && o.status !== "done")
+      .map(o => o.id);
+
+    return { assigned, unassigned };
+  }, [serverAssignments, allDayOrders, draft]);
+
+  // 给地图用的 assignments 数组 (按合并后的顺序生成 sequence)
+  const assignments = useMemo(() => {
+    const result: any[] = [];
+    Object.entries(merged.assigned).forEach(([driverId, orderIds]) => {
+      orderIds.forEach((orderId, idx) => {
+        const order = orderById.get(orderId);
+        if (!order) return;
+        // 找服务器原始 assignment (如果有)
+        const existing = serverAssignments.find(
+          a => a.driver_id === driverId && a.order_id === orderId
+        );
+        result.push({
+          id: existing?.id ?? `local-${orderId}`,
+          driver_id: driverId,
+          order_id: orderId,
+          sequence: idx + 1,
+          orders: order,
+        });
+      });
+    });
+    return result;
+  }, [merged.assigned, serverAssignments, orderById]);
+
+  // 地图拖拽判断用: 未分配订单 id 列表 (基于本地合并状态)
   const unassignedOrders = useMemo(
-    () => allDayOrders.filter(o => !assignedOrderIds.has(o.id) && o.status !== "done"),
-    [allDayOrders, assignedOrderIds]
+    () => merged.unassigned
+      .map(id => orderById.get(id))
+      .filter((o): o is Order => !!o),
+    [merged.unassigned, orderById]
   );
 
-  // 拖拽订单到司机行时调用: 创建 dispatch_assignments + job_steps
-  const assignOrderToDriver = useMutation({
-    mutationFn: async ({ orderId, driverId }: { orderId: string; driverId: string }) => {
-      const order = allDayOrders.find(o => o.id === orderId);
-      if (!order) throw new Error("订单不存在");
+  // 本地拖拽: 更新 draft. 不立即写库.
+  //   driverId = null → 取消分配
+  //   driverId = 'xxx' → 放到该司机的 index 位置 (index undefined 时放最后)
+  const stageAssignment = (orderId: string, driverId: string | null, index?: number) => {
+    setDraft(prev => {
+      const next = { ...prev };
 
-      // 查司机的车辆分配
-      const vAssign = vehicleAssignments.find((a: any) => a.driver_id === driverId);
-      if (!vAssign?.vehicle_id) {
-        throw new Error("该司机还没有绑定车辆");
+      // 计算目标位置: 如果没指定 index 就放末尾
+      let targetIndex = index ?? 0;
+      if (driverId && index === undefined) {
+        targetIndex = (merged.assigned[driverId] ?? []).length;
+        // 但 merged 已经反映了 draft, 所以放末尾意思是"现有列表长度"
+        // 如果这个 order 原本就在这个司机的列表里, 得减 1 (因为会被移除再插入)
+        if ((merged.assigned[driverId] ?? []).includes(orderId)) {
+          targetIndex = Math.max(0, targetIndex - 1);
+        }
       }
 
-      // 计算这个司机当天的下一个 sequence
-      const driverSteps = jobSteps.filter(s => s.driver_id === driverId);
-      const nextSeq = driverSteps.length > 0
-        ? Math.max(...driverSteps.map(s => s.step_number)) + 1
-        : 1;
+      // 检查是否与"服务器当前状态"一致 → 是的话把 draft 条目清掉, 避免 pending 变更堆积
+      const serverCurrent = serverAssignments.find(a => a.order_id === orderId);
+      const serverDriverId = serverCurrent?.driver_id ?? null;
+      // 服务器上这个司机里这个订单的索引
+      let serverIndex: number | null = null;
+      if (serverCurrent) {
+        const serverSiblings = serverAssignments
+          .filter(a => a.driver_id === serverCurrent.driver_id)
+          .sort((a, b) => a.sequence - b.sequence);
+        serverIndex = serverSiblings.findIndex(a => a.order_id === orderId);
+      }
 
-      // 1. 创建 dispatch_assignment
-      const { data: newAsg, error: asgErr } = await supabase
-        .from("dispatch_assignments")
-        .insert({
-          order_id: orderId,
-          driver_id: driverId,
-          vehicle_id: vAssign.vehicle_id,
-          scheduled_date: date,
-          sequence: nextSeq,
-        })
-        .select()
-        .single();
-      if (asgErr) throw asgErr;
+      if (driverId === serverDriverId && driverId !== null && targetIndex === serverIndex) {
+        // 和服务器完全一致, 清掉这条 draft
+        delete next[orderId];
+      } else if (driverId === null && serverDriverId === null) {
+        delete next[orderId];
+      } else {
+        next[orderId] = { orderId, driverId, index: targetIndex };
+      }
+      return next;
+    });
+  };
 
-      // 2. 在 job_steps 中创建一条订单节点, 让司机端和地图页都能看到
-      //    step_type 使用合法枚举值 (delivery→customer_delivery; pickup→customer_pickup; swap/material→customer_delivery)
+  // 放弃本地改动
+  const discardDraft = () => {
+    setDraft({});
+    setDropPosition(null);
+    toast.message("已撤销未同步的改动");
+  };
+
+  // 同步: 按 draft 计算出要新增/更新/删除的 assignments, 批量写库
+  const syncDraft = useMutation({
+    mutationFn: async () => {
+      const entries = Object.values(draft);
+      if (entries.length === 0) return { created: 0, deleted: 0, reordered: 0 };
+
+      // 1. 取消分配: draft 里 driverId=null 且原本有分配 → 删除 dispatch_assignment
+      const toDelete: string[] = [];
+      // 2. 新建或移动: driverId 非 null → 若原来没有 assignment 就 INSERT; 若有但司机变了, 也需要删旧建新 (简化处理)
+      const toInsert: Array<{ orderId: string; driverId: string; sequence: number }> = [];
+      // 3. reorder: 仅同司机顺序变 → UPDATE sequence
+      const toReorder: Array<{ id: string; sequence: number; driverId: string }> = [];
+
+      // 收集每个司机合并后的完整顺序, 统一重写 sequence
+      const targetOrder: Record<string, string[]> = merged.assigned;
+      const driverIdsInvolved = new Set<string>();
+      entries.forEach(e => {
+        if (e.driverId) driverIdsInvolved.add(e.driverId);
+        const orig = serverAssignments.find(a => a.order_id === e.orderId);
+        if (orig) driverIdsInvolved.add(orig.driver_id);
+      });
+
+      for (const e of entries) {
+        const serverCurrent = serverAssignments.find(a => a.order_id === e.orderId);
+        if (e.driverId === null) {
+          // 取消分配
+          if (serverCurrent) toDelete.push(serverCurrent.id);
+        } else if (!serverCurrent) {
+          // 新建
+          const seq = (targetOrder[e.driverId] ?? []).indexOf(e.orderId) + 1;
+          toInsert.push({ orderId: e.orderId, driverId: e.driverId, sequence: seq });
+        } else if (serverCurrent.driver_id !== e.driverId) {
+          // 换司机: 删旧建新 (简化处理)
+          toDelete.push(serverCurrent.id);
+          const seq = (targetOrder[e.driverId] ?? []).indexOf(e.orderId) + 1;
+          toInsert.push({ orderId: e.orderId, driverId: e.driverId, sequence: seq });
+        }
+      }
+
+      // 同司机内的 reorder: 遍历每位涉及的司机的最终 order, 对保留下来的 assignments 更新 sequence
+      driverIdsInvolved.forEach(dId => {
+        const order = targetOrder[dId] ?? [];
+        order.forEach((orderId, idx) => {
+          const seq = idx + 1;
+          const existing = serverAssignments.find(
+            a => a.driver_id === dId && a.order_id === orderId
+          );
+          if (existing && !toDelete.includes(existing.id) && existing.sequence !== seq) {
+            toReorder.push({ id: existing.id, sequence: seq, driverId: dId });
+          }
+        });
+      });
+
+      // --- 执行 ---
+      // 1. 删除 (级联会删 job_steps)
+      if (toDelete.length > 0) {
+        const { error } = await supabase
+          .from("dispatch_assignments")
+          .delete()
+          .in("id", toDelete);
+        if (error) throw error;
+      }
+
+      // 2. 插入
       const stepTypeMap: Record<string, string> = {
         delivery: "customer_delivery",
         pickup: "customer_pickup",
         swap: "customer_delivery",
         material: "customer_delivery",
       };
-      const { error: stepErr } = await supabase.from("job_steps").insert({
-        assignment_id: newAsg.id,
-        driver_id: driverId,
-        scheduled_date: date,
-        order_id: orderId,
-        node_type: "order",
-        step_number: nextSeq,
-        step_type: stepTypeMap[order.type] || "customer_delivery",
-        location: order.address,
-        status: "locked",
-      });
-      if (stepErr) {
-        // 如果 job_steps 已经被 AFTER INSERT 触发器自动创建, 这里会报唯一性/重复错误
-        // 只要 dispatch_assignment 已成功, 继续流程不阻断
-        console.warn("job_steps 插入失败 (可能由触发器已生成):", stepErr.message);
+      for (const ins of toInsert) {
+        const order = orderById.get(ins.orderId);
+        if (!order) continue;
+        const vAssign = vehicleAssignments.find((a: any) => a.driver_id === ins.driverId);
+        if (!vAssign?.vehicle_id) {
+          throw new Error(`司机未绑定车辆, 无法分配`);
+        }
+        const { data: newAsg, error: aErr } = await supabase
+          .from("dispatch_assignments")
+          .insert({
+            order_id: ins.orderId,
+            driver_id: ins.driverId,
+            vehicle_id: vAssign.vehicle_id,
+            scheduled_date: date,
+            sequence: ins.sequence,
+          })
+          .select()
+          .single();
+        if (aErr) throw aErr;
+
+        // 补 job_steps 订单节点 (触发器生成的是 depot_pickup/customer_delivery 等流水步骤,
+        // 但 FleetMap / 司机 APP 依赖 node_type='order' 节点)
+        const { error: sErr } = await supabase.from("job_steps").insert({
+          assignment_id: newAsg.id,
+          driver_id: ins.driverId,
+          scheduled_date: date,
+          order_id: ins.orderId,
+          node_type: "order",
+          step_number: ins.sequence,
+          step_type: stepTypeMap[order.type] || "customer_delivery",
+          location: order.address,
+          status: "locked",
+        });
+        if (sErr) {
+          console.warn("job_steps 订单节点插入失败 (可能已由触发器创建):", sErr.message);
+        }
       }
 
-      // 3. 把订单状态更新为 assigned (trigger 本身会做, 兜底再更一次)
-      await supabase
-        .from("orders")
-        .update({ status: "assigned", updated_at: new Date().toISOString() })
-        .eq("id", orderId);
+      // 3. 更新 sequence (同步更新 order 节点的 step_number)
+      for (const u of toReorder) {
+        await supabase
+          .from("dispatch_assignments")
+          .update({ sequence: u.sequence })
+          .eq("id", u.id);
+        await supabase
+          .from("job_steps")
+          .update({ step_number: u.sequence })
+          .eq("assignment_id", u.id)
+          .eq("node_type", "order");
+      }
 
-      return { orderId, driverId, sequence: nextSeq };
+      return { created: toInsert.length, deleted: toDelete.length, reordered: toReorder.length };
     },
-    onSuccess: (result) => {
-      const driver = drivers.find(d => d.id === result.driverId);
-      toast.success(`已分配给 ${driver?.name || "司机"}`);
+    onSuccess: (res) => {
+      setDraft({});
+      setDropPosition(null);
+      const parts: string[] = [];
+      if (res.created) parts.push(`新增 ${res.created}`);
+      if (res.deleted) parts.push(`取消 ${res.deleted}`);
+      if (res.reordered) parts.push(`重排 ${res.reordered}`);
+      toast.success(`同步成功: ${parts.join(" · ") || "无改动"}`);
       qc.invalidateQueries({ queryKey: ["map-job-steps"] });
       qc.invalidateQueries({ queryKey: ["map-all-orders"] });
       qc.invalidateQueries({ queryKey: ["dispatch-assignments"] });
       qc.invalidateQueries({ queryKey: ["dispatch-orders"] });
       qc.invalidateQueries({ queryKey: ["job-steps"] });
     },
-    onError: (e: Error) => toast.error(`分配失败: ${e.message}`),
+    onError: (e: Error) => toast.error(`同步失败: ${e.message}`),
   });
 
   // 计算单个司机的 ETA
@@ -452,7 +699,37 @@ export function FleetMapPage() {
             <Truck className="h-4 w-4" />
             司机任务 ({filteredDrivers.length})
           </div>
-          
+
+          {/* 同步按钮 - 有未保存改动时高亮 */}
+          <div className="p-2 border-b bg-background shrink-0 flex gap-2">
+            <Button
+              size="sm"
+              variant={hasDraft ? "default" : "outline"}
+              onClick={() => syncDraft.mutate()}
+              disabled={!hasDraft || syncDraft.isPending}
+              className="flex-1 h-8 text-xs"
+            >
+              {syncDraft.isPending ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <Save className="h-3 w-3 mr-1" />
+              )}
+              {hasDraft ? `同步 (${Object.keys(draft).length})` : "同步"}
+            </Button>
+            {hasDraft && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={discardDraft}
+                disabled={syncDraft.isPending}
+                className="h-8 px-2 text-xs"
+                title="撤销未同步的改动"
+              >
+                <RotateCcw className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+
           {/* 日期选择器 */}
           <div className="p-3 border-b bg-background shrink-0">
             <input
@@ -510,76 +787,118 @@ export function FleetMapPage() {
                   
                   {isExpanded && (
                     <div className="p-2 space-y-1.5 border-t bg-muted/10">
-                      {steps.length === 0 ? (
-                        <div className="text-xs text-muted-foreground text-center py-3">暂无任务</div>
-                      ) : (
-                        steps.map((step, i) => {
-                          if (step.node_type === 'order' && step.orders) {
-                            // 订单节点卡片
-                            const order = step.orders;
-                            const tm = typeMeta(order.type);
-                            const binTypeName = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : '';
-                            const timeLabel = order.time_window_custom || order.time_window || '';
-                            const driverETA = driverETAs[d.id];
-                            const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
-                            
-                            return (
-                              <div key={step.id} className="relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl">
-                                <div className="flex flex-col gap-1.5">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="text-xs font-semibold leading-tight">
-                                      {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
+                      {/* 计算: 这个司机下, 每个订单节点在"订单序列"中的 index, 用于 drop 指示 */}
+                      {(() => {
+                        const orderList = merged.assigned[d.id] ?? [];
+                        let orderIdx = 0; // 在 orderList 里的位置
+                        const isHovered = dropHoverDriverId === d.id;
+
+                        // 顶部插入点
+                        const topIndicator = (
+                          <DropIndicator
+                            driverId={d.id}
+                            index={0}
+                            active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === 0}
+                          />
+                        );
+
+                        const items: React.ReactNode[] = [];
+                        if (steps.length === 0) {
+                          items.push(topIndicator);
+                          items.push(
+                            <div key="empty" className="text-xs text-muted-foreground text-center py-3">
+                              暂无任务
+                            </div>
+                          );
+                        } else {
+                          // 顶部
+                          items.push(<div key="top-ind">{topIndicator}</div>);
+                          steps.forEach((step, i) => {
+                            if (step.node_type === 'order' && step.orders) {
+                              const order = step.orders;
+                              const tm = typeMeta(order.type);
+                              const binTypeName = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : '';
+                              const timeLabel = order.time_window_custom || order.time_window || '';
+                              const driverETA = driverETAs[d.id];
+                              const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
+                              // 这个卡片是否为本地 draft 新增 / 变动
+                              const isDraft = !!draft[order.id];
+
+                              items.push(
+                                <div
+                                  key={step.id}
+                                  className={`relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl ${
+                                    isDraft ? "ring-1 ring-amber-400" : ""
+                                  }`}
+                                >
+                                  {isDraft && (
+                                    <div className="absolute top-1 right-1 text-[8px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-1">
+                                      待同步
                                     </div>
-                                    {/* 调试：强制显示 ETA 区域 */}
-                                    {driverETA && (
-                                      <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
-                                        {orderETA && orderETA.status === 'OK' ? formatETATime(orderETA.eta) : '无ETA'}
+                                  )}
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="text-xs font-semibold leading-tight">
+                                        {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
+                                      </div>
+                                      {driverETA && (
+                                        <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
+                                          {orderETA && orderETA.status === 'OK' ? formatETATime(orderETA.eta) : '无ETA'}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground leading-snug break-words" title={order.address}>
+                                      {order.address}
+                                    </div>
+                                    <div className="text-[10px] text-primary font-medium">{timeLabel}</div>
+                                    {order.customer_notes && (
+                                      <div className="text-[9px] text-status-progress truncate">
+                                        📝 {order.customer_notes}
                                       </div>
                                     )}
                                   </div>
-                                  <div className="text-[10px] text-muted-foreground leading-snug break-words" title={order.address}>
-                                    {order.address}
-                                  </div>
-                                  <div className="text-[10px] text-primary font-medium">{timeLabel}</div>
-                                  
-                                  {order.customer_notes && (
-                                    <div className="text-[9px] text-status-progress truncate">
-                                      📝 {order.customer_notes}
-                                    </div>
-                                  )}
                                 </div>
-                              </div>
-                            );
-                          } else {
-                            // 手动步骤节点卡片
-                            const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
-                            
-                            return (
-                              <div key={step.id} className="relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg">
-                                <div className="flex flex-col gap-1">
-                                  <div className="text-[11px] font-semibold">
-                                    {stepLabel}
-                                  </div>
-                                  {step.location && (
-                                    <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
-                                      <MapPin className="h-2 w-2 inline mr-0.5" />
-                                      {step.location}
-                                    </div>
-                                  )}
-                                  {step.bin_id && (
-                                    <div className="text-[9px] text-primary">桶: {step.bin_id}</div>
-                                  )}
-                                  {step.notes && (
-                                    <div className="text-[8px] text-muted-foreground truncate">
-                                      📝 {step.notes}
-                                    </div>
-                                  )}
+                              );
+                              // 每张订单卡片后面插入一个 drop point (index = orderIdx + 1)
+                              orderIdx += 1;
+                              items.push(
+                                <div key={`ind-${step.id}`}>
+                                  <DropIndicator
+                                    driverId={d.id}
+                                    index={orderIdx}
+                                    active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === orderIdx}
+                                  />
                                 </div>
-                              </div>
-                            );
-                          }
-                        })
-                      )}
+                              );
+                            } else {
+                              // 手动步骤节点卡片 (不作为可插入位置)
+                              const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
+                              items.push(
+                                <div key={step.id} className="relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg">
+                                  <div className="flex flex-col gap-1">
+                                    <div className="text-[11px] font-semibold">{stepLabel}</div>
+                                    {step.location && (
+                                      <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
+                                        <MapPin className="h-2 w-2 inline mr-0.5" />
+                                        {step.location}
+                                      </div>
+                                    )}
+                                    {step.bin_id && (
+                                      <div className="text-[9px] text-primary">桶: {step.bin_id}</div>
+                                    )}
+                                    {step.notes && (
+                                      <div className="text-[8px] text-muted-foreground truncate">
+                                        📝 {step.notes}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            }
+                          });
+                        }
+                        return items;
+                      })()}
                     </div>
                   )}
                 </div>
@@ -599,15 +918,35 @@ export function FleetMapPage() {
              assignments={assignments}
              driverETAs={driverETAs}
              businessType={businessType}
+             draggableOrderIds={allDayOrders.map(o => o.id)}
              unassignedOrderIds={unassignedOrders.map(o => o.id)}
              onDragHoverDriver={setDropHoverDriverId}
-             onAssignOrder={(orderId, driverId) =>
-               assignOrderToDriver.mutate({ orderId, driverId })
-             }
+             onDragHoverPosition={setDropPosition}
+             onAssignOrder={(orderId, driverId, index) => {
+               stageAssignment(orderId, driverId, index);
+             }}
+             onUnassignOrder={(orderId) => {
+               stageAssignment(orderId, null);
+             }}
              driverDropZoneAttr={DRIVER_DROP_ZONE_ATTR}
+             dropPositionAttr={DROP_POSITION_ATTR}
            />
         </div>
       </div>
     </div>
+  );
+}
+
+// ============ DropIndicator: 拖拽时显示的"插入位置"指示条 ============
+function DropIndicator({
+  driverId, index, active,
+}: { driverId: string; index: number; active: boolean }) {
+  return (
+    <div
+      {...{ [DROP_POSITION_ATTR]: `${driverId}:${index}` }}
+      className={`h-1.5 rounded-full transition-all my-0.5 ${
+        active ? "bg-primary h-2 shadow-md shadow-primary/50" : "bg-transparent"
+      }`}
+    />
   );
 }
