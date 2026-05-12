@@ -414,13 +414,13 @@ export function DispatchMapWidget({
     const geocoder = new (window as any).google.maps.Geocoder();
 
     // 为订单 marker 绑定拖拽处理 (未分配 + 已分配订单都可拖)
-    // - dragstart: 记录当前拖拽订单, 提高 zIndex
+    // - dragstart: 冻结地图 (防止边界 panning), 原位留虚影, 提高 marker zIndex
     // - drag:      找鼠标下方目标 (司机 / 精确位置), 回调让 UI 做高亮
     // - dragend:   释放时决定动作:
     //              * 命中司机 (有索引) → onAssignOrder(orderId, driverId, index)
     //              * 命中司机 (无索引) → onAssignOrder(orderId, driverId) 放末尾
     //              * 未命中 → onUnassignOrder(orderId) (把已分配订单拖到空白 = 取消分配)
-    //              marker 永远弹回原位 (位置显示仍然是订单地址)
+    //              marker 永远弹回原位; 虚影移除; 地图恢复可拖
     const attachOrderDragHandlers = (marker: any, order: any) => {
       if (marker._dragHandlersAttached) return;
       marker._dragHandlersAttached = true;
@@ -429,6 +429,29 @@ export function DispatchMapWidget({
         currentDraggingOrderRef.current = order.id;
         hoverDriverRef.current = null;
         marker.setZIndex(10000);
+
+        // 冻结地图, 防止拖到地图边缘触发地图 pan
+        if (mapInstance.current) {
+          mapInstance.current.setOptions({
+            draggable: false,
+            scrollwheel: false,
+            disableDoubleClickZoom: true,
+          });
+        }
+
+        // 在原坐标创建虚影 marker (半透明)
+        const origPos = marker._originalPos || marker.getPosition();
+        if (origPos && mapInstance.current && (window as any).google) {
+          const ghost = new (window as any).google.maps.Marker({
+            map: mapInstance.current,
+            position: origPos,
+            icon: marker.getIcon(),
+            zIndex: 400,
+            clickable: false,
+            opacity: 0.35,
+          });
+          marker._ghostMarker = ghost;
+        }
       });
 
       marker.addListener("drag", () => {
@@ -451,11 +474,27 @@ export function DispatchMapWidget({
         onDragHoverPosition?.(null);
         hoverDriverRef.current = null;
         currentDraggingOrderRef.current = null;
+
         // 弹回原位
         if (marker._originalPos) {
           marker.setPosition(marker._originalPos);
         }
         marker.setZIndex(500);
+
+        // 移除虚影
+        if (marker._ghostMarker) {
+          marker._ghostMarker.setMap(null);
+          marker._ghostMarker = null;
+        }
+
+        // 恢复地图可拖
+        if (mapInstance.current) {
+          mapInstance.current.setOptions({
+            draggable: true,
+            scrollwheel: true,
+            disableDoubleClickZoom: false,
+          });
+        }
 
         if (target?.driverId) {
           onAssignOrder?.(order.id, target.driverId, target.index);

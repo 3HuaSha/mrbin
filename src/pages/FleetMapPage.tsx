@@ -86,6 +86,8 @@ export function FleetMapPage() {
   const [dropHoverDriverId, setDropHoverDriverId] = useState<string | null>(null);
   // 指定的插入位置 (driverId + index)，null 表示插到最后
   const [dropPosition, setDropPosition] = useState<{ driverId: string; index: number } | null>(null);
+  // 侧边栏正在被 HTML5 DnD 拖动的订单 id (用于视觉反馈 + hit-test)
+  const [sidebarDragOrderId, setSidebarDragOrderId] = useState<string | null>(null);
 
   // 本地草稿: 记录每个订单当前应该属于哪个司机 + 在该司机列表中的位置
   // key = order.id
@@ -749,6 +751,27 @@ export function FleetMapPage() {
                 <div
                   key={d.id}
                   {...{ [DRIVER_DROP_ZONE_ATTR]: d.id }}
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes("text/plain")) {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      // 悬停时自动展开 + 高亮 (与地图拖拽一致)
+                      if (dropHoverDriverId !== d.id) setDropHoverDriverId(d.id);
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    // 仅在真的离开卡片 (而不是进入子元素) 时取消
+                    const related = e.relatedTarget as Node | null;
+                    if (related && (e.currentTarget as Node).contains(related)) return;
+                    if (dropHoverDriverId === d.id) setDropHoverDriverId(null);
+                  }}
+                  onDrop={(e) => {
+                    // 如果没落在具体的 DropIndicator 上, 就放到末尾
+                    e.preventDefault();
+                    const orderId = e.dataTransfer.getData("text/plain");
+                    if (orderId) stageAssignment(orderId, d.id);
+                    setDropHoverDriverId(null);
+                  }}
                   className={`border rounded-md overflow-hidden bg-card transition-all ${
                     dropHoverDriverId === d.id
                       ? "ring-2 ring-primary shadow-lg scale-[1.02] border-primary"
@@ -799,6 +822,7 @@ export function FleetMapPage() {
                             driverId={d.id}
                             index={0}
                             active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === 0}
+                            onDrop={(orderId, dId, idx) => stageAssignment(orderId, dId, idx)}
                           />
                         );
 
@@ -827,9 +851,20 @@ export function FleetMapPage() {
                               items.push(
                                 <div
                                   key={step.id}
-                                  className={`relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl ${
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.setData("text/plain", order.id);
+                                    e.dataTransfer.effectAllowed = "move";
+                                    setSidebarDragOrderId(order.id);
+                                  }}
+                                  onDragEnd={() => {
+                                    setSidebarDragOrderId(null);
+                                    setDropHoverDriverId(null);
+                                    setDropPosition(null);
+                                  }}
+                                  className={`relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl cursor-grab active:cursor-grabbing ${
                                     isDraft ? "ring-1 ring-amber-400" : ""
-                                  }`}
+                                  } ${sidebarDragOrderId === order.id ? "opacity-40" : ""}`}
                                 >
                                   {isDraft && (
                                     <div className="absolute top-1 right-1 text-[8px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-1">
@@ -867,6 +902,7 @@ export function FleetMapPage() {
                                     driverId={d.id}
                                     index={orderIdx}
                                     active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === orderIdx}
+                                    onDrop={(orderId, dId, idx) => stageAssignment(orderId, dId, idx)}
                                   />
                                 </div>
                               );
@@ -910,8 +946,31 @@ export function FleetMapPage() {
           </div>
         </Card>
 
-        {/* 右侧地图 - 移除上方白边 */}
-        <div className="flex-1 overflow-hidden relative">
+        {/* 右侧地图 - 拖到地图上 = 取消分配 */}
+        <div
+          className="flex-1 overflow-hidden relative"
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes("text/plain")) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const orderId = e.dataTransfer.getData("text/plain");
+            if (!orderId) return;
+            // 查一下这个订单原本就是未分配的话就什么都不干
+            const serverCurrent = serverAssignments.find(a => a.order_id === orderId);
+            const draftCurrent = draft[orderId];
+            const currentlyAssigned = draftCurrent
+              ? !!draftCurrent.driverId
+              : !!serverCurrent;
+            if (currentlyAssigned) {
+              stageAssignment(orderId, null);
+              toast.message("已标记为取消分配, 点同步保存");
+            }
+          }}
+        >
            <DispatchMapWidget 
              drivers={filteredDrivers} 
              orders={orders} 
@@ -939,13 +998,34 @@ export function FleetMapPage() {
 
 // ============ DropIndicator: 拖拽时显示的"插入位置"指示条 ============
 function DropIndicator({
-  driverId, index, active,
-}: { driverId: string; index: number; active: boolean }) {
+  driverId, index, active, onDrop,
+}: {
+  driverId: string;
+  index: number;
+  active: boolean;
+  onDrop?: (orderId: string, driverId: string, index: number) => void;
+}) {
+  const [isOver, setIsOver] = useState(false);
   return (
     <div
       {...{ [DROP_POSITION_ATTR]: `${driverId}:${index}` }}
-      className={`h-1.5 rounded-full transition-all my-0.5 ${
-        active ? "bg-primary h-2 shadow-md shadow-primary/50" : "bg-transparent"
+      onDragOver={(e) => {
+        // 允许 drop (必须 preventDefault)
+        if (e.dataTransfer.types.includes("text/plain")) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          if (!isOver) setIsOver(true);
+        }
+      }}
+      onDragLeave={() => setIsOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsOver(false);
+        const orderId = e.dataTransfer.getData("text/plain");
+        if (orderId && onDrop) onDrop(orderId, driverId, index);
+      }}
+      className={`rounded-full transition-all my-0.5 ${
+        active || isOver ? "bg-primary h-2 shadow-md shadow-primary/50" : "bg-transparent h-1.5"
       }`}
     />
   );
