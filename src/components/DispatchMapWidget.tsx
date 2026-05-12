@@ -4,7 +4,7 @@ import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { supabase } from "@/integrations/supabase/client";
 import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES } from "@/lib/manual-step-locations";
 
-const KENNEDY_DEPOT = { lat: 43.816434, lng: -79.288219, label: "Kennedy Depot" };
+const KENNEDY_DEPOT = { lat: 43.821044, lng: -79.304742, label: "Kennedy Depot" };
 
 export function DispatchMapWidget({
   drivers, orders = [], assignments = [], driverETAs = {}, businessType = 'garbage',

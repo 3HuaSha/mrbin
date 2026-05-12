@@ -22,7 +22,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     name: '3445 Kennedy Depot',
     shortName: '3445',
     fullAddress: '3445 Kennedy Rd, Scarborough, ON M1V 4Y3',
-    coordinates: { lat: 43.816434, lng: -79.288219 },
+    coordinates: { lat: 43.821044, lng: -79.304742 },
     type: 'depot',
     icon: '🏢'
   },
@@ -31,7 +31,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     name: '12441 Woodbine Depot',
     shortName: '12441',
     fullAddress: '12441 Woodbine Ave, Gormley, ON L4A 2K4',
-    coordinates: { lat: 43.953610, lng: -79.377054 },
+    coordinates: { lat: 43.948446, lng: -79.374072 },
     type: 'depot',
     icon: '🏢'
   },
@@ -40,7 +40,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     name: 'YORK1 Nugget Transfer Station',
     shortName: 'york1 300',
     fullAddress: 'YORK1 Nugget Transfer Station, 300 Nugget Ave, Scarborough, ON M1S 4A4',
-    coordinates: { lat: 43.805804, lng: -79.255925 },
+    coordinates: { lat: 43.797395, lng: -79.249517 },
     type: 'transfer_station',
     icon: '♻'
   },
@@ -49,7 +49,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     name: 'YORK1 Warren Transfer Station',
     shortName: 'york1 whitby',
     fullAddress: 'YORK1 Warren Transfer Station, 113 Warren Rd, Whitby, ON L1N 2C4',
-    coordinates: { lat: 43.864323, lng: -78.932942 },
+    coordinates: { lat: 43.878177, lng: -78.917902 },
     type: 'transfer_station',
     icon: '♻'
   },
@@ -58,7 +58,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     name: 'Maple Transfer & Recycling',
     shortName: 'maple waste',
     fullAddress: 'Maple Transfer & Recycling Inc., 10525 Keele St, Maple, ON L6A 3Y9',
-    coordinates: { lat: 43.856923, lng: -79.516542 },
+    coordinates: { lat: 43.868360, lng: -79.513730 },
     type: 'transfer_station',
     icon: '♻'
   },
@@ -67,7 +67,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     name: '63A Medulla Dump Site',
     shortName: '63A',
     fullAddress: '63A Medulla Ave, Etobicoke, ON M8Z 5L6',
-    coordinates: { lat: 43.625357, lng: -79.546445 },
+    coordinates: { lat: 43.625163, lng: -79.546445 },
     type: 'dump_site',
     icon: '♻'
   },
@@ -76,7 +76,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     name: 'Draglam Salt Vaughan',
     shortName: 'draglam',
     fullAddress: 'Draglam Salt, 401 Bowes Rd, Vaughan, ON L4K 1J5',
-    coordinates: { lat: 43.804142, lng: -79.493921 },
+    coordinates: { lat: 43.813181, lng: -79.494187 },
     type: 'material_site',
     icon: '♻'
   },
@@ -85,7 +85,7 @@ export const MANUAL_STEP_LOCATIONS: ManualStepLocation[] = [
     name: 'Draglam Salt Brampton',
     shortName: 'draglam brampton',
     fullAddress: 'Draglam Salt, 19 Delta Park Blvd, Brampton, ON L6T 5E7',
-    coordinates: { lat: 43.712621, lng: -79.689612 },
+    coordinates: { lat: 43.738057, lng: -79.684882 },
     type: 'material_site',
     icon: '♻'
   }
