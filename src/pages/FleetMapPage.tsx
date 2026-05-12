@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { todayISO, typeMeta } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,9 @@ import { getFullAddress } from "@/lib/manual-step-locations";
 import { toast } from "sonner";
 import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
 import { useBusinessType } from "@/lib/business-type-storage";
+
+// 司机卡片放置区域的 data-* 标识, DispatchMapWidget 会根据它判断拖拽释放位置
+export const DRIVER_DROP_ZONE_ATTR = "data-fleet-driver-drop";
 
 type Driver = { id: string; name: string };
 
@@ -70,12 +73,14 @@ type JobStep = {
 };
 
 export function FleetMapPage() {
+  const qc = useQueryClient();
   const [date, setDate] = useState(todayISO());
   const [expandedDrivers, setExpandedDrivers] = useState<Set<string>>(new Set());
   const [calculatingDriverId, setCalculatingDriverId] = useState<string | null>(null);
   const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>({});
   const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set());
   const [businessType, setBusinessType] = useBusinessType();
+  const [dropHoverDriverId, setDropHoverDriverId] = useState<string | null>(null);
 
   const toggleDriver = (id: string) => {
     const next = new Set(expandedDrivers);
@@ -129,16 +134,46 @@ export function FleetMapPage() {
     },
   });
   
-  // 提取所有订单（只包含订单节点，用于地图显示）
+  // 获取当日所有订单（包括未分配的），用于在地图上显示未排班订单
+  const { data: allDayOrders = [] } = useQuery({
+    queryKey: ["map-all-orders", date, businessType],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("service_date", date)
+        .eq("business_type", businessType)
+        .neq("status", "cancelled")
+        .order("created_at");
+      if (error) throw error;
+      // 地图侧隐藏换桶自动生成的 pickup 子单:
+      // 有 linked_order_id 的 pickup 属于某条 swap 订单,不单独出现
+      const mainSwapIds = new Set(
+        (data ?? []).filter((o: any) => o.type === "swap").map((o: any) => o.id)
+      );
+      return (data ?? []).filter((o: any) => {
+        if (o.type === "pickup" && o.linked_order_id && mainSwapIds.has(o.linked_order_id)) return false;
+        return true;
+      }) as Order[];
+    },
+  });
   const orders = useMemo(() => {
+    // 合并已分配订单和全部当日订单 - 这样地图上能看到即使没有分配的订单
     const uniqueOrders = new Map<string, Order>();
+    // 先加入 jobSteps 里已分配的订单（带司机/状态信息）
     jobSteps.forEach(step => {
       if (step.node_type === 'order' && step.orders) {
         uniqueOrders.set(step.orders.id, step.orders);
       }
     });
+    // 再补齐未分配的订单
+    allDayOrders.forEach(o => {
+      if (!uniqueOrders.has(o.id)) {
+        uniqueOrders.set(o.id, o);
+      }
+    });
     return Array.from(uniqueOrders.values());
-  }, [jobSteps]);
+  }, [jobSteps, allDayOrders]);
 
   // 按司机分组任务步骤
   const driverJobSteps = useMemo(() => {
@@ -183,6 +218,95 @@ export function FleetMapPage() {
         orders: step.orders!
       }));
   }, [jobSteps]);
+
+  // 已分配的订单 ID (用于在地图上标识哪些订单未分配 → 可拖拽)
+  const assignedOrderIds = useMemo(
+    () => new Set(assignments.map(a => a.order_id)),
+    [assignments]
+  );
+
+  // 未分配订单: 当日订单中尚未进入 dispatch_assignments 的
+  const unassignedOrders = useMemo(
+    () => allDayOrders.filter(o => !assignedOrderIds.has(o.id) && o.status !== "done"),
+    [allDayOrders, assignedOrderIds]
+  );
+
+  // 拖拽订单到司机行时调用: 创建 dispatch_assignments + job_steps
+  const assignOrderToDriver = useMutation({
+    mutationFn: async ({ orderId, driverId }: { orderId: string; driverId: string }) => {
+      const order = allDayOrders.find(o => o.id === orderId);
+      if (!order) throw new Error("订单不存在");
+
+      // 查司机的车辆分配
+      const vAssign = vehicleAssignments.find((a: any) => a.driver_id === driverId);
+      if (!vAssign?.vehicle_id) {
+        throw new Error("该司机还没有绑定车辆");
+      }
+
+      // 计算这个司机当天的下一个 sequence
+      const driverSteps = jobSteps.filter(s => s.driver_id === driverId);
+      const nextSeq = driverSteps.length > 0
+        ? Math.max(...driverSteps.map(s => s.step_number)) + 1
+        : 1;
+
+      // 1. 创建 dispatch_assignment
+      const { data: newAsg, error: asgErr } = await supabase
+        .from("dispatch_assignments")
+        .insert({
+          order_id: orderId,
+          driver_id: driverId,
+          vehicle_id: vAssign.vehicle_id,
+          scheduled_date: date,
+          sequence: nextSeq,
+        })
+        .select()
+        .single();
+      if (asgErr) throw asgErr;
+
+      // 2. 在 job_steps 中创建一条订单节点, 让司机端和地图页都能看到
+      //    step_type 使用合法枚举值 (delivery→customer_delivery; pickup→customer_pickup; swap/material→customer_delivery)
+      const stepTypeMap: Record<string, string> = {
+        delivery: "customer_delivery",
+        pickup: "customer_pickup",
+        swap: "customer_delivery",
+        material: "customer_delivery",
+      };
+      const { error: stepErr } = await supabase.from("job_steps").insert({
+        assignment_id: newAsg.id,
+        driver_id: driverId,
+        scheduled_date: date,
+        order_id: orderId,
+        node_type: "order",
+        step_number: nextSeq,
+        step_type: stepTypeMap[order.type] || "customer_delivery",
+        location: order.address,
+        status: "locked",
+      });
+      if (stepErr) {
+        // 如果 job_steps 已经被 AFTER INSERT 触发器自动创建, 这里会报唯一性/重复错误
+        // 只要 dispatch_assignment 已成功, 继续流程不阻断
+        console.warn("job_steps 插入失败 (可能由触发器已生成):", stepErr.message);
+      }
+
+      // 3. 把订单状态更新为 assigned (trigger 本身会做, 兜底再更一次)
+      await supabase
+        .from("orders")
+        .update({ status: "assigned", updated_at: new Date().toISOString() })
+        .eq("id", orderId);
+
+      return { orderId, driverId, sequence: nextSeq };
+    },
+    onSuccess: (result) => {
+      const driver = drivers.find(d => d.id === result.driverId);
+      toast.success(`已分配给 ${driver?.name || "司机"}`);
+      qc.invalidateQueries({ queryKey: ["map-job-steps"] });
+      qc.invalidateQueries({ queryKey: ["map-all-orders"] });
+      qc.invalidateQueries({ queryKey: ["dispatch-assignments"] });
+      qc.invalidateQueries({ queryKey: ["dispatch-orders"] });
+      qc.invalidateQueries({ queryKey: ["job-steps"] });
+    },
+    onError: (e: Error) => toast.error(`分配失败: ${e.message}`),
+  });
 
   // 计算单个司机的 ETA
   const handleCalculateDriverETA = async (driverId: string, driverName: string) => {
@@ -345,7 +469,15 @@ export function FleetMapPage() {
               const isExpanded = expandedDrivers.has(d.id);
               
               return (
-                <div key={d.id} className="border rounded-md overflow-hidden bg-card">
+                <div
+                  key={d.id}
+                  {...{ [DRIVER_DROP_ZONE_ATTR]: d.id }}
+                  className={`border rounded-md overflow-hidden bg-card transition-all ${
+                    dropHoverDriverId === d.id
+                      ? "ring-2 ring-primary shadow-lg scale-[1.02] border-primary"
+                      : ""
+                  }`}
+                >
                   <div 
                     className="flex items-center justify-between p-2 hover:bg-muted/50 cursor-pointer transition-colors"
                     onClick={() => toggleDriver(d.id)}
@@ -467,6 +599,12 @@ export function FleetMapPage() {
              assignments={assignments}
              driverETAs={driverETAs}
              businessType={businessType}
+             unassignedOrderIds={unassignedOrders.map(o => o.id)}
+             onDragHoverDriver={setDropHoverDriverId}
+             onAssignOrder={(orderId, driverId) =>
+               assignOrderToDriver.mutate({ orderId, driverId })
+             }
+             driverDropZoneAttr={DRIVER_DROP_ZONE_ATTR}
            />
         </div>
       </div>

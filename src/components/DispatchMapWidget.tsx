@@ -6,21 +6,72 @@ import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES } from "@/lib/manual-step-lo
 
 const KENNEDY_DEPOT = { lat: 43.7568, lng: -79.2865, label: "Kennedy Depot" };
 
-export function DispatchMapWidget({ drivers, orders = [], assignments = [], driverETAs = {}, businessType = 'garbage' }: { 
+export function DispatchMapWidget({
+  drivers, orders = [], assignments = [], driverETAs = {}, businessType = 'garbage',
+  unassignedOrderIds = [],
+  onDragHoverDriver,
+  onAssignOrder,
+  driverDropZoneAttr = "data-fleet-driver-drop",
+}: { 
   drivers: any[], 
   orders?: any[], 
   assignments?: any[],
   driverETAs?: Record<string, any>,
-  businessType?: 'garbage' | 'brick'
+  businessType?: 'garbage' | 'brick',
+  /** 未分配订单 id 列表, 在地图上可拖拽 */
+  unassignedOrderIds?: string[],
+  /** 拖拽时悬停在哪个司机上的回调 */
+  onDragHoverDriver?: (driverId: string | null) => void,
+  /** 释放到司机上时的回调: (orderId, driverId) */
+  onAssignOrder?: (orderId: string, driverId: string) => void,
+  /** 司机行的 data-* 属性名, 用于命中检测 */
+  driverDropZoneAttr?: string,
 }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
   const markersRef = useRef<Record<string, any>>({});
   const infoWindowRef = useRef<any>(null);
   const routeLinesRef = useRef<any[]>([]); // 存储路线折线
+
+  // 拖拽未分配订单到司机卡片的辅助 ref
+  // - lastMouseRef: 全局鼠标位置, 用 document mousemove 捕获 (Google Maps 的 dragend 不给 DOM 事件)
+  // - hoverDriverRef: 当前悬停在哪个司机 drop zone 上
+  const lastMouseRef = useRef<{ x: number; y: number } | null>(null);
+  const hoverDriverRef = useRef<string | null>(null);
+  const currentDraggingOrderRef = useRef<string | null>(null);
   
   const [mapLoaded, setMapLoaded] = useState(false);
   const [samsaraLocs, setSamsaraLocs] = useState<any[]>([]);
+
+  // 未分配订单 id 集合 (稳定引用, 便于在 effect 内判断)
+  const unassignedOrderSet = useMemo(
+    () => new Set(unassignedOrderIds),
+    [unassignedOrderIds]
+  );
+
+  // 全局 mousemove 捕获: Google Maps 的 marker drag 不暴露 DOM 事件
+  // 我们需要知道释放时鼠标在屏幕上哪里, 才能用 elementFromPoint 判断落在哪个司机卡片上
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("mousemove", onMove, { passive: true });
+    window.addEventListener("dragover", (e: any) => {
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
+    }, { passive: true });
+    return () => window.removeEventListener("mousemove", onMove);
+  }, []);
+
+  // 查找鼠标下方的司机 drop zone, 返回 driver_id 或 null
+  const findDriverAtCursor = (): string | null => {
+    const mouse = lastMouseRef.current;
+    if (!mouse) return null;
+    const el = document.elementFromPoint(mouse.x, mouse.y);
+    if (!el) return null;
+    const zone = (el as HTMLElement).closest(`[${driverDropZoneAttr}]`);
+    if (!zone) return null;
+    return zone.getAttribute(driverDropZoneAttr);
+  };
   
   // 获取车辆分配信息（包含车辆的 type 字段）
   const { data: vehicleAssignments = [] } = useQuery({
@@ -328,6 +379,46 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
 
     // 绘制订单
     const geocoder = new (window as any).google.maps.Geocoder();
+
+    // 为订单 marker 绑定拖拽处理 (仅在订单未分配时生效)
+    // - dragstart: 记录当前拖拽的订单, 提高 zIndex, 改光标
+    // - drag:      根据鼠标位置计算悬停司机, 回调 onDragHoverDriver 做高亮
+    // - dragend:   判断落点, 若命中司机则调用 onAssignOrder; 否则把 marker 弹回原位
+    const attachOrderDragHandlers = (marker: any, order: any) => {
+      if (marker._dragHandlersAttached) return;
+      marker._dragHandlersAttached = true;
+
+      marker.addListener("dragstart", () => {
+        currentDraggingOrderRef.current = order.id;
+        hoverDriverRef.current = null;
+        marker.setZIndex(10000);
+      });
+
+      marker.addListener("drag", () => {
+        const driverId = findDriverAtCursor();
+        if (driverId !== hoverDriverRef.current) {
+          hoverDriverRef.current = driverId;
+          onDragHoverDriver?.(driverId);
+        }
+      });
+
+      marker.addListener("dragend", () => {
+        const driverId = findDriverAtCursor();
+        // 清除高亮
+        onDragHoverDriver?.(null);
+        hoverDriverRef.current = null;
+        currentDraggingOrderRef.current = null;
+        // 弹回原位 (不论是否成功分配, marker 位置应该还是订单地址)
+        if (marker._originalPos) {
+          marker.setPosition(marker._originalPos);
+        }
+        marker.setZIndex(500);
+
+        if (driverId && onAssignOrder) {
+          onAssignOrder(order.id, driverId);
+        }
+      });
+    };
     
     orders.forEach(order => {
       if (order.status === 'done' || order.completed) {
@@ -355,7 +446,18 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
            if (marker.getMap && !marker.getMap()) {
              marker.setMap(mapInstance.current);
            }
-           updateOrderIcon(marker, order, assignments, drivers, orderETA);
+           updateOrderIcon(marker, order, assignments, drivers, orderETA, unassignedOrderSet.has(order.id));
+           // 动态更新 draggable: 分配后不能再拖, 未分配可拖
+           const shouldBeDraggable = unassignedOrderSet.has(order.id) && !!onAssignOrder;
+           if (marker.getDraggable && marker.getDraggable() !== shouldBeDraggable) {
+             marker.setDraggable(shouldBeDraggable);
+           }
+           // 给可拖拽订单单独存一份原始坐标, 松手后要回弹
+           if (shouldBeDraggable && marker.getPosition && !marker._originalPos) {
+             const p = marker.getPosition();
+             marker._originalPos = { lat: p.lat(), lng: p.lng() };
+           }
+           attachOrderDragHandlers(marker, order);
         }
         newMarkers[id] = marker;
         return;
@@ -369,14 +471,21 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
           if (status === "OK" && results?.[0]) {
             const pos = results[0].geometry.location;
             
+            const isDraggable = unassignedOrderSet.has(order.id) && !!onAssignOrder;
             const marker = new (window as any).google.maps.Marker({
               map: mapInstance.current,
               position: pos,
               title: order.order_number || order.id,
               zIndex: 500,
+              draggable: isDraggable,
+              cursor: isDraggable ? "grab" : undefined,
             });
+            if (isDraggable) {
+              marker._originalPos = { lat: pos.lat(), lng: pos.lng() };
+            }
             
-            updateOrderIcon(marker, order, assignments, drivers, orderETA);
+            updateOrderIcon(marker, order, assignments, drivers, orderETA, isDraggable);
+            attachOrderDragHandlers(marker, order);
             
             marker.addListener('click', () => {
               if (!infoWindowRef.current) return;
@@ -464,7 +573,7 @@ export function DispatchMapWidget({ drivers, orders = [], assignments = [], driv
       }
     });
 
-  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments, driverETAs, businessType]);
+  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments, driverETAs, businessType, unassignedOrderSet, onAssignOrder, onDragHoverDriver, driverDropZoneAttr]);
 
   // 5. 绘制ETA路线
   useEffect(() => {
@@ -650,14 +759,18 @@ function createVehicleIconWithLabel(vehicleType: string, driverName: string): st
 }
 
 // 辅助函数: 创建订单标记 (紧凑徽章: 主信息 + 地址 + HINO 提示)
-function createOrderIconWithLabel(order: any, orderETA?: any): string {
+function createOrderIconWithLabel(order: any, orderETA?: any, isUnassigned: boolean = false): string {
   // 订单类型配色
   const colorSchemes: Record<string, { bg: string; text: string; border: string; addr: string }> = {
     'delivery': { bg: '#2196F3', text: '#FFFFFF', border: '#0D47A1', addr: '#E3F2FD' },  // 蓝
     'pickup':   { bg: '#4CAF50', text: '#FFFFFF', border: '#1B5E20', addr: '#E8F5E9' },  // 绿
     'swap':     { bg: '#9C27B0', text: '#FFFFFF', border: '#4A148C', addr: '#F3E5F5' },  // 紫
   };
-  const scheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', border: '#E65100', addr: '#FFF3E0' };
+  const baseScheme = colorSchemes[order.type] || { bg: '#FF9800', text: '#FFFFFF', border: '#E65100', addr: '#FFF3E0' };
+  // 未分配订单: 灰色底 + 警示边, 明显区分于已分配
+  const scheme = isUnassigned
+    ? { bg: '#F57C00', text: '#FFFFFF', border: '#BF360C', addr: '#FFF3E0' }
+    : baseScheme;
 
   const typeNames: Record<string, string> = { delivery: '送', pickup: '收', swap: '换', material: '料' };
   const typeName = typeNames[order.type] || order.type;
@@ -668,9 +781,10 @@ function createOrderIconWithLabel(order: any, orderETA?: any): string {
   const binSize = order.bin_size ? `${order.bin_size}yd` : '';
   const timeDisplay = order.time_window_custom || order.time_window || '';
 
-  // 主徽章: 类型 + 尺寸 + 时段
+  // 主徽章: 类型 + 尺寸 + 时段 (未分配订单前面加 ⇢ 提示可拖拽)
   const mainParts = [typeName, binSize, timeDisplay].filter(Boolean);
-  const mainText = (binEmoji ? binEmoji + ' ' : '') + mainParts.join(' · ');
+  const prefix = isUnassigned ? '⇢ ' : '';
+  const mainText = prefix + (binEmoji ? binEmoji + ' ' : '') + mainParts.join(' · ');
 
   // 地址第二行: 只保留街号+街名和城市 (例: "102 Fenelon Dr, North York")
   const extractAddr = (addr: string): string => {
@@ -725,7 +839,8 @@ function createOrderIconWithLabel(order: any, orderETA?: any): string {
   </defs>
   <!-- 主徽章 -->
   <rect x='${badgeX}' y='0' width='${badgeWidthClamped}' height='${mainH}' rx='10'
-        fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='1.2' filter='url(#s)'/>
+        fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='${isUnassigned ? 1.8 : 1.2}'
+        ${isUnassigned ? "stroke-dasharray='4 2'" : ''} filter='url(#s)'/>
   <text x='${pinCx}' y='14' text-anchor='middle' font-size='11' font-weight='bold' fill='${scheme.text}'
         font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${escapeXml(mainText)}</text>
 
@@ -767,8 +882,8 @@ function escapeXml(s: string): string {
 }
 
 // 辅助函数: 更新订单的图标
-function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: any[], orderETA?: any) {
-  const iconUrl = createOrderIconWithLabel(order, orderETA);
+function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: any[], orderETA?: any, isUnassigned: boolean = false) {
+  const iconUrl = createOrderIconWithLabel(order, orderETA, isUnassigned);
 
   // 和 createOrderIconWithLabel 保持一致的尺寸计算
   const typeNames: Record<string, string> = { delivery: '送', pickup: '收', swap: '换', material: '料' };
@@ -777,7 +892,8 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
   const binEmoji = binEmojis[order.bin_type] || '';
   const binSize = order.bin_size ? `${order.bin_size}yd` : '';
   const timeDisplay = order.time_window_custom || order.time_window || '';
-  const mainText = (binEmoji ? binEmoji + ' ' : '') + [typeName, binSize, timeDisplay].filter(Boolean).join(' · ');
+  const prefix = isUnassigned ? '⇢ ' : '';
+  const mainText = prefix + (binEmoji ? binEmoji + ' ' : '') + [typeName, binSize, timeDisplay].filter(Boolean).join(' · ');
 
   const extractAddr = (addr: string) => {
     if (!addr) return '';
