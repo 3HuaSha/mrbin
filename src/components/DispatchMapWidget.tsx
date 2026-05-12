@@ -53,7 +53,26 @@ export function DispatchMapWidget({
   const currentDraggingOrderRef = useRef<string | null>(null);
   
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [samsaraLocs, setSamsaraLocs] = useState<any[]>([]);
+
+  // Samsara 车辆位置: 用 React Query 托管, 有缓存, 自动 refetch, 页面切回立刻有数据
+  const { data: samsaraLocs = [] } = useQuery<any[]>({
+    queryKey: ["samsara-vehicles"],
+    queryFn: async () => {
+      const result = await fetchSamsaraVehicles();
+      if (!result.success) {
+        console.warn("Samsara 获取失败:", result.error);
+        // 返回空数组而不是抛错, 避免 useQuery 把缓存清掉
+        return [];
+      }
+      return result.data || [];
+    },
+    // 首次拉取后 30s 重新获取一次, 保持和原实现一致
+    refetchInterval: 30000,
+    // 切换页面 / focus 时不强制重取 (避免闪烁), 用缓存数据
+    refetchOnWindowFocus: false,
+    // 即使报错也保留上次成功的数据
+    staleTime: 15000,
+  });
 
   // 未分配订单 id 集合 (稳定引用, 便于在 effect 内判断)
   const unassignedOrderSet = useMemo(
@@ -272,28 +291,7 @@ export function DispatchMapWidget({
     });
   }, [mapLoaded]);
 
-  // 3. 通过辅助函数获取 Samsara 数据
-  useEffect(() => {
-    let active = true;
-    const fetchData = async () => {
-      try {
-        const result = await fetchSamsaraVehicles();
-        if (active && result.success && result.data) {
-          setSamsaraLocs(result.data);
-        } else if (result.error) {
-          console.warn("Samsara获取失败:", result.error);
-          console.warn("📍 地图将继续显示订单，但不显示车辆位置");
-        }
-      } catch (error) {
-        console.error("❌ Samsara API 调用异常:", error);
-        console.warn("📍 地图将继续显示订单，但不显示车辆位置");
-      }
-    };
-    
-    fetchData();
-    const id = setInterval(fetchData, 30000); // 30s 轮询
-    return () => { active = false; clearInterval(id); };
-  }, []);
+  // 3. Samsara 数据由上方的 useQuery 托管, 无需手动 setInterval
 
   // 4. 绘制地图标记 (车辆 & 订单)
   useEffect(() => {
@@ -303,10 +301,14 @@ export function DispatchMapWidget({
     
     const newMarkers: Record<string, any> = {};
 
-    // 首先清除所有车辆标记（truck_ 开头的）
+    // 本轮需要保留的 truck id 集合 (只清掉不在这一批里的, 避免业务类型切换等时短暂为空导致闪烁)
+    const currentTruckIds = new Set(filteredVehicles.map((t: any) => "truck_" + t.id));
     Object.keys(markersRef.current).forEach(key => {
-      if (key.startsWith('truck_') && markersRef.current[key] && markersRef.current[key] !== "pending") {
-        markersRef.current[key].setMap(null);
+      if (!key.startsWith('truck_')) return;
+      // 若这个 truck 不在新列表里 → 移除
+      if (!currentTruckIds.has(key)) {
+        const m = markersRef.current[key];
+        if (m && m !== "pending") m.setMap(null);
         delete markersRef.current[key];
       }
     });
