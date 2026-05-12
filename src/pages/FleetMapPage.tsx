@@ -9,10 +9,13 @@ import { Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateC
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
-import { getFullAddress } from "@/lib/manual-step-locations";
+import { getFullAddress, MANUAL_STEP_LOCATIONS } from "@/lib/manual-step-locations";
 import { toast } from "sonner";
 import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
 import { useBusinessType } from "@/lib/business-type-storage";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // 司机卡片放置区域的 data-* 标识, DispatchMapWidget 会根据它判断拖拽释放位置
 export const DRIVER_DROP_ZONE_ATTR = "data-fleet-driver-drop";
@@ -96,7 +99,28 @@ export function FleetMapPage() {
   //   index            → 在该司机订单任务列表中的顺序 (0 开头)
   type DraftEntry = { orderId: string; driverId: string | null; index: number };
   const [draft, setDraft] = useState<Record<string, DraftEntry>>({});
-  const hasDraft = Object.keys(draft).length > 0;
+
+  // 手动步骤草稿: 从地图固定地点拖到司机产生的待同步步骤
+  type DraftManualStep = {
+    id: string; // 临时 id
+    driverId: string;
+    location: string; // shortName
+    stepType: string; // dump_waste / pickup_bin / drop_bin
+    notes: string; // 桶大小等
+    index: number; // 在该司机列表中的位置
+  };
+  const [draftManualSteps, setDraftManualSteps] = useState<DraftManualStep[]>([]);
+
+  // 弹窗: 拖 3445/12441 到司机时需要选择动作和桶大小
+  const [locationDropDialog, setLocationDropDialog] = useState<{
+    locationId: string;
+    driverId: string;
+    index?: number;
+  } | null>(null);
+  const [dialogStepType, setDialogStepType] = useState("");
+  const [dialogBinSize, setDialogBinSize] = useState("");
+
+  const hasDraft = Object.keys(draft).length > 0 || draftManualSteps.length > 0;
 
   const toggleDriver = (id: string) => {
     const next = new Set(expandedDrivers);
@@ -363,10 +387,30 @@ export function FleetMapPage() {
       });
     });
 
-    // 3. 每个司机的列表按 step_number 排序 (订单在本来的位置, 手动步骤夹在中间)
+    // 3. 本地 draft 手动步骤也加进来 (显示为"待同步"卡片)
+    draftManualSteps.forEach(ms => {
+      const arr = map[ms.driverId] ??= [];
+      const stepTypeLabels: Record<string, string> = { dump_waste: '倒垃圾', pickup_bin: '取桶', drop_bin: '放桶' };
+      arr.push({
+        id: ms.id,
+        driver_id: ms.driverId,
+        scheduled_date: date,
+        step_number: 999, // 放最后
+        order_id: null,
+        assignment_id: null,
+        node_type: 'step',
+        location: ms.location,
+        step_type: ms.stepType,
+        bin_id: null,
+        notes: ms.notes || null,
+        status: 'locked',
+      } as JobStep);
+    });
+
+    // 4. 每个司机的列表按 step_number 排序 (订单在本来的位置, 手动步骤夹在中间)
     Object.values(map).forEach(arr => arr.sort((a, b) => a.step_number - b.step_number));
     return map;
-  }, [jobSteps, merged.assigned, orderById, date]);
+  }, [jobSteps, merged.assigned, orderById, date, draftManualSteps]);
 
   // 本地拖拽: 更新 draft. 不立即写库.
   //   driverId = null → 取消分配
@@ -413,8 +457,68 @@ export function FleetMapPage() {
   // 放弃本地改动
   const discardDraft = () => {
     setDraft({});
+    setDraftManualSteps([]);
     setDropPosition(null);
     toast.message("已撤销未同步的改动");
+  };
+
+  // 地图固定地点拖到司机: 根据地点类型决定是直接创建步骤还是弹窗
+  const handleLocationDrop = (locationId: string, driverId: string, index?: number) => {
+    const loc = MANUAL_STEP_LOCATIONS.find(l => l.id === locationId);
+    if (!loc) return;
+
+    // 3445: 可以倒垃圾/放桶/拿桶 → 弹窗
+    if (locationId === '3445') {
+      setLocationDropDialog({ locationId, driverId, index });
+      setDialogStepType("");
+      setDialogBinSize("");
+      return;
+    }
+    // 12441: 只能放桶/拿桶 → 弹窗
+    if (locationId === '12441') {
+      setLocationDropDialog({ locationId, driverId, index });
+      setDialogStepType("");
+      setDialogBinSize("");
+      return;
+    }
+    // 其他垃圾场/转运站: 直接创建"倒垃圾"步骤, 不需要选桶大小
+    const newStep: DraftManualStep = {
+      id: `draft-step-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      driverId,
+      location: loc.shortName,
+      stepType: "dump_waste",
+      notes: "",
+      index: index ?? 999,
+    };
+    setDraftManualSteps(prev => [...prev, newStep]);
+    toast.success(`已添加"倒垃圾 → ${loc.shortName}"步骤 (待同步)`);
+  };
+
+  // 弹窗确认: 创建手动步骤
+  const confirmLocationDrop = () => {
+    if (!locationDropDialog) return;
+    if (!dialogStepType) { toast.error("请选择动作"); return; }
+    if ((dialogStepType === "pickup_bin" || dialogStepType === "drop_bin") && !dialogBinSize) {
+      toast.error("请选择桶大小"); return;
+    }
+    const loc = MANUAL_STEP_LOCATIONS.find(l => l.id === locationDropDialog.locationId);
+    if (!loc) return;
+
+    const notes = dialogBinSize ? `${dialogBinSize}yd` : "";
+    const newStep: DraftManualStep = {
+      id: `draft-step-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      driverId: locationDropDialog.driverId,
+      location: loc.shortName,
+      stepType: dialogStepType,
+      notes,
+      index: locationDropDialog.index ?? 999,
+    };
+    setDraftManualSteps(prev => [...prev, newStep]);
+    setLocationDropDialog(null);
+    setDialogStepType("");
+    setDialogBinSize("");
+    const stepLabel = dialogStepType === "dump_waste" ? "倒垃圾" : dialogStepType === "pickup_bin" ? "取桶" : "放桶";
+    toast.success(`已添加"${stepLabel} → ${loc.shortName}"步骤 (待同步)`);
   };
 
   // 同步: 按 draft 计算出要新增/更新/删除的 assignments, 批量写库
@@ -538,15 +642,44 @@ export function FleetMapPage() {
           .eq("node_type", "order");
       }
 
-      return { created: toInsert.length, deleted: toDelete.length, reordered: toReorder.length };
+      // 4. 插入手动步骤 (draftManualSteps)
+      for (const ms of draftManualSteps) {
+        // 计算该司机当天的下一个 step_number
+        const { data: existingSteps } = await supabase
+          .from("job_steps")
+          .select("step_number")
+          .eq("driver_id", ms.driverId)
+          .eq("scheduled_date", date)
+          .order("step_number", { ascending: false })
+          .limit(1);
+        const nextStepNum = existingSteps && existingSteps.length > 0
+          ? existingSteps[0].step_number + 1
+          : 1;
+
+        const { error: msErr } = await supabase.from("job_steps").insert({
+          driver_id: ms.driverId,
+          scheduled_date: date,
+          step_number: nextStepNum,
+          node_type: "step",
+          location: ms.location,
+          step_type: ms.stepType,
+          notes: ms.notes || null,
+          status: "locked",
+        });
+        if (msErr) throw msErr;
+      }
+
+      return { created: toInsert.length, deleted: toDelete.length, reordered: toReorder.length, manualSteps: draftManualSteps.length };
     },
     onSuccess: (res) => {
       setDraft({});
+      setDraftManualSteps([]);
       setDropPosition(null);
       const parts: string[] = [];
       if (res.created) parts.push(`新增 ${res.created}`);
       if (res.deleted) parts.push(`取消 ${res.deleted}`);
       if (res.reordered) parts.push(`重排 ${res.reordered}`);
+      if (res.manualSteps) parts.push(`手动步骤 ${res.manualSteps}`);
       toast.success(`同步成功: ${parts.join(" · ") || "无改动"}`);
       qc.invalidateQueries({ queryKey: ["map-job-steps"] });
       qc.invalidateQueries({ queryKey: ["map-all-orders"] });
@@ -909,8 +1042,14 @@ export function FleetMapPage() {
                             } else {
                               // 手动步骤节点卡片 (不作为可插入位置)
                               const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
+                              const isDraftStep = step.id.startsWith('draft-step-');
                               items.push(
-                                <div key={step.id} className="relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg">
+                                <div key={step.id} className={`relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg ${isDraftStep ? "ring-1 ring-amber-400" : ""}`}>
+                                  {isDraftStep && (
+                                    <div className="absolute top-1 right-1 text-[8px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-1">
+                                      待同步
+                                    </div>
+                                  )}
                                   <div className="flex flex-col gap-1">
                                     <div className="text-[11px] font-semibold">{stepLabel}</div>
                                     {step.location && (
@@ -987,11 +1126,56 @@ export function FleetMapPage() {
              onUnassignOrder={(orderId) => {
                stageAssignment(orderId, null);
              }}
+             onLocationDrop={handleLocationDrop}
              driverDropZoneAttr={DRIVER_DROP_ZONE_ATTR}
              dropPositionAttr={DROP_POSITION_ATTR}
            />
         </div>
       </div>
+
+      {/* 拖 3445/12441 到司机时的选择弹窗 */}
+      <Dialog open={!!locationDropDialog} onOpenChange={(open) => { if (!open) setLocationDropDialog(null); }}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>
+              选择步骤类型 — {locationDropDialog && MANUAL_STEP_LOCATIONS.find(l => l.id === locationDropDialog.locationId)?.shortName}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label className="text-xs">动作</Label>
+              <Select value={dialogStepType} onValueChange={setDialogStepType}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="选择动作" /></SelectTrigger>
+                <SelectContent>
+                  {locationDropDialog?.locationId === '3445' && (
+                    <SelectItem value="dump_waste">倒垃圾</SelectItem>
+                  )}
+                  <SelectItem value="drop_bin">放桶</SelectItem>
+                  <SelectItem value="pickup_bin">取桶</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {(dialogStepType === "pickup_bin" || dialogStepType === "drop_bin") && (
+              <div>
+                <Label className="text-xs">桶大小</Label>
+                <Select value={dialogBinSize} onValueChange={setDialogBinSize}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="选择桶大小" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="14">14 yd</SelectItem>
+                    <SelectItem value="20">20 yd</SelectItem>
+                    <SelectItem value="30">30 yd</SelectItem>
+                    <SelectItem value="40">40 yd</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLocationDropDialog(null)}>取消</Button>
+            <Button onClick={confirmLocationDrop}>确认</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

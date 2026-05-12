@@ -14,6 +14,7 @@ export function DispatchMapWidget({
   onDragHoverPosition,
   onAssignOrder,
   onUnassignOrder,
+  onLocationDrop,
   driverDropZoneAttr = "data-fleet-driver-drop",
   dropPositionAttr = "data-fleet-drop-position",
 }: { 
@@ -34,6 +35,8 @@ export function DispatchMapWidget({
   onAssignOrder?: (orderId: string, driverId: string, index?: number) => void,
   /** 释放到地图空白 (非司机、非位置指示) 时的回调: 取消分配 */
   onUnassignOrder?: (orderId: string) => void,
+  /** 固定地点 marker 拖到司机时的回调: (locationId, driverId, index?) */
+  onLocationDrop?: (locationId: string, driverId: string, index?: number) => void,
   /** 司机行的 data-* 属性名 */
   driverDropZoneAttr?: string,
   /** 位置指示的 data-* 属性名, 值格式: `${driverId}:${index}` */
@@ -51,6 +54,9 @@ export function DispatchMapWidget({
   const lastMouseRef = useRef<{ x: number; y: number } | null>(null);
   const hoverDriverRef = useRef<string | null>(null);
   const currentDraggingOrderRef = useRef<string | null>(null);
+  // Ref for onLocationDrop so the map-init effect (runs once) can access latest callback
+  const onLocationDropRef = useRef(onLocationDrop);
+  onLocationDropRef.current = onLocationDrop;
   
   const [mapLoaded, setMapLoaded] = useState(false);
 
@@ -245,7 +251,7 @@ export function DispatchMapWidget({
       title: "Kennedy Depot"
     });
     
-    // 渲染所有手动步骤固定地点
+    // 渲染所有手动步骤固定地点 (可拖拽到司机 → 创建手动步骤)
     MANUAL_STEP_LOCATIONS.forEach(location => {
       const marker = new (window as any).google.maps.Marker({
         position: location.coordinates,
@@ -256,12 +262,70 @@ export function DispatchMapWidget({
           anchor: new (window as any).google.maps.Point(22.5, 45)
         },
         title: location.name,
-        zIndex: 50
+        zIndex: 50,
+        draggable: true,
+        cursor: "grab",
       });
+      
+      // 存储原始坐标 (拖完要弹回)
+      marker._originalPos = { lat: location.coordinates.lat, lng: location.coordinates.lng };
+      marker._locationId = location.id;
       
       // 将固定地点标记也存储到markersRef中，用于路线绘制
       const markerId = `manual_${location.id}`;
       markersRef.current[markerId] = marker;
+
+      // 拖拽处理: 和订单 marker 类似
+      marker.addListener("dragstart", () => {
+        marker.setZIndex(10000);
+        if (mapInstance.current) {
+          mapInstance.current.setOptions({ draggable: false, scrollwheel: false, disableDoubleClickZoom: true });
+        }
+        // 虚影
+        const ghost = new (window as any).google.maps.Marker({
+          map: mapInstance.current,
+          position: marker._originalPos,
+          icon: marker.getIcon(),
+          zIndex: 40,
+          clickable: false,
+          opacity: 0.35,
+        });
+        marker._ghostMarker = ghost;
+      });
+
+      marker.addListener("drag", () => {
+        const target = findDropTargetAtCursor();
+        const driverId = target?.driverId ?? null;
+        if (driverId !== hoverDriverRef.current) {
+          hoverDriverRef.current = driverId;
+          onDragHoverDriver?.(driverId);
+        }
+        if (target?.driverId && target.index !== undefined) {
+          onDragHoverPosition?.({ driverId: target.driverId, index: target.index });
+        } else {
+          onDragHoverPosition?.(null);
+        }
+      });
+
+      marker.addListener("dragend", () => {
+        const target = findDropTargetAtCursor();
+        onDragHoverDriver?.(null);
+        onDragHoverPosition?.(null);
+        hoverDriverRef.current = null;
+        // 弹回原位
+        marker.setPosition(marker._originalPos);
+        marker.setZIndex(50);
+        // 移除虚影
+        if (marker._ghostMarker) { marker._ghostMarker.setMap(null); marker._ghostMarker = null; }
+        // 恢复地图
+        if (mapInstance.current) {
+          mapInstance.current.setOptions({ draggable: true, scrollwheel: true, disableDoubleClickZoom: false });
+        }
+        // 命中司机 → 回调
+        if (target?.driverId && onLocationDropRef.current) {
+          onLocationDropRef.current(location.id, target.driverId, target.index);
+        }
+      });
       
       // 添加点击事件
       marker.addListener('click', () => {
