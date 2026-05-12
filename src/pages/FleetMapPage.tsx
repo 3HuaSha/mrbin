@@ -200,52 +200,6 @@ export function FleetMapPage() {
     return Array.from(uniqueOrders.values());
   }, [jobSteps, allDayOrders]);
 
-  // 按司机分组任务步骤 (已应用本地 draft: 订单节点部分)
-  //   - 手动步骤 (node_type='step') 保持服务器数据
-  //   - 订单节点 (node_type='order') 根据 merged.assigned 重新生成, 保证和地图一致
-  const driverJobSteps = useMemo(() => {
-    const map: Record<string, JobStep[]> = {};
-
-    // 1. 手动步骤先放进去
-    jobSteps.forEach(step => {
-      if (step.node_type === 'step') {
-        (map[step.driver_id] ??= []).push(step);
-      }
-    });
-
-    // 2. 订单节点按 merged 重新生成 (假 JobStep, 只需足够渲染)
-    Object.entries(merged.assigned).forEach(([driverId, orderIds]) => {
-      const arr = map[driverId] ??= [];
-      orderIds.forEach((orderId, idx) => {
-        const order = orderById.get(orderId);
-        if (!order) return;
-        // 找原始 step 来复用 id/状态 (若有)
-        const originalStep = jobSteps.find(
-          s => s.node_type === 'order' && s.order_id === orderId && s.driver_id === driverId
-        );
-        arr.push({
-          id: originalStep?.id ?? `draft-${driverId}-${orderId}`,
-          driver_id: driverId,
-          scheduled_date: date,
-          step_number: idx + 1,
-          order_id: orderId,
-          assignment_id: originalStep?.assignment_id ?? null,
-          node_type: 'order',
-          location: order.address,
-          step_type: originalStep?.step_type ?? 'customer_delivery',
-          bin_id: originalStep?.bin_id ?? null,
-          notes: originalStep?.notes ?? null,
-          status: originalStep?.status ?? 'locked',
-          orders: order,
-        } as JobStep);
-      });
-    });
-
-    // 3. 每个司机的列表按 step_number 排序 (订单在本来的位置, 手动步骤夹在中间)
-    Object.values(map).forEach(arr => arr.sort((a, b) => a.step_number - b.step_number));
-    return map;
-  }, [jobSteps, merged.assigned, orderById, date]);
-
   const { data: vehicleAssignments = [] } = useQuery({
     queryKey: ["driver-vehicle-assignments-map"],
     queryFn: async () => {
@@ -365,6 +319,52 @@ export function FleetMapPage() {
       .filter((o): o is Order => !!o),
     [merged.unassigned, orderById]
   );
+
+  // 按司机分组任务步骤 (已应用本地 draft: 订单节点部分)
+  //   - 手动步骤 (node_type='step') 保持服务器数据
+  //   - 订单节点 (node_type='order') 根据 merged.assigned 重新生成, 保证和地图一致
+  const driverJobSteps = useMemo(() => {
+    const map: Record<string, JobStep[]> = {};
+
+    // 1. 手动步骤先放进去
+    jobSteps.forEach(step => {
+      if (step.node_type === 'step') {
+        (map[step.driver_id] ??= []).push(step);
+      }
+    });
+
+    // 2. 订单节点按 merged 重新生成 (假 JobStep, 只需足够渲染)
+    Object.entries(merged.assigned).forEach(([driverId, orderIds]) => {
+      const arr = map[driverId] ??= [];
+      orderIds.forEach((orderId, idx) => {
+        const order = orderById.get(orderId);
+        if (!order) return;
+        // 找原始 step 来复用 id/状态 (若有)
+        const originalStep = jobSteps.find(
+          s => s.node_type === 'order' && s.order_id === orderId && s.driver_id === driverId
+        );
+        arr.push({
+          id: originalStep?.id ?? `draft-${driverId}-${orderId}`,
+          driver_id: driverId,
+          scheduled_date: date,
+          step_number: idx + 1,
+          order_id: orderId,
+          assignment_id: originalStep?.assignment_id ?? null,
+          node_type: 'order',
+          location: order.address,
+          step_type: originalStep?.step_type ?? 'customer_delivery',
+          bin_id: originalStep?.bin_id ?? null,
+          notes: originalStep?.notes ?? null,
+          status: originalStep?.status ?? 'locked',
+          orders: order,
+        } as JobStep);
+      });
+    });
+
+    // 3. 每个司机的列表按 step_number 排序 (订单在本来的位置, 手动步骤夹在中间)
+    Object.values(map).forEach(arr => arr.sort((a, b) => a.step_number - b.step_number));
+    return map;
+  }, [jobSteps, merged.assigned, orderById, date]);
 
   // 本地拖拽: 更新 draft. 不立即写库.
   //   driverId = null → 取消分配
