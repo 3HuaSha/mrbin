@@ -847,7 +847,7 @@ function createVehicleIconWithLabel(vehicleType: string, driverName: string): st
 }
 
 // 辅助函数: 创建订单标记 (紧凑徽章: 主信息 + 地址 + HINO 提示)
-function createOrderIconWithLabel(order: any, orderETA?: any, isUnassigned: boolean = false): string {
+function createOrderIconWithLabel(order: any, orderETA?: any, isUnassigned: boolean = false, driverName?: string): string {
   // 订单类型配色
   const colorSchemes: Record<string, { bg: string; text: string; border: string; addr: string }> = {
     'delivery': { bg: '#2196F3', text: '#FFFFFF', border: '#0D47A1', addr: '#E3F2FD' },  // 蓝
@@ -873,6 +873,11 @@ function createOrderIconWithLabel(order: any, orderETA?: any, isUnassigned: bool
   const mainParts = [typeName, binSize, timeDisplay].filter(Boolean);
   const prefix = isUnassigned ? '⇢ ' : '';
   const mainText = prefix + (binEmoji ? binEmoji + ' ' : '') + mainParts.join(' · ');
+
+  // 司机名: 分配后显示, 单独一条小胶囊 (只显示前 6 个字, 避免过长)
+  const driverShort = driverName
+    ? (driverName.length > 6 ? driverName.slice(0, 6) : driverName)
+    : '';
 
   // 地址第二行: 只保留街号+街名和城市 (例: "102 Fenelon Dr, North York")
   const extractAddr = (addr: string): string => {
@@ -900,21 +905,25 @@ function createOrderIconWithLabel(order: any, orderETA?: any, isUnassigned: bool
   const charW = (s: string) => s.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 13 : 6.5), 0);
   const mainW = charW(mainText);
   const addrW = charW(addrText);
-  const badgeWidth = Math.max(mainW, addrW) + 12;
+  const driverW = driverShort ? charW('👤 ' + driverShort) + 10 : 0;
+  const badgeWidth = Math.max(mainW, addrW, driverW) + 12;
   const badgeWidthClamped = Math.min(Math.max(badgeWidth, 60), 170);
   const svgWidth = badgeWidthClamped + (etaText ? 42 : 6);
 
-  // 行高收紧: 主行 20, 地址行 14, HINO 条 13
+  // 行高收紧: 司机条 12 (可选), 主行 20, 地址行 14, HINO 条 13
+  const driverRowH = driverShort ? 12 : 0;
   const mainH = 20;
   const addrH = addrText ? 14 : 0;
   const hinoH = hasHinoFlag ? 13 : 0;
   const gap = 1;
-  const stackH = mainH + (addrH ? addrH + gap : 0) + (hinoH ? hinoH + gap : 0);
+  const stackH = driverRowH + (driverRowH ? gap : 0) + mainH + (addrH ? addrH + gap : 0) + (hinoH ? hinoH + gap : 0);
   const svgHeight = stackH + 4 + 10; // + 连接线 + 图钉
 
   const badgeX = 3;
   const pinCx = badgeX + badgeWidthClamped / 2;
-  const addrY = mainH + gap;
+  const driverY = 0;
+  const mainY = driverRowH + (driverRowH ? gap : 0);
+  const addrY = mainY + mainH + gap;
   const hinoY = addrY + addrH + (addrH ? gap : 0);
   const pinY = stackH;
 
@@ -925,11 +934,20 @@ function createOrderIconWithLabel(order: any, orderETA?: any, isUnassigned: bool
       <feDropShadow dx='0' dy='1' stdDeviation='1' flood-opacity='0.3'/>
     </filter>
   </defs>
+
+  ${driverShort ? `
+  <!-- 司机名小条 (只在分配后显示) -->
+  <rect x='${badgeX}' y='${driverY}' width='${badgeWidthClamped}' height='${driverRowH}' rx='4'
+        fill='#263238' stroke='${scheme.border}' stroke-width='0.6'/>
+  <text x='${pinCx}' y='${driverY + 9}' text-anchor='middle' font-size='9' font-weight='bold' fill='#FFFFFF'
+        font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>👤 ${escapeXml(driverShort)}</text>
+  ` : ''}
+
   <!-- 主徽章 -->
-  <rect x='${badgeX}' y='0' width='${badgeWidthClamped}' height='${mainH}' rx='10'
+  <rect x='${badgeX}' y='${mainY}' width='${badgeWidthClamped}' height='${mainH}' rx='10'
         fill='${scheme.bg}' stroke='${scheme.border}' stroke-width='${isUnassigned ? 1.8 : 1.2}'
         ${isUnassigned ? "stroke-dasharray='4 2'" : ''} filter='url(#s)'/>
-  <text x='${pinCx}' y='14' text-anchor='middle' font-size='11' font-weight='bold' fill='${scheme.text}'
+  <text x='${pinCx}' y='${mainY + 14}' text-anchor='middle' font-size='11' font-weight='bold' fill='${scheme.text}'
         font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${escapeXml(mainText)}</text>
 
   ${addrText ? `
@@ -950,9 +968,9 @@ function createOrderIconWithLabel(order: any, orderETA?: any, isUnassigned: bool
 
   ${etaText ? `
   <!-- ETA 右上角小徽章 -->
-  <rect x='${badgeX + badgeWidthClamped + 3}' y='1' width='36' height='16' rx='8'
+  <rect x='${badgeX + badgeWidthClamped + 3}' y='${mainY + 1}' width='36' height='16' rx='8'
         fill='#FFD54F' stroke='#F57F17' stroke-width='0.8' filter='url(#s)'/>
-  <text x='${badgeX + badgeWidthClamped + 21}' y='13' text-anchor='middle' font-size='9.5' font-weight='bold' fill='#333'
+  <text x='${badgeX + badgeWidthClamped + 21}' y='${mainY + 13}' text-anchor='middle' font-size='9.5' font-weight='bold' fill='#333'
         font-family='-apple-system, "Segoe UI", Roboto, Arial, sans-serif'>${etaText}</text>
   ` : ''}
 
@@ -971,7 +989,11 @@ function escapeXml(s: string): string {
 
 // 辅助函数: 更新订单的图标
 function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: any[], orderETA?: any, isUnassigned: boolean = false) {
-  const iconUrl = createOrderIconWithLabel(order, orderETA, isUnassigned);
+  // 查这个订单分配给哪位司机
+  const asg = assignments.find(a => a.order_id === order.id);
+  const driverName = asg ? drivers.find(d => d.id === asg.driver_id)?.name : undefined;
+
+  const iconUrl = createOrderIconWithLabel(order, orderETA, isUnassigned, driverName);
 
   // 和 createOrderIconWithLabel 保持一致的尺寸计算
   const typeNames: Record<string, string> = { delivery: '送', pickup: '收', swap: '换', material: '料' };
@@ -992,11 +1014,16 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
   const addrText = extractAddr(order.address);
   const hasHinoFlag = /\bhino\b/i.test(order.customer_notes || '');
   const hasETA = !!(orderETA && orderETA.status === 'OK');
+  const driverShort = driverName
+    ? (driverName.length > 6 ? driverName.slice(0, 6) : driverName)
+    : '';
 
   const charW = (s: string) => s.split('').reduce((w, c) => w + (/[\u4e00-\u9fa5🗑🧱🪨🏗🛣]/.test(c) ? 13 : 6.5), 0);
-  const badgeWidth = Math.min(Math.max(Math.max(charW(mainText), charW(addrText)) + 12, 60), 170);
+  const driverW = driverShort ? charW('👤 ' + driverShort) + 10 : 0;
+  const badgeWidth = Math.min(Math.max(Math.max(charW(mainText), charW(addrText), driverW) + 12, 60), 170);
   const width = badgeWidth + (hasETA ? 42 : 6);
-  const height = 20 + (addrText ? 15 : 0) + (hasHinoFlag ? 14 : 0) + 12;
+  // 高度 = (司机条 12+1) + 主行 20 + 地址行 14 + HINO 13 + 图钉 12
+  const height = (driverShort ? 13 : 0) + 20 + (addrText ? 15 : 0) + (hasHinoFlag ? 14 : 0) + 12;
 
   marker.setIcon({
     url: iconUrl,
