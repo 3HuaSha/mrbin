@@ -528,7 +528,9 @@ export function FleetMapPage() {
   const syncDraft = useMutation({
     mutationFn: async () => {
       const entries = Object.values(draft);
-      if (entries.length === 0) return { created: 0, deleted: 0, reordered: 0 };
+      if (entries.length === 0 && draftManualSteps.length === 0 && deleteStepIds.length === 0) {
+        return { created: 0, deleted: 0, reordered: 0, manualSteps: 0, deletedSteps: 0 };
+      }
 
       // 1. 取消分配: draft 里 driverId=null 且原本有分配 → 删除 dispatch_assignment
       const toDelete: string[] = [];
