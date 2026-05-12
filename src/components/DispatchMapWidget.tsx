@@ -4,7 +4,7 @@ import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { supabase } from "@/integrations/supabase/client";
 import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES } from "@/lib/manual-step-locations";
 
-const KENNEDY_DEPOT = { lat: 43.7568, lng: -79.2865, label: "Kennedy Depot" };
+const KENNEDY_DEPOT = { lat: 43.816434, lng: -79.288219, label: "Kennedy Depot" };
 
 export function DispatchMapWidget({
   drivers, orders = [], assignments = [], driverETAs = {}, businessType = 'garbage',
@@ -240,17 +240,6 @@ export function DispatchMapWidget({
     
     infoWindowRef.current = new (window as any).google.maps.InfoWindow();
 
-    // 渲染基地的点
-    new (window as any).google.maps.Marker({
-      position: KENNEDY_DEPOT,
-      map: mapInstance.current,
-      icon: {
-        url: 'http://maps.google.com/mapfiles/kml/pal2/icon2.png',
-        scaledSize: new (window as any).google.maps.Size(24, 24)
-      },
-      title: "Kennedy Depot"
-    });
-    
     // 渲染所有手动步骤固定地点 (可拖拽到司机 → 创建手动步骤)
     MANUAL_STEP_LOCATIONS.forEach(location => {
       const marker = new (window as any).google.maps.Marker({
@@ -621,7 +610,10 @@ export function DispatchMapWidget({
       if (order.address && !newMarkers[id]) {
         newMarkers[id] = "pending"; // 占位
         
-        geocoder.geocode({ address: order.address + ", Toronto, ON, Canada" }, (results: any, status: any) => {
+        const geocodeAddress = order.address.toLowerCase().includes('on') 
+          ? order.address 
+          : `${order.address}, Toronto, ON, Canada`;
+        geocoder.geocode({ address: geocodeAddress }, (results: any, status: any) => {
           if (status === "OK" && results?.[0]) {
             const pos = results[0].geometry.location;
             
