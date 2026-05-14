@@ -118,6 +118,36 @@ export function OrdersPage() {
     refetchInterval: 15000,
   });
 
+  // 查询每个订单的"已送达"状态: customer_delivery 步骤 done 即视为已送达
+  const { data: orderDeliveredSet = new Set<string>() } = useQuery({
+    queryKey: ["order-delivered-status", from, to, businessType],
+    queryFn: async () => {
+      // 查找 customer_delivery 步骤已完成的 assignment
+      const { data, error } = await supabase
+        .from("job_steps")
+        .select("assignment_id")
+        .gte("scheduled_date", from)
+        .lte("scheduled_date", to)
+        .eq("step_type", "customer_delivery")
+        .eq("status", "done");
+      if (error) throw error;
+      if (!data || data.length === 0) return new Set<string>();
+
+      // 通过 assignment_id 找到 order_id
+      const assignmentIds = [...new Set(data.map(s => s.assignment_id).filter(Boolean))];
+      if (assignmentIds.length === 0) return new Set<string>();
+
+      const { data: assignments, error: aErr } = await supabase
+        .from("dispatch_assignments")
+        .select("order_id")
+        .in("id", assignmentIds);
+      if (aErr) throw aErr;
+
+      return new Set((assignments ?? []).map(a => a.order_id));
+    },
+    refetchInterval: 15000,
+  });
+
   const filtered = useMemo(() => {
     let list = orders;
     if (search.trim()) {
@@ -310,6 +340,7 @@ export function OrdersPage() {
                   typeLabel={tm.label}
                   binNumber={orderBinNumbers[main.id] || null}
                   childBinNumber={child ? (orderBinNumbers[child.id] || null) : null}
+                  isDelivered={orderDeliveredSet.has(main.id)}
                 />
               );
             })}
@@ -323,7 +354,7 @@ export function OrdersPage() {
 }
 
 function FragmentRow({
-  order, childOrder, businessType, open, childOpen, onToggle, onToggleChild, onEdit, onCancel, typeBadgeClass, typeLabel, binNumber, childBinNumber,
+  order, childOrder, businessType, open, childOpen, onToggle, onToggleChild, onEdit, onCancel, typeBadgeClass, typeLabel, binNumber, childBinNumber, isDelivered,
 }: {
   order: Order; childOrder?: Order; businessType: BusinessType;
   open: boolean; childOpen: boolean;
@@ -332,6 +363,7 @@ function FragmentRow({
   typeBadgeClass: string; typeLabel: string;
   binNumber: string | null;
   childBinNumber: string | null;
+  isDelivered: boolean;
 }) {
   // 桶类型中文映射
   const binTypeNames: Record<string, string> = {
@@ -350,11 +382,16 @@ function FragmentRow({
   };
   const brickOrderTypeLabel = order.brick_order_type ? brickOrderTypeLabels[order.brick_order_type] || order.brick_order_type : '—';
 
-  // 状态相关的行背景色: done -> 明显绿色, cancelled -> 灰 (区分于活跃订单)
+  // 状态相关的行背景色:
+  //   done -> 明显绿色
+  //   已送达 (customer_delivery done) 但订单未完全完成 -> 浅绿色
+  //   cancelled -> 灰
   const rowBgClass = order.status === "done"
     ? "bg-green-100 hover:bg-green-200 text-green-900"
     : order.status === "cancelled"
     ? "bg-gray-100 text-gray-400 hover:bg-gray-200 line-through"
+    : isDelivered
+    ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-900"
     : "hover:bg-accent/40";
 
   return (

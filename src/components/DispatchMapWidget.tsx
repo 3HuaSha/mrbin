@@ -57,6 +57,32 @@ export function DispatchMapWidget({
   // Ref for onLocationDrop so the map-init effect (runs once) can access latest callback
   const onLocationDropRef = useRef(onLocationDrop);
   onLocationDropRef.current = onLocationDrop;
+
+  // Geocode 缓存: 地址 → { lat, lng }, 避免重复调用 Geocoding API
+  // 使用 localStorage 持久化, 当天内切换页面/刷新都不会重新调用
+  const geocodeCacheRef = useRef<Record<string, { lat: number; lng: number }>>((() => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const raw = localStorage.getItem('geocode-cache');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // 只用当天的缓存, 过期的清掉
+        if (parsed._date === today) {
+          const { _date, ...rest } = parsed;
+          return rest;
+        }
+      }
+    } catch {}
+    return {};
+  })());
+
+  // 写入 localStorage 的辅助函数
+  const saveGeocodeCache = (cache: Record<string, { lat: number; lng: number }>) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      localStorage.setItem('geocode-cache', JSON.stringify({ _date: today, ...cache }));
+    } catch {}
+  };
   
   const [mapLoaded, setMapLoaded] = useState(false);
 
@@ -613,9 +639,60 @@ export function DispatchMapWidget({
         const geocodeAddress = order.address.toLowerCase().includes('on') 
           ? order.address 
           : `${order.address}, Toronto, ON, Canada`;
-        geocoder.geocode({ address: geocodeAddress }, (results: any, status: any) => {
+
+        // 检查 geocode 缓存
+        const cached = geocodeCacheRef.current[geocodeAddress];
+        if (cached) {
+          // 使用缓存的坐标直接创建 marker, 不调用 API
+          const pos = new (window as any).google.maps.LatLng(cached.lat, cached.lng);
+          const isDraggable = draggableOrderSet.has(order.id) && (!!onAssignOrder || !!onUnassignOrder);
+          const marker = new (window as any).google.maps.Marker({
+            map: mapInstance.current,
+            position: pos,
+            title: order.order_number || order.id,
+            zIndex: 500,
+            draggable: isDraggable,
+            cursor: isDraggable ? "grab" : undefined,
+          });
+          if (isDraggable) {
+            marker._originalPos = { lat: cached.lat, lng: cached.lng };
+          }
+          updateOrderIcon(marker, order, assignments, drivers, orderETA, unassignedOrderSet.has(order.id));
+          attachOrderDragHandlers(marker, order);
+          marker.addListener('click', () => {
+            if (!infoWindowRef.current) return;
+            const driverName = assignments.find(a => a.order_id === order.id)?.driver_id 
+              ? drivers.find(d => d.id === assignments.find(a => a.order_id === order.id)?.driver_id)?.name 
+              : "未分配";
+            const timeDisplay = order.time_window_custom || order.time_window || '—';
+            const binTypeNames: Record<string, string> = { 'garbage': '垃圾桶', 'brick': '砖桶', 'soil': '土桶', 'cement': '水泥桶', 'asphalt': '沥青桶' };
+            const binTypeName = binTypeNames[order.bin_type] || '—';
+            const etaInfo = orderETA && orderETA.status === 'OK' 
+              ? `<div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">预计到达:</span> <span style="color:#2196F3;margin-left:4px;">${new Date(orderETA.eta).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span></div>` : '';
+            infoWindowRef.current.setContent(`
+              <div style="padding:8px;font-size:12px;color:black;min-width:180px;">
+                <div style="font-weight:bold;font-size:14px;margin-bottom:6px;color:#333;">${order.order_number || order.id}</div>
+                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">类型:</span> <span style="color:#2196F3;margin-left:4px;">${order.type}</span></div>
+                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">桶类型:</span> <span style="color:#FF5722;margin-left:4px;">${binTypeName}</span></div>
+                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">尺寸:</span> <span style="color:#4CAF50;margin-left:4px;">${order.bin_size || '—'}</span></div>
+                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">时段:</span> <span style="color:#9C27B0;margin-left:4px;">${timeDisplay}</span></div>
+                ${etaInfo}
+                <div style="margin-bottom:6px;"><span style="font-weight:bold;color:#666;">地址:</span> <div style="color:#333;margin-top:2px;font-size:11px;">${order.address}</div></div>
+                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">驾驶员:</span> <span style="color:#FF9800;margin-left:4px;">${driverName}</span></div>
+              </div>
+            `);
+            infoWindowRef.current.open(mapInstance.current, marker);
+          });
+          markersRef.current[id] = marker;
+          newMarkers[id] = marker;
+        } else {
+          // 没有缓存, 调用 Geocoding API
+          geocoder.geocode({ address: geocodeAddress }, (results: any, status: any) => {
           if (status === "OK" && results?.[0]) {
             const pos = results[0].geometry.location;
+            // 缓存 geocode 结果
+            geocodeCacheRef.current[geocodeAddress] = { lat: pos.lat(), lng: pos.lng() };
+            saveGeocodeCache(geocodeCacheRef.current);
             
             const isDraggable = draggableOrderSet.has(order.id) && (!!onAssignOrder || !!onUnassignOrder);
             const marker = new (window as any).google.maps.Marker({
@@ -698,6 +775,7 @@ export function DispatchMapWidget({
             console.warn(`地址解析失败: ${order.order_number} - ${order.address}`);
           }
         });
+        } // end else (no cache)
       }
     });
 
