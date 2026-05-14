@@ -351,23 +351,24 @@ export function FleetMapPage() {
   // 按司机分组任务步骤 (已应用本地 draft: 订单节点部分)
   //   - 手动步骤 (node_type='step') 保持服务器数据
   //   - 订单节点 (node_type='order') 根据 merged.assigned 重新生成, 保证和地图一致
+  //   - 本地 draft 手动步骤按 index 插入到正确位置
   const driverJobSteps = useMemo(() => {
     const map: Record<string, JobStep[]> = {};
 
-    // 1. 手动步骤先放进去 (排除已标记删除的)
+    // 1. 先按司机收集已有的手动步骤 (排除已标记删除的)
+    const existingManualSteps: Record<string, JobStep[]> = {};
     jobSteps.forEach(step => {
       if (step.node_type === 'step' && !deleteStepIds.includes(step.id)) {
-        (map[step.driver_id] ??= []).push(step);
+        (existingManualSteps[step.driver_id] ??= []).push(step);
       }
     });
 
-    // 2. 订单节点按 merged 重新生成 (假 JobStep, 只需足够渲染)
+    // 2. 按司机构建统一列表: 先把订单节点按 merged 顺序放入, 再把手动步骤插入正确位置
     Object.entries(merged.assigned).forEach(([driverId, orderIds]) => {
-      const arr = map[driverId] ??= [];
+      const arr: JobStep[] = [];
       orderIds.forEach((orderId, idx) => {
         const order = orderById.get(orderId);
         if (!order) return;
-        // 找原始 step 来复用 id/状态 (若有)
         const originalStep = jobSteps.find(
           s => s.node_type === 'order' && s.order_id === orderId && s.driver_id === driverId
         );
@@ -387,17 +388,37 @@ export function FleetMapPage() {
           orders: order,
         } as JobStep);
       });
+      map[driverId] = arr;
     });
 
-    // 3. 本地 draft 手动步骤也加进来 (显示为"待同步"卡片)
+    // 3. 把已有的手动步骤按 step_number 插入到对应司机列表中
+    //    使用 step_number 来确定相对位置
+    Object.entries(existingManualSteps).forEach(([driverId, steps]) => {
+      const arr = map[driverId] ??= [];
+      steps.forEach(step => {
+        // 找到插入位置: step_number 表示它在所有步骤中的位置
+        // 插入到第一个 step_number >= 当前 step 的位置之前
+        let insertIdx = arr.length; // 默认放末尾
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i].step_number >= step.step_number && arr[i].node_type === 'order') {
+            insertIdx = i;
+            break;
+          }
+        }
+        arr.splice(insertIdx, 0, step);
+      });
+    });
+
+    // 4. 本地 draft 手动步骤按 index 插入到正确位置
+    //    index 表示在该司机列表中的插入位置 (0 = 最前面)
     draftManualSteps.forEach(ms => {
       const arr = map[ms.driverId] ??= [];
-      const stepTypeLabels: Record<string, string> = { dump_waste: '倒垃圾', pickup_bin: '取桶', drop_bin: '放桶' };
-      arr.push({
+      const insertIdx = Math.min(ms.index, arr.length);
+      const newStep = {
         id: ms.id,
         driver_id: ms.driverId,
         scheduled_date: date,
-        step_number: 999, // 放最后
+        step_number: insertIdx + 1, // 临时编号, 同步时会重新计算
         order_id: null,
         assignment_id: null,
         node_type: 'step',
@@ -406,27 +427,90 @@ export function FleetMapPage() {
         bin_id: null,
         notes: ms.notes || null,
         status: 'locked',
-      } as JobStep);
+      } as JobStep;
+      arr.splice(insertIdx, 0, newStep);
     });
 
-    // 4. 每个司机的列表按 step_number 排序 (订单在本来的位置, 手动步骤夹在中间)
-    Object.values(map).forEach(arr => arr.sort((a, b) => a.step_number - b.step_number));
+    // 5. 重新编号 step_number (保证连续, 用于 ETA 计算等)
+    Object.values(map).forEach(arr => {
+      arr.forEach((step, i) => { step.step_number = i + 1; });
+    });
+
+    // 确保没有任务的司机也有空数组
+    filteredDrivers.forEach(d => { map[d.id] ??= []; });
+
     return map;
-  }, [jobSteps, merged.assigned, orderById, date, draftManualSteps, deleteStepIds]);
+  }, [jobSteps, merged.assigned, orderById, date, draftManualSteps, deleteStepIds, filteredDrivers]);
 
   // 本地拖拽: 更新 draft. 不立即写库.
+  //   orderId 可以是订单 id 或 "step:xxx" 格式的手动步骤 id
   //   driverId = null → 取消分配
   //   driverId = 'xxx' → 放到该司机的 index 位置 (index undefined 时放最后)
+  //   index 是统一列表中的位置 (包含订单和手动步骤)
   const stageAssignment = (orderId: string, driverId: string | null, index?: number) => {
+    // 如果是手动步骤的拖拽重排
+    if (orderId.startsWith("step:")) {
+      const stepId = orderId.slice(5);
+      if (driverId === null) {
+        // 拖到地图 = 删除 (已在 onDrop 处理)
+        return;
+      }
+      // 手动步骤重排: 更新 draftManualSteps 的 index 或已有步骤的 step_number
+      const isDraftStep = stepId.startsWith("draft-step-");
+      if (isDraftStep) {
+        // 更新 draft 步骤的 index
+        setDraftManualSteps(prev => {
+          const stepIdx = prev.findIndex(s => s.id === stepId);
+          if (stepIdx < 0) return prev;
+          const updated = [...prev];
+          const [moved] = updated.splice(stepIdx, 1);
+          moved.driverId = driverId;
+          moved.index = index ?? 999;
+          return [...updated, moved];
+        });
+      } else {
+        // 已有步骤: 需要更新 step_number, 暂时通过 deleteStepIds + draftManualSteps 实现
+        const existingStep = jobSteps.find(s => s.id === stepId);
+        if (existingStep) {
+          // 标记旧的为删除
+          setDeleteStepIds(prev => prev.includes(stepId) ? prev : [...prev, stepId]);
+          // 创建新的 draft 步骤在目标位置
+          const newDraft: DraftManualStep = {
+            id: `draft-step-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            driverId,
+            location: existingStep.location || '',
+            stepType: existingStep.step_type,
+            notes: existingStep.notes || '',
+            index: index ?? 999,
+          };
+          setDraftManualSteps(prev => [...prev, newDraft]);
+        }
+      }
+      return;
+    }
+
     setDraft(prev => {
       const next = { ...prev };
 
+      // 需要把统一 index 转换为订单序列中的 index
+      // 因为 merged.assigned 只跟踪订单, 不包含手动步骤
+      let orderIndex = index;
+      if (driverId && index !== undefined) {
+        // 统一列表中 index 位置之前有多少个订单节点 = 订单序列中的 index
+        const steps = driverJobSteps[driverId] ?? [];
+        let orderCount = 0;
+        for (let i = 0; i < Math.min(index, steps.length); i++) {
+          if (steps[i].node_type === 'order' && steps[i].order_id !== orderId) {
+            orderCount++;
+          }
+        }
+        orderIndex = orderCount;
+      }
+
       // 计算目标位置: 如果没指定 index 就放末尾
-      let targetIndex = index ?? 0;
+      let targetIndex = orderIndex ?? 0;
       if (driverId && index === undefined) {
         targetIndex = (merged.assigned[driverId] ?? []).length;
-        // 但 merged 已经反映了 draft, 所以放末尾意思是"现有列表长度"
-        // 如果这个 order 原本就在这个司机的列表里, 得减 1 (因为会被移除再插入)
         if ((merged.assigned[driverId] ?? []).includes(orderId)) {
           targetIndex = Math.max(0, targetIndex - 1);
         }
@@ -435,7 +519,6 @@ export function FleetMapPage() {
       // 检查是否与"服务器当前状态"一致 → 是的话把 draft 条目清掉, 避免 pending 变更堆积
       const serverCurrent = serverAssignments.find(a => a.order_id === orderId);
       const serverDriverId = serverCurrent?.driver_id ?? null;
-      // 服务器上这个司机里这个订单的索引
       let serverIndex: number | null = null;
       if (serverCurrent) {
         const serverSiblings = serverAssignments
@@ -445,7 +528,6 @@ export function FleetMapPage() {
       }
 
       if (driverId === serverDriverId && driverId !== null && targetIndex === serverIndex) {
-        // 和服务器完全一致, 清掉这条 draft
         delete next[orderId];
       } else if (driverId === null && serverDriverId === null) {
         delete next[orderId];
@@ -647,24 +729,32 @@ export function FleetMapPage() {
           .eq("node_type", "order");
       }
 
-      // 4. 插入手动步骤 (draftManualSteps)
+      // 4. 插入手动步骤 (draftManualSteps) - 按 index 插入到正确位置
       for (const ms of draftManualSteps) {
-        // 计算该司机当天的下一个 step_number
+        // 获取该司机当天所有步骤 (包括刚插入的)
         const { data: existingSteps } = await supabase
           .from("job_steps")
-          .select("step_number")
+          .select("id, step_number")
           .eq("driver_id", ms.driverId)
           .eq("scheduled_date", date)
-          .order("step_number", { ascending: false })
-          .limit(1);
-        const nextStepNum = existingSteps && existingSteps.length > 0
-          ? existingSteps[0].step_number + 1
-          : 1;
+          .order("step_number", { ascending: true });
+
+        const allSteps = existingSteps || [];
+        // 计算插入位置: index 是统一列表中的位置
+        const targetStepNum = Math.min(ms.index + 1, allSteps.length + 1);
+
+        // 把目标位置及之后的步骤编号都 +1
+        const stepsToShift = allSteps.filter(s => s.step_number >= targetStepNum);
+        for (const s of stepsToShift.reverse()) {
+          await supabase.from("job_steps")
+            .update({ step_number: s.step_number + 1 })
+            .eq("id", s.id);
+        }
 
         const { error: msErr } = await supabase.from("job_steps").insert({
           driver_id: ms.driverId,
           scheduled_date: date,
-          step_number: nextStepNum,
+          step_number: targetStepNum,
           node_type: "step",
           location: ms.location,
           step_type: ms.stepType,
@@ -917,8 +1007,10 @@ export function FleetMapPage() {
                   onDrop={(e) => {
                     // 如果没落在具体的 DropIndicator 上, 就放到末尾
                     e.preventDefault();
-                    const orderId = e.dataTransfer.getData("text/plain");
-                    if (orderId) stageAssignment(orderId, d.id);
+                    const raw = e.dataTransfer.getData("text/plain");
+                    if (!raw) return;
+                    // 支持手动步骤和订单的拖拽
+                    stageAssignment(raw, d.id);
                     setDropHoverDriverId(null);
                   }}
                   className={`border rounded-md overflow-hidden bg-card transition-all ${
@@ -959,10 +1051,9 @@ export function FleetMapPage() {
                   
                   {isExpanded && (
                     <div className="p-2 space-y-1.5 border-t bg-muted/10">
-                      {/* 计算: 这个司机下, 每个订单节点在"订单序列"中的 index, 用于 drop 指示 */}
+                      {/* 统一索引: 每个节点 (订单/手动步骤) 之间都有 DropIndicator */}
                       {(() => {
-                        const orderList = merged.assigned[d.id] ?? [];
-                        let orderIdx = 0; // 在 orderList 里的位置
+                        let stepIdx = 0; // 统一列表中的位置
                         const isHovered = dropHoverDriverId === d.id;
 
                         // 顶部插入点
@@ -1043,25 +1134,27 @@ export function FleetMapPage() {
                                   </div>
                                 </div>
                               );
-                              // 每张订单卡片后面插入一个 drop point (index = orderIdx + 1)
-                              orderIdx += 1;
+                              // 每张卡片后面插入一个 drop point (统一 index)
+                              stepIdx += 1;
                               items.push(
                                 <div key={`ind-${step.id}`}>
                                   <DropIndicator
                                     driverId={d.id}
-                                    index={orderIdx}
-                                    active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === orderIdx}
+                                    index={stepIdx}
+                                    active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === stepIdx}
                                     onDrop={(orderId, dId, idx) => stageAssignment(orderId, dId, idx)}
                                   />
                                 </div>
                               );
                             } else {
-                              // 手动步骤节点卡片 (不作为可插入位置)
+                              // 手动步骤节点卡片
                               const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
                               const isDraftStep = step.id.startsWith('draft-step-');
                               const isMarkedForDelete = deleteStepIds.includes(step.id);
                               // 已标记删除的不显示
-                              if (isMarkedForDelete) return;
+                              if (isMarkedForDelete) {
+                                return;
+                              }
                               items.push(
                                 <div
                                   key={step.id}
@@ -1069,9 +1162,14 @@ export function FleetMapPage() {
                                   onDragStart={(e) => {
                                     e.dataTransfer.setData("text/plain", `step:${step.id}`);
                                     e.dataTransfer.effectAllowed = "move";
+                                    setSidebarDragOrderId(`step:${step.id}`);
                                   }}
-                                  onDragEnd={() => {}}
-                                  className={`relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg cursor-grab active:cursor-grabbing ${isDraftStep ? "ring-1 ring-amber-400" : ""}`}
+                                  onDragEnd={() => {
+                                    setSidebarDragOrderId(null);
+                                    setDropHoverDriverId(null);
+                                    setDropPosition(null);
+                                  }}
+                                  className={`relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg cursor-grab active:cursor-grabbing ${isDraftStep ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === "step:" + step.id ? "opacity-40" : ""}`}
                                 >
                                   {isDraftStep && (
                                     <div className="absolute top-1 right-1 text-[8px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-1">
@@ -1095,6 +1193,18 @@ export function FleetMapPage() {
                                       </div>
                                     )}
                                   </div>
+                                </div>
+                              );
+                              // 手动步骤后面也插入 drop point
+                              stepIdx += 1;
+                              items.push(
+                                <div key={`ind-step-${step.id}`}>
+                                  <DropIndicator
+                                    driverId={d.id}
+                                    index={stepIdx}
+                                    active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === stepIdx}
+                                    onDrop={(orderId, dId, idx) => stageAssignment(orderId, dId, idx)}
+                                  />
                                 </div>
                               );
                             }
@@ -1249,9 +1359,10 @@ function DropIndicator({
       onDragLeave={() => setIsOver(false)}
       onDrop={(e) => {
         e.preventDefault();
+        e.stopPropagation(); // 防止冒泡到父级 driver card 的 onDrop
         setIsOver(false);
-        const orderId = e.dataTransfer.getData("text/plain");
-        if (orderId && onDrop) onDrop(orderId, driverId, index);
+        const raw = e.dataTransfer.getData("text/plain");
+        if (raw && onDrop) onDrop(raw, driverId, index);
       }}
       className={`rounded-full transition-all my-0.5 ${
         active || isOver ? "bg-primary h-2 shadow-md shadow-primary/50" : "bg-transparent h-1.5"
