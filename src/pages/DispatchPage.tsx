@@ -1035,7 +1035,7 @@ function OrderNodeDisplay({
       className={cn(
         "group relative rounded-lg border-l-4 shadow-md p-2.5 transition-all duration-300 hover:shadow-xl hover:scale-105 hover:z-10 w-[180px] shrink-0",
         isDone 
-          ? "border-l-status-done bg-status-done/10" 
+          ? "border-l-green-600 bg-green-100" 
           : "border-l-blue-500 bg-card",
         onClick && "cursor-pointer"
       )}
@@ -1046,7 +1046,7 @@ function OrderNodeDisplay({
           <div className="text-xs font-semibold leading-tight">
             {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
           </div>
-          {isDone && <CheckCircle2 className="h-4 w-4 text-status-done" />}
+          {isDone && <CheckCircle2 className="h-4 w-4 text-green-600" />}
         </div>
         <div className="text-[10px] text-muted-foreground leading-snug break-words" title={order.address}>
           {order.address}
@@ -1116,7 +1116,7 @@ function StepNodeDisplay({
       className={cn(
         "group relative rounded-lg border-l-4 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[150px] shrink-0",
         isDone 
-          ? "border-l-status-done bg-status-done/10" 
+          ? "border-l-green-600 bg-green-100" 
           : "border-l-gray-400 bg-card/80",
         onClick && "cursor-pointer"
       )}
@@ -1125,7 +1125,7 @@ function StepNodeDisplay({
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
           <Badge variant="outline" className="text-[8px] w-fit">手动步骤</Badge>
-          {isDone && <CheckCircle2 className="h-3 w-3 text-status-done" />}
+          {isDone && <CheckCircle2 className="h-3 w-3 text-green-600" />}
         </div>
         <div className="text-[11px] font-semibold">
           {stepLabel}

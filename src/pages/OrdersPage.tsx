@@ -299,11 +299,11 @@ function FragmentRow({
   };
   const brickOrderTypeLabel = order.brick_order_type ? brickOrderTypeLabels[order.brick_order_type] || order.brick_order_type : '—';
 
-  // 状态相关的行背景色: done -> 浅绿, cancelled -> 灰 (区分于活跃订单)
+  // 状态相关的行背景色: done -> 明显绿色, cancelled -> 灰 (区分于活跃订单)
   const rowBgClass = order.status === "done"
-    ? "bg-green-50 hover:bg-green-100"
+    ? "bg-green-100 hover:bg-green-200 text-green-900"
     : order.status === "cancelled"
-    ? "bg-gray-100 text-gray-400 hover:bg-gray-200"
+    ? "bg-gray-100 text-gray-400 hover:bg-gray-200 line-through"
     : "hover:bg-accent/40";
 
   return (

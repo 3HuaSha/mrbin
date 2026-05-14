@@ -44,8 +44,8 @@ export const ORDER_STATUS_CLASS: Record<string, string> = {
   pending: "bg-muted text-muted-foreground",
   assigned: "bg-status-assigned/15 text-status-assigned border border-status-assigned/30",
   in_progress: "bg-status-progress/15 text-status-progress border border-status-progress/30",
-  done: "bg-status-done/15 text-status-done border border-status-done/30",
-  cancelled: "bg-status-cancelled/15 text-status-cancelled border border-status-cancelled/30",
+  done: "bg-green-100 text-green-800 border border-green-400 font-semibold",
+  cancelled: "bg-gray-200 text-gray-500 border border-gray-400 line-through",
 };
 
 export const STEP_TYPE_LABEL: Record<string, string> = {
