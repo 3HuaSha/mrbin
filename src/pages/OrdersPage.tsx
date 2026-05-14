@@ -69,6 +69,7 @@ export function OrdersPage() {
       if (error) throw error;
       return (data ?? []) as Order[];
     },
+    refetchInterval: 15000, // 每15秒自动刷新, 及时反映司机完成状态
   });
 
   const filtered = useMemo(() => {

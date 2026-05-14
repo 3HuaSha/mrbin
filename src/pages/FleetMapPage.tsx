@@ -124,12 +124,34 @@ export function FleetMapPage() {
 
   const hasDraft = Object.keys(draft).length > 0 || draftManualSteps.length > 0 || deleteStepIds.length > 0;
 
+  // 刚展开的司机 id, 用于触发滚动到当前进行中的任务
+  const [justExpandedDriverId, setJustExpandedDriverId] = useState<string | null>(null);
+
   const toggleDriver = (id: string) => {
     const next = new Set(expandedDrivers);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(id)) {
+      next.delete(id);
+      setJustExpandedDriverId(null);
+    } else {
+      next.add(id);
+      setJustExpandedDriverId(id);
+    }
     setExpandedDrivers(next);
   };
+
+  // 展开司机后自动滚动到当前进行中的任务卡片
+  useEffect(() => {
+    if (!justExpandedDriverId) return;
+    // 延迟一帧等 DOM 渲染完成
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-current-step="${justExpandedDriverId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      setJustExpandedDriverId(null);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [justExpandedDriverId]);
 
   // 拖拽悬停时自动展开司机, 这样用户可以看到任务卡片间的插入位置
   useEffect(() => {
@@ -185,6 +207,7 @@ export function FleetMapPage() {
       
       return filtered as unknown as JobStep[];
     },
+    refetchInterval: 15000, // 每15秒自动刷新, 及时反映司机完成状态
   });
   
   // 获取当日所有订单（包括未分配的），用于在地图上显示未排班订单
@@ -209,6 +232,7 @@ export function FleetMapPage() {
         return true;
       }) as Order[];
     },
+    refetchInterval: 15000, // 与 jobSteps 同步刷新
   });
   const orders = useMemo(() => {
     // 合并已分配订单和全部当日订单 - 这样地图上能看到即使没有分配的订单
@@ -1054,6 +1078,7 @@ export function FleetMapPage() {
                       {/* 统一索引: 每个节点 (订单/手动步骤) 之间都有 DropIndicator */}
                       {(() => {
                         let stepIdx = 0; // 统一列表中的位置
+                        let foundCurrentStep = false; // 是否已找到第一个未完成的步骤
                         const isHovered = dropHoverDriverId === d.id;
 
                         // 顶部插入点
@@ -1087,12 +1112,21 @@ export function FleetMapPage() {
                               const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
                               // 这个卡片是否为本地 draft 新增 / 变动
                               const isDraft = !!draft[order.id];
+                              // 订单/步骤完成状态
+                              const isDone = step.status === 'done' || order.status === 'done';
+                              const isInProgress = !isDone && (step.status === 'pending' || order.status === 'in_progress');
+
+                              // 标记第一个未完成的步骤 (用于展开时自动滚动)
+                              const isCurrentStep = !isDone && !foundCurrentStep;
+                              if (isCurrentStep) foundCurrentStep = true;
 
                               items.push(
                                 <div
                                   key={step.id}
-                                  draggable
+                                  {...(isCurrentStep ? { "data-current-step": d.id } : {})}
+                                  draggable={!isDone}
                                   onDragStart={(e) => {
+                                    if (isDone) { e.preventDefault(); return; }
                                     e.dataTransfer.setData("text/plain", order.id);
                                     e.dataTransfer.effectAllowed = "move";
                                     setSidebarDragOrderId(order.id);
@@ -1102,11 +1136,22 @@ export function FleetMapPage() {
                                     setDropHoverDriverId(null);
                                     setDropPosition(null);
                                   }}
-                                  className={`relative rounded-lg border-l-4 border-l-blue-500 bg-card shadow-md p-2.5 transition-all duration-300 hover:shadow-xl cursor-grab active:cursor-grabbing ${
-                                    isDraft ? "ring-1 ring-amber-400" : ""
-                                  } ${sidebarDragOrderId === order.id ? "opacity-40" : ""}`}
+                                  className={`relative rounded-lg border-l-4 ${
+                                    isDone
+                                      ? "border-l-green-500 bg-green-50"
+                                      : isInProgress
+                                      ? "border-l-amber-500 bg-amber-50/30"
+                                      : "border-l-blue-500 bg-card"
+                                  } shadow-md p-2.5 transition-all duration-300 hover:shadow-xl ${
+                                    isDone ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+                                  } ${isDraft ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === order.id ? "opacity-40" : ""}`}
                                 >
-                                  {isDraft && (
+                                  {isDone && (
+                                    <div className="absolute top-1 right-1 text-[8px] text-green-700 bg-green-100 border border-green-300 rounded px-1">
+                                      ✓ 完成
+                                    </div>
+                                  )}
+                                  {isDraft && !isDone && (
                                     <div className="absolute top-1 right-1 text-[8px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-1">
                                       待同步
                                     </div>
@@ -1151,15 +1196,22 @@ export function FleetMapPage() {
                               const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
                               const isDraftStep = step.id.startsWith('draft-step-');
                               const isMarkedForDelete = deleteStepIds.includes(step.id);
+                              const isStepDone = step.status === 'done';
                               // 已标记删除的不显示
                               if (isMarkedForDelete) {
                                 return;
                               }
+                              // 标记第一个未完成的步骤
+                              const isCurrentStep = !isStepDone && !foundCurrentStep;
+                              if (isCurrentStep) foundCurrentStep = true;
+
                               items.push(
                                 <div
                                   key={step.id}
-                                  draggable
+                                  {...(isCurrentStep ? { "data-current-step": d.id } : {})}
+                                  draggable={!isStepDone}
                                   onDragStart={(e) => {
+                                    if (isStepDone) { e.preventDefault(); return; }
                                     e.dataTransfer.setData("text/plain", `step:${step.id}`);
                                     e.dataTransfer.effectAllowed = "move";
                                     setSidebarDragOrderId(`step:${step.id}`);
@@ -1169,9 +1221,20 @@ export function FleetMapPage() {
                                     setDropHoverDriverId(null);
                                     setDropPosition(null);
                                   }}
-                                  className={`relative rounded-lg border-l-4 border-l-gray-400 bg-card/80 shadow-sm p-2 transition-all duration-300 hover:shadow-lg cursor-grab active:cursor-grabbing ${isDraftStep ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === "step:" + step.id ? "opacity-40" : ""}`}
+                                  className={`relative rounded-lg border-l-4 ${
+                                    isStepDone
+                                      ? "border-l-green-500 bg-green-50"
+                                      : "border-l-gray-400 bg-card/80"
+                                  } shadow-sm p-2 transition-all duration-300 hover:shadow-lg ${
+                                    isStepDone ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+                                  } ${isDraftStep ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === "step:" + step.id ? "opacity-40" : ""}`}
                                 >
-                                  {isDraftStep && (
+                                  {isStepDone && (
+                                    <div className="absolute top-1 right-1 text-[8px] text-green-700 bg-green-100 border border-green-300 rounded px-1">
+                                      ✓ 完成
+                                    </div>
+                                  )}
+                                  {isDraftStep && !isStepDone && (
                                     <div className="absolute top-1 right-1 text-[8px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-1">
                                       待同步
                                     </div>
