@@ -588,211 +588,159 @@ export function DispatchMapWidget({
         }
       });
     };
-    
-    orders.forEach(order => {
-      if (order.status === 'done' || order.completed) {
-        return; // 隐藏已完成
-      }
 
-      const id = "order_" + order.id;
-      
-      // 查找该订单的ETA信息
-      let orderETA = null;
-      for (const driverId in driverETAs) {
-        const eta = driverETAs[driverId];
-        const found = eta?.orders?.find((o: any) => o.orderId === order.id);
-        if (found) {
-          orderETA = found;
-          break;
+    // ===== 按地址聚合订单: 同一地址多个订单只显示一个 cluster marker =====
+    const activeOrders = orders.filter(o => o.status !== 'done' && !o.completed);
+    // 按 geocode 地址 key 分组
+    const ordersByAddress: Record<string, any[]> = {};
+    activeOrders.forEach(order => {
+      if (!order.address) return;
+      const geoAddr = order.address.toLowerCase().includes('on') ? order.address : `${order.address}, Toronto, ON, Canada`;
+      (ordersByAddress[geoAddr] ??= []).push(order);
+    });
+
+    // 辅助: 创建单个订单 marker 的 click handler
+    const makeOrderClickHandler = (marker: any, order: any, orderETA: any) => () => {
+      if (!infoWindowRef.current) return;
+      const dn = assignments.find((a: any) => a.order_id === order.id)?.driver_id
+        ? drivers.find((d: any) => d.id === assignments.find((a: any) => a.order_id === order.id)?.driver_id)?.name : "未分配";
+      const td = order.time_window_custom || order.time_window || '—';
+      const btnm: Record<string, string> = { garbage: '垃圾桶', brick: '砖桶', soil: '土桶', cement: '水泥桶', asphalt: '沥青桶' };
+      const bn = btnm[order.bin_type] || '—';
+      const eta = orderETA && orderETA.status === 'OK'
+        ? `<div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">预计到达:</span> <span style="color:#2196F3;margin-left:4px;">${new Date(orderETA.eta).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span></div>` : '';
+      infoWindowRef.current.setContent(`<div style="padding:8px;font-size:12px;color:black;min-width:180px;"><div style="font-weight:bold;font-size:14px;margin-bottom:6px;color:#333;">${order.order_number || order.id}</div><div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">类型:</span> <span style="color:#2196F3;margin-left:4px;">${order.type}</span></div><div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">桶类型:</span> <span style="color:#FF5722;margin-left:4px;">${bn}</span></div><div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">尺寸:</span> <span style="color:#4CAF50;margin-left:4px;">${order.bin_size || '—'}</span></div><div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">时段:</span> <span style="color:#9C27B0;margin-left:4px;">${td}</span></div>${eta}<div style="margin-bottom:6px;"><span style="font-weight:bold;color:#666;">地址:</span><div style="color:#333;margin-top:2px;font-size:11px;">${order.address}</div></div><div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">驾驶员:</span> <span style="color:#FF9800;margin-left:4px;">${dn}</span></div></div>`);
+      infoWindowRef.current.open(mapInstance.current, marker);
+    };
+
+    // 辅助: 创建聚合 marker 的 click handler
+    const makeClusterClickHandler = (marker: any) => () => {
+      if (!infoWindowRef.current) return;
+      const clusterOrders = marker._clusterOrders || [];
+      const ordersHtml = clusterOrders.map((o: any) => {
+        const tm = o.type === 'delivery' ? '送桶' : o.type === 'pickup' ? '收桶' : o.type === 'swap' ? '换桶' : o.type;
+        const asg = assignments.find((a: any) => a.order_id === o.id);
+        const dn = asg ? drivers.find((d: any) => d.id === asg.driver_id)?.name || '已分配' : '未分配';
+        const td = o.time_window_custom || o.time_window || '';
+        const sc = asg ? '#4CAF50' : '#FF9800';
+        return `<div style="padding:6px 0;border-bottom:1px solid #eee;"><div style="font-weight:bold;font-size:12px;color:#333;">${o.order_number} · ${tm} ${o.bin_size ? o.bin_size + 'yd' : ''}</div><div style="font-size:10px;color:#666;margin-top:2px;">${td} · <span style="color:${sc}">${dn}</span></div></div>`;
+      }).join('');
+      infoWindowRef.current.setContent(`<div style="padding:8px;font-size:12px;color:black;min-width:220px;max-height:300px;overflow-y:auto;"><div style="font-weight:bold;font-size:13px;margin-bottom:8px;color:#333;border-bottom:2px solid #2196F3;padding-bottom:4px;">📍 ${clusterOrders[0]?.address || ''}</div><div style="font-size:11px;color:#666;margin-bottom:6px;">${clusterOrders.length} 个订单</div>${ordersHtml}</div>`);
+      infoWindowRef.current.open(mapInstance.current, marker);
+    };
+
+    Object.entries(ordersByAddress).forEach(([geocodeAddress, groupOrders]) => {
+      const isCluster = groupOrders.length > 1;
+      const clusterId = `cluster_${geocodeAddress}`;
+
+      // --- 单个订单: 保持原有逻辑 ---
+      if (!isCluster) {
+        const order = groupOrders[0];
+        const id = "order_" + order.id;
+        let orderETA = null;
+        for (const did in driverETAs) {
+          const f = driverETAs[did]?.orders?.find((o: any) => o.orderId === order.id);
+          if (f) { orderETA = f; break; }
         }
-      }
-      
-      // 已有 marker
-      if (markersRef.current[id]) {
-        const marker = markersRef.current[id];
-        if (marker !== "pending") {
-           // 确保重新挂到地图上 (业务类型切换后可能被 setMap(null) 过)
-           if (marker.getMap && !marker.getMap()) {
-             marker.setMap(mapInstance.current);
-           }
-           updateOrderIcon(marker, order, assignments, drivers, orderETA, unassignedOrderSet.has(order.id));
-           // 动态更新 draggable: 分配后不能再拖, 未分配可拖
-           const shouldBeDraggable = draggableOrderSet.has(order.id) && (!!onAssignOrder || !!onUnassignOrder);
-           if (marker.getDraggable && marker.getDraggable() !== shouldBeDraggable) {
-             marker.setDraggable(shouldBeDraggable);
-           }
-           // 给可拖拽订单单独存一份原始坐标, 松手后要回弹
-           if (shouldBeDraggable && marker.getPosition && !marker._originalPos) {
-             const p = marker.getPosition();
-             marker._originalPos = { lat: p.lat(), lng: p.lng() };
-           }
-           attachOrderDragHandlers(marker, order);
+        // 已有 marker → 复用
+        if (markersRef.current[id] && markersRef.current[id] !== "pending") {
+          const marker = markersRef.current[id];
+          if (marker.getMap && !marker.getMap()) marker.setMap(mapInstance.current);
+          updateOrderIcon(marker, order, assignments, drivers, orderETA, unassignedOrderSet.has(order.id));
+          const shouldDrag = draggableOrderSet.has(order.id) && (!!onAssignOrder || !!onUnassignOrder);
+          if (marker.getDraggable && marker.getDraggable() !== shouldDrag) marker.setDraggable(shouldDrag);
+          if (shouldDrag && marker.getPosition && !marker._originalPos) { const p = marker.getPosition(); marker._originalPos = { lat: p.lat(), lng: p.lng() }; }
+          attachOrderDragHandlers(marker, order);
+          newMarkers[id] = marker;
+          return;
         }
-        newMarkers[id] = marker;
-        return;
-      }
-
-      // 如果没有 marker，需要解析地址并创建
-      if (order.address && !newMarkers[id]) {
-        newMarkers[id] = "pending"; // 占位
-        
-        const geocodeAddress = order.address.toLowerCase().includes('on') 
-          ? order.address 
-          : `${order.address}, Toronto, ON, Canada`;
-
-        // 检查 geocode 缓存
+        // 需要创建
         const cached = geocodeCacheRef.current[geocodeAddress];
         if (cached) {
-          // 使用缓存的坐标直接创建 marker, 不调用 API
           const pos = new (window as any).google.maps.LatLng(cached.lat, cached.lng);
           const isDraggable = draggableOrderSet.has(order.id) && (!!onAssignOrder || !!onUnassignOrder);
-          const marker = new (window as any).google.maps.Marker({
-            map: mapInstance.current,
-            position: pos,
-            title: order.order_number || order.id,
-            zIndex: 500,
-            draggable: isDraggable,
-            cursor: isDraggable ? "grab" : undefined,
-          });
-          if (isDraggable) {
-            marker._originalPos = { lat: cached.lat, lng: cached.lng };
-          }
+          const marker = new (window as any).google.maps.Marker({ map: mapInstance.current, position: pos, title: order.order_number || order.id, zIndex: 500, draggable: isDraggable, cursor: isDraggable ? "grab" : undefined });
+          if (isDraggable) marker._originalPos = { lat: cached.lat, lng: cached.lng };
           updateOrderIcon(marker, order, assignments, drivers, orderETA, unassignedOrderSet.has(order.id));
           attachOrderDragHandlers(marker, order);
-          marker.addListener('click', () => {
-            if (!infoWindowRef.current) return;
-            const driverName = assignments.find(a => a.order_id === order.id)?.driver_id 
-              ? drivers.find(d => d.id === assignments.find(a => a.order_id === order.id)?.driver_id)?.name 
-              : "未分配";
-            const timeDisplay = order.time_window_custom || order.time_window || '—';
-            const binTypeNames: Record<string, string> = { 'garbage': '垃圾桶', 'brick': '砖桶', 'soil': '土桶', 'cement': '水泥桶', 'asphalt': '沥青桶' };
-            const binTypeName = binTypeNames[order.bin_type] || '—';
-            const etaInfo = orderETA && orderETA.status === 'OK' 
-              ? `<div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">预计到达:</span> <span style="color:#2196F3;margin-left:4px;">${new Date(orderETA.eta).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span></div>` : '';
-            infoWindowRef.current.setContent(`
-              <div style="padding:8px;font-size:12px;color:black;min-width:180px;">
-                <div style="font-weight:bold;font-size:14px;margin-bottom:6px;color:#333;">${order.order_number || order.id}</div>
-                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">类型:</span> <span style="color:#2196F3;margin-left:4px;">${order.type}</span></div>
-                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">桶类型:</span> <span style="color:#FF5722;margin-left:4px;">${binTypeName}</span></div>
-                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">尺寸:</span> <span style="color:#4CAF50;margin-left:4px;">${order.bin_size || '—'}</span></div>
-                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">时段:</span> <span style="color:#9C27B0;margin-left:4px;">${timeDisplay}</span></div>
-                ${etaInfo}
-                <div style="margin-bottom:6px;"><span style="font-weight:bold;color:#666;">地址:</span> <div style="color:#333;margin-top:2px;font-size:11px;">${order.address}</div></div>
-                <div style="margin-bottom:4px;"><span style="font-weight:bold;color:#666;">驾驶员:</span> <span style="color:#FF9800;margin-left:4px;">${driverName}</span></div>
-              </div>
-            `);
-            infoWindowRef.current.open(mapInstance.current, marker);
-          });
+          marker.addListener('click', makeOrderClickHandler(marker, order, orderETA));
           markersRef.current[id] = marker;
           newMarkers[id] = marker;
         } else {
-          // 没有缓存, 调用 Geocoding API
+          newMarkers[id] = "pending";
           geocoder.geocode({ address: geocodeAddress }, (results: any, status: any) => {
+            if (status === "OK" && results?.[0]) {
+              const pos = results[0].geometry.location;
+              geocodeCacheRef.current[geocodeAddress] = { lat: pos.lat(), lng: pos.lng() };
+              saveGeocodeCache(geocodeCacheRef.current);
+              const isDraggable = draggableOrderSet.has(order.id) && (!!onAssignOrder || !!onUnassignOrder);
+              const marker = new (window as any).google.maps.Marker({ map: mapInstance.current, position: pos, title: order.order_number || order.id, zIndex: 500, draggable: isDraggable, cursor: isDraggable ? "grab" : undefined });
+              if (isDraggable) marker._originalPos = { lat: pos.lat(), lng: pos.lng() };
+              updateOrderIcon(marker, order, assignments, drivers, orderETA, unassignedOrderSet.has(order.id));
+              attachOrderDragHandlers(marker, order);
+              marker.addListener('click', makeOrderClickHandler(marker, order, orderETA));
+              markersRef.current[id] = marker;
+            } else { console.warn(`地址解析失败: ${order.order_number} - ${order.address}`); }
+          });
+        }
+        return;
+      }
+
+      // --- 聚合 marker (同地址多个订单) ---
+      // 已有聚合 marker → 更新
+      if (markersRef.current[clusterId] && markersRef.current[clusterId] !== "pending") {
+        const marker = markersRef.current[clusterId];
+        if (marker.getMap && !marker.getMap()) marker.setMap(mapInstance.current);
+        marker.setIcon(createClusterIcon(groupOrders.length, groupOrders.some(o => unassignedOrderSet.has(o.id))));
+        marker._clusterOrders = groupOrders;
+        newMarkers[clusterId] = marker;
+        groupOrders.forEach(o => { newMarkers["order_" + o.id] = "cluster"; });
+        return;
+      }
+
+      // 需要创建聚合 marker
+      const cached = geocodeCacheRef.current[geocodeAddress];
+      if (cached) {
+        const pos = new (window as any).google.maps.LatLng(cached.lat, cached.lng);
+        const marker = new (window as any).google.maps.Marker({ map: mapInstance.current, position: pos, icon: createClusterIcon(groupOrders.length, groupOrders.some(o => unassignedOrderSet.has(o.id))), title: `${groupOrders.length} 个订单`, zIndex: 600 });
+        marker._clusterOrders = groupOrders;
+        marker._originalPos = { lat: cached.lat, lng: cached.lng };
+        marker.addListener('click', makeClusterClickHandler(marker));
+        markersRef.current[clusterId] = marker;
+        newMarkers[clusterId] = marker;
+        groupOrders.forEach(o => { newMarkers["order_" + o.id] = "cluster"; });
+      } else {
+        newMarkers[clusterId] = "pending";
+        groupOrders.forEach(o => { newMarkers["order_" + o.id] = "cluster"; });
+        geocoder.geocode({ address: geocodeAddress }, (results: any, status: any) => {
           if (status === "OK" && results?.[0]) {
             const pos = results[0].geometry.location;
-            // 缓存 geocode 结果
             geocodeCacheRef.current[geocodeAddress] = { lat: pos.lat(), lng: pos.lng() };
             saveGeocodeCache(geocodeCacheRef.current);
-            
-            const isDraggable = draggableOrderSet.has(order.id) && (!!onAssignOrder || !!onUnassignOrder);
-            const marker = new (window as any).google.maps.Marker({
-              map: mapInstance.current,
-              position: pos,
-              title: order.order_number || order.id,
-              zIndex: 500,
-              draggable: isDraggable,
-              cursor: isDraggable ? "grab" : undefined,
-            });
-            if (isDraggable) {
-              marker._originalPos = { lat: pos.lat(), lng: pos.lng() };
-            }
-            
-            updateOrderIcon(marker, order, assignments, drivers, orderETA, unassignedOrderSet.has(order.id));
-            attachOrderDragHandlers(marker, order);
-            
-            marker.addListener('click', () => {
-              if (!infoWindowRef.current) return;
-              const driverName = assignments.find(a => a.order_id === order.id)?.driver_id 
-                ? drivers.find(d => d.id === assignments.find(a => a.order_id === order.id)?.driver_id)?.name 
-                : "未分配";
-              
-              // 显示自定义时段或默认时段
-              const timeDisplay = order.time_window_custom || order.time_window || '—';
-              
-              // 桶类型中文映射
-              const binTypeNames: Record<string, string> = {
-                'garbage': '垃圾桶',
-                'brick': '砖桶',
-                'soil': '土桶',
-                'cement': '水泥桶',
-                'asphalt': '沥青桶'
-              };
-              const binTypeName = binTypeNames[order.bin_type] || '—';
-              
-              // ETA信息
-              const etaInfo = orderETA && orderETA.status === 'OK' 
-                ? `<div style="margin-bottom:4px;">
-                     <span style="font-weight:bold;color:#666;">预计到达:</span> 
-                     <span style="color:#2196F3;margin-left:4px;">${new Date(orderETA.eta).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
-                   </div>`
-                : '';
-                
-              infoWindowRef.current.setContent(`
-                <div style="padding:8px;font-size:12px;color:black;min-width:180px;">
-                  <div style="font-weight:bold;font-size:14px;margin-bottom:6px;color:#333;">${order.order_number || order.id}</div>
-                  <div style="margin-bottom:4px;">
-                    <span style="font-weight:bold;color:#666;">类型:</span> 
-                    <span style="color:#2196F3;margin-left:4px;">${order.type}</span>
-                  </div>
-                  <div style="margin-bottom:4px;">
-                    <span style="font-weight:bold;color:#666;">桶类型:</span> 
-                    <span style="color:#FF5722;margin-left:4px;">${binTypeName}</span>
-                  </div>
-                  <div style="margin-bottom:4px;">
-                    <span style="font-weight:bold;color:#666;">尺寸:</span> 
-                    <span style="color:#4CAF50;margin-left:4px;">${order.bin_size || '—'}</span>
-                  </div>
-                  <div style="margin-bottom:4px;">
-                    <span style="font-weight:bold;color:#666;">时段:</span> 
-                    <span style="color:#9C27B0;margin-left:4px;">${timeDisplay}</span>
-                  </div>
-                  ${etaInfo}
-                  <div style="margin-bottom:6px;">
-                    <span style="font-weight:bold;color:#666;">地址:</span> 
-                    <div style="color:#333;margin-top:2px;font-size:11px;">${order.address}</div>
-                  </div>
-                  <div style="margin-bottom:4px;">
-                    <span style="font-weight:bold;color:#666;">驾驶员:</span> 
-                    <span style="color:#FF9800;margin-left:4px;">${driverName}</span>
-                  </div>
-                </div>
-              `);
-              infoWindowRef.current.open(mapInstance.current, marker);
-            });
-            
-            markersRef.current[id] = marker;
-          } else {
-            console.warn(`地址解析失败: ${order.order_number} - ${order.address}`);
-          }
+            const marker = new (window as any).google.maps.Marker({ map: mapInstance.current, position: pos, icon: createClusterIcon(groupOrders.length, groupOrders.some(o => unassignedOrderSet.has(o.id))), title: `${groupOrders.length} 个订单`, zIndex: 600 });
+            marker._clusterOrders = groupOrders;
+            marker._originalPos = { lat: pos.lat(), lng: pos.lng() };
+            marker.addListener('click', makeClusterClickHandler(marker));
+            markersRef.current[clusterId] = marker;
+          } else { console.warn(`地址解析失败: ${geocodeAddress}`); }
         });
-        } // end else (no cache)
       }
     });
 
-    // 清理不再显示的 markers（但保留固定地点标记）
+    // 清理不再显示的 markers（但保留固定地点标记和聚合子订单占位）
     Object.keys(markersRef.current).forEach(key => {
       // 跳过固定地点标记（以manual_开头）
       if (key.startsWith('manual_')) return;
 
-      if (markersRef.current[key] && markersRef.current[key] !== "pending" && !newMarkers[key]) {
-        markersRef.current[key].setMap(null);
-        delete markersRef.current[key];  // 同步清掉 ref, 避免下次复用到已从地图移除的死对象
+      if (markersRef.current[key] && markersRef.current[key] !== "pending" && markersRef.current[key] !== "cluster" && !newMarkers[key]) {
+        if (markersRef.current[key].setMap) markersRef.current[key].setMap(null);
+        delete markersRef.current[key];
       }
     });
     
     // 更新
     Object.keys(newMarkers).forEach(key => {
-      if (newMarkers[key] !== "pending") {
+      if (newMarkers[key] !== "pending" && newMarkers[key] !== "cluster") {
         markersRef.current[key] = newMarkers[key];
       }
     });
@@ -919,6 +867,24 @@ export function DispatchMapWidget({
       <div id="map" ref={mapRef} className="w-full h-full bg-muted/10 min-h-[300px]"></div>
     </div>
   );
+}
+
+// 辅助函数: 创建聚合 marker 图标 (圆形 + 数字)
+function createClusterIcon(count: number, hasUnassigned: boolean): any {
+  const bg = hasUnassigned ? '#FF9800' : '#2196F3';
+  const border = hasUnassigned ? '#E65100' : '#1565C0';
+  const size = Math.min(48, 32 + count * 4);
+  const svg = `
+    <svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'>
+      <circle cx='${size/2}' cy='${size/2}' r='${size/2 - 2}' fill='${bg}' stroke='${border}' stroke-width='2'/>
+      <text x='${size/2}' y='${size/2 + 5}' text-anchor='middle' font-size='14' font-weight='bold' fill='white'>${count}</text>
+    </svg>
+  `;
+  return {
+    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
+    scaledSize: new (window as any).google.maps.Size(size, size),
+    anchor: new (window as any).google.maps.Point(size/2, size/2),
+  };
 }
 
 // 辅助函数: 创建带标签的车辆图标
