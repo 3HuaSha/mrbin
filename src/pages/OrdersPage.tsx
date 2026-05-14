@@ -72,6 +72,52 @@ export function OrdersPage() {
     refetchInterval: 15000, // 每15秒自动刷新, 及时反映司机完成状态
   });
 
+  // 查询订单关联的桶号 (司机完成步骤后上报的 bin_number_reported)
+  const { data: orderBinNumbers = {} } = useQuery({
+    queryKey: ["order-bin-numbers", from, to, businessType],
+    queryFn: async () => {
+      // 通过 job_steps 获取桶号, 支持两种关联方式:
+      // 1. job_steps.order_id 直接关联 (node_type='order' 的步骤)
+      // 2. job_steps.assignment_id → dispatch_assignments.order_id
+      const { data, error } = await supabase
+        .from("job_steps")
+        .select("order_id, bin_number_reported, old_bin_number_reported, step_type, assignment_id")
+        .gte("scheduled_date", from)
+        .lte("scheduled_date", to)
+        .not("bin_number_reported", "is", null);
+      if (error) throw error;
+      
+      // 对于有 assignment_id 但没有 order_id 的步骤, 需要查 dispatch_assignments
+      const stepsNeedingOrderId = (data ?? []).filter(s => !s.order_id && s.assignment_id);
+      let assignmentOrderMap: Record<string, string> = {};
+      if (stepsNeedingOrderId.length > 0) {
+        const assignmentIds = [...new Set(stepsNeedingOrderId.map(s => s.assignment_id!))];
+        const { data: assignments } = await supabase
+          .from("dispatch_assignments")
+          .select("id, order_id")
+          .in("id", assignmentIds);
+        (assignments ?? []).forEach(a => { assignmentOrderMap[a.id] = a.order_id; });
+      }
+      
+      // 按 order_id 汇总桶号
+      const map: Record<string, string> = {};
+      (data ?? []).forEach((step: any) => {
+        const orderId = step.order_id || (step.assignment_id ? assignmentOrderMap[step.assignment_id] : null);
+        if (!orderId) return;
+        const bn = step.bin_number_reported;
+        if (bn) {
+          if (map[orderId] && !map[orderId].includes(bn)) {
+            map[orderId] += `, ${bn}`;
+          } else {
+            map[orderId] = bn;
+          }
+        }
+      });
+      return map as Record<string, string>;
+    },
+    refetchInterval: 15000,
+  });
+
   const filtered = useMemo(() => {
     let list = orders;
     if (search.trim()) {
@@ -217,6 +263,7 @@ export function OrdersPage() {
                   <th className="px-3 py-2">类型</th>
                   <th className="px-3 py-2">桶类型</th>
                   <th className="px-3 py-2">尺寸</th>
+                  <th className="px-3 py-2">桶号</th>
                 </>
               )}
               {businessType === 'brick' && (
@@ -229,7 +276,6 @@ export function OrdersPage() {
               <th className="px-3 py-2">日期</th>
               <th className="px-3 py-2">时段</th>
               <th className="px-3 py-2">地址</th>
-              <th className="px-3 py-2">客户</th>
               <th className="px-3 py-2">电话</th>
               <th className="px-3 py-2">状态</th>
               <th className="px-3 py-2 text-right">操作</th>
@@ -262,6 +308,8 @@ export function OrdersPage() {
                   }}
                   typeBadgeClass={tm.className}
                   typeLabel={tm.label}
+                  binNumber={orderBinNumbers[main.id] || null}
+                  childBinNumber={child ? (orderBinNumbers[child.id] || null) : null}
                 />
               );
             })}
@@ -275,13 +323,15 @@ export function OrdersPage() {
 }
 
 function FragmentRow({
-  order, childOrder, businessType, open, childOpen, onToggle, onToggleChild, onEdit, onCancel, typeBadgeClass, typeLabel,
+  order, childOrder, businessType, open, childOpen, onToggle, onToggleChild, onEdit, onCancel, typeBadgeClass, typeLabel, binNumber, childBinNumber,
 }: {
   order: Order; childOrder?: Order; businessType: BusinessType;
   open: boolean; childOpen: boolean;
   onToggle: () => void; onToggleChild: () => void;
   onEdit: () => void; onCancel: () => void;
   typeBadgeClass: string; typeLabel: string;
+  binNumber: string | null;
+  childBinNumber: string | null;
 }) {
   // 桶类型中文映射
   const binTypeNames: Record<string, string> = {
@@ -328,6 +378,13 @@ function FragmentRow({
             </td>
             <td className="px-3 py-2">{binTypeName}</td>
             <td className="px-3 py-2">{order.bin_size ? `${order.bin_size}yd` : "—"}</td>
+            <td className="px-3 py-2 font-mono text-xs">
+              {binNumber ? (
+                <span className="text-green-700 font-semibold">{binNumber}</span>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </td>
           </>
         )}
         {businessType === 'brick' && (
@@ -346,7 +403,6 @@ function FragmentRow({
         <td className="px-3 py-2">{order.service_date}</td>
         <td className="px-3 py-2">{order.time_window === "custom" ? order.time_window_custom : order.time_window}</td>
         <td className="px-3 py-2 max-w-[240px] truncate">{order.address}</td>
-        <td className="px-3 py-2">{order.customer_name}</td>
         <td className="px-3 py-2">{order.customer_phone}</td>
         <td className="px-3 py-2">
           <Badge className={cn("text-xs", ORDER_STATUS_CLASS[order.status])}>{ORDER_STATUS_LABEL[order.status]}</Badge>
@@ -374,6 +430,13 @@ function FragmentRow({
               </td>
               <td className="px-3 py-1 text-xs text-muted-foreground">{binTypeName}</td>
               <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.bin_size ? `${childOrder.bin_size}yd` : "—"}</td>
+              <td className="px-3 py-1 font-mono text-[11px]">
+                {childBinNumber ? (
+                  <span className="text-green-700 font-semibold">{childBinNumber}</span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </td>
             </>
           )}
           {businessType === 'brick' && (
@@ -386,7 +449,6 @@ function FragmentRow({
           <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.service_date}</td>
           <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.time_window === "custom" ? childOrder.time_window_custom : childOrder.time_window}</td>
           <td className="px-3 py-1 max-w-[240px] truncate text-xs text-muted-foreground">{childOrder.address}</td>
-          <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.customer_name}</td>
           <td className="px-3 py-1 text-xs text-muted-foreground">{childOrder.customer_phone}</td>
           <td className="px-3 py-1"></td>
           <td className="px-3 py-1"></td>
