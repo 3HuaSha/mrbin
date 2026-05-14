@@ -497,18 +497,38 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
 function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
+    type: order.type,
+    bin_size: order.bin_size || "",
+    bin_type: order.bin_type || "",
+    time_window: order.time_window,
+    time_window_custom: order.time_window_custom || "",
     address: order.address,
     customer_name: order.customer_name,
     customer_phone: order.customer_phone,
     customer_notes: order.customer_notes || "",
     netsuite_order_id: order.netsuite_order_id || "",
     service_date: order.service_date,
+    status: order.status,
   });
   const save = useMutation({
     mutationFn: async () => {
       const { error } = await supabase
         .from("orders")
-        .update({ ...form, customer_notes: form.customer_notes || null, netsuite_order_id: form.netsuite_order_id || null, updated_at: new Date().toISOString() })
+        .update({
+          type: form.type,
+          bin_size: form.bin_size || null,
+          bin_type: form.bin_type || null,
+          time_window: form.time_window,
+          time_window_custom: form.time_window_custom || null,
+          address: form.address,
+          customer_name: form.customer_name,
+          customer_phone: form.customer_phone,
+          customer_notes: form.customer_notes || null,
+          netsuite_order_id: form.netsuite_order_id || null,
+          service_date: form.service_date,
+          status: form.status,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", order.id);
       if (error) throw error;
     },
@@ -517,16 +537,95 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
   });
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader><DialogTitle>编辑订单 {order.order_number}</DialogTitle></DialogHeader>
         <div className="space-y-3">
+          {/* 类型 + 状态 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>订单类型</Label>
+              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ORDER_TYPES.map(t => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>状态</Label>
+              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(ORDER_STATUS_LABEL).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {/* 桶类型 + 桶大小 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>桶类型</Label>
+              <Select value={form.bin_type} onValueChange={(v) => setForm({ ...form, bin_type: v })}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="选择桶类型" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="garbage">垃圾桶</SelectItem>
+                  <SelectItem value="brick">砖桶</SelectItem>
+                  <SelectItem value="soil">土桶</SelectItem>
+                  <SelectItem value="cement">水泥桶</SelectItem>
+                  <SelectItem value="asphalt">沥青桶</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>桶大小</Label>
+              <Select value={form.bin_size} onValueChange={(v) => setForm({ ...form, bin_size: v })}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="选择大小" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="14">14 yd</SelectItem>
+                  <SelectItem value="20">20 yd</SelectItem>
+                  <SelectItem value="30">30 yd</SelectItem>
+                  <SelectItem value="40">40 yd</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {/* 时段 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>时段</Label>
+              <Select value={form.time_window} onValueChange={(v) => setForm({ ...form, time_window: v })}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="AM">AM</SelectItem>
+                  <SelectItem value="PM">PM</SelectItem>
+                  <SelectItem value="7-9">7-9</SelectItem>
+                  <SelectItem value="custom">自定义</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {form.time_window === "custom" && (
+              <div>
+                <Label>自定义时段</Label>
+                <Input className="mt-1" value={form.time_window_custom} onChange={(e) => setForm({ ...form, time_window_custom: e.target.value })} placeholder="如: 10am-12pm" />
+              </div>
+            )}
+          </div>
+          {/* 地址 */}
           <div><Label>地址</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
+          {/* 客户信息 */}
           <div className="grid grid-cols-2 gap-3">
             <div><Label>客户姓名</Label><Input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} /></div>
             <div><Label>电话</Label><Input value={form.customer_phone} onChange={(e) => setForm({ ...form, customer_phone: formatPhone(e.target.value) })} /></div>
           </div>
+          {/* 日期 */}
           <div><Label>服务日期</Label><Input type="date" value={form.service_date} onChange={(e) => setForm({ ...form, service_date: e.target.value })} /></div>
+          {/* NetSuite */}
           <div><Label>NetSuite 订单号</Label><Input value={form.netsuite_order_id} onChange={(e) => setForm({ ...form, netsuite_order_id: e.target.value })} /></div>
+          {/* 备注 */}
           <div><Label>备注</Label><Textarea value={form.customer_notes} onChange={(e) => setForm({ ...form, customer_notes: e.target.value })} /></div>
         </div>
         <DialogFooter>
