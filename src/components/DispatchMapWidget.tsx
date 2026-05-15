@@ -16,6 +16,9 @@ export function DispatchMapWidget({
   onUnassignOrder,
   onLocationDrop,
   previewRoute,
+  hoverRoute,
+  activeBrickFactoryIds,
+  onOrderClick,
   onMapDragOrder,
   driverDropZoneAttr = "data-fleet-driver-drop",
   dropPositionAttr = "data-fleet-drop-position",
@@ -41,6 +44,12 @@ export function DispatchMapWidget({
   onLocationDrop?: (locationId: string, driverId: string, index?: number) => void,
   /** 拖拽预览路线: 当拖拽订单悬停在司机上时, 显示该司机加上新订单后的路线预览 */
   previewRoute?: { lat: number; lng: number }[] | null,
+  /** 悬停司机时的路线高亮: 该司机所有任务点连线 */
+  hoverRoute?: { lat: number; lng: number }[] | null,
+  /** 当天有取货单的砖厂 id 集合 (砖业务时只显示这些砖厂标记) */
+  activeBrickFactoryIds?: Set<string>,
+  /** 地图上点击订单标记时的回调 */
+  onOrderClick?: (orderId: string) => void,
   /** 地图上开始/结束拖拽订单时的回调, 用于通知父组件当前正在拖拽哪个订单 */
   onMapDragOrder?: (orderId: string | null) => void,
   /** 司机行的 data-* 属性名 */
@@ -54,6 +63,7 @@ export function DispatchMapWidget({
   const infoWindowRef = useRef<any>(null);
   const routeLinesRef = useRef<any[]>([]); // 存储路线折线
   const previewLineRef = useRef<any>(null); // 拖拽预览路线折线
+  const hoverLineRef = useRef<any>(null); // 悬停司机路线折线
 
   // 拖拽未分配订单到司机卡片的辅助 ref
   // - lastMouseRef: 全局鼠标位置, 用 document mousemove 捕获 (Google Maps 的 dragend 不给 DOM 事件)
@@ -387,14 +397,24 @@ export function DispatchMapWidget({
       const markerId = `manual_${location.id}`;
       const marker = markersRef.current[markerId];
       if (marker && marker.setMap) {
-        if (visibleIds.has(location.id)) {
-          if (!marker.getMap()) marker.setMap(mapInstance.current);
+        // 对于砖厂, 只显示当天有取货单的
+        if (location.type === 'brick_factory') {
+          const isActive = activeBrickFactoryIds?.has(location.id);
+          if (visibleIds.has(location.id) && isActive) {
+            if (!marker.getMap()) marker.setMap(mapInstance.current);
+          } else {
+            marker.setMap(null);
+          }
         } else {
-          marker.setMap(null);
+          if (visibleIds.has(location.id)) {
+            if (!marker.getMap()) marker.setMap(mapInstance.current);
+          } else {
+            marker.setMap(null);
+          }
         }
       }
     });
-  }, [businessType, mapLoaded]);
+  }, [businessType, mapLoaded, activeBrickFactoryIds]);
 
   // 3. Samsara 数据由上方的 useQuery 托管, 无需手动 setInterval
 
@@ -629,6 +649,8 @@ export function DispatchMapWidget({
 
     // 辅助: 创建单个订单 marker 的 click handler
     const makeOrderClickHandler = (marker: any, order: any, orderETA: any) => () => {
+      // 通知父组件点击了哪个订单 (用于左侧高亮)
+      onOrderClick?.(order.id);
       if (!infoWindowRef.current) return;
       const dn = assignments.find((a: any) => a.order_id === order.id)?.driver_id
         ? drivers.find((d: any) => d.id === assignments.find((a: any) => a.order_id === order.id)?.driver_id)?.name : "未分配";
@@ -934,6 +956,49 @@ export function DispatchMapWidget({
       }
     };
   }, [previewRoute, mapLoaded]);
+
+  // 7. 绘制悬停司机路线高亮 (实线, 悬停在司机名字上时显示)
+  useEffect(() => {
+    if (hoverLineRef.current) {
+      hoverLineRef.current.setMap(null);
+      hoverLineRef.current = null;
+    }
+
+    if (!mapInstance.current || !(window as any).google || !hoverRoute || hoverRoute.length < 2) {
+      return;
+    }
+
+    const line = new (window as any).google.maps.Polyline({
+      path: hoverRoute,
+      geodesic: true,
+      strokeColor: '#2196F3',
+      strokeOpacity: 0.7,
+      strokeWeight: 3,
+      map: mapInstance.current,
+      zIndex: 150,
+      icons: [{
+        icon: {
+          path: (window as any).google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+          scale: 2.5,
+          strokeColor: '#2196F3',
+          strokeWeight: 2,
+          fillColor: '#2196F3',
+          fillOpacity: 0.8,
+        },
+        offset: '100%',
+        repeat: '100px',
+      }],
+    });
+
+    hoverLineRef.current = line;
+
+    return () => {
+      if (hoverLineRef.current) {
+        hoverLineRef.current.setMap(null);
+        hoverLineRef.current = null;
+      }
+    };
+  }, [hoverRoute, mapLoaded]);
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   if (!apiKey) {

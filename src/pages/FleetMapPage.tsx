@@ -9,7 +9,8 @@ import { Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateC
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
-import { getFullAddress, MANUAL_STEP_LOCATIONS } from "@/lib/manual-step-locations";
+import { getFullAddress, MANUAL_STEP_LOCATIONS, BRICK_FACTORIES } from "@/lib/manual-step-locations";
+import { getRouteSegments, formatSeconds, STOP_DURATION_SEC } from "@/lib/route-cache";
 import { toast } from "sonner";
 import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
 import { useBusinessType } from "@/lib/business-type-storage";
@@ -87,6 +88,10 @@ export function FleetMapPage() {
   const [businessType, setBusinessType] = useBusinessType();
   // 当前被拖拽悬停的司机 (地图告诉我们)
   const [dropHoverDriverId, setDropHoverDriverId] = useState<string | null>(null);
+  // 鼠标悬停在司机名字上 (用于高亮路线, 非拖拽)
+  const [hoveredDriverId, setHoveredDriverId] = useState<string | null>(null);
+  // 地图上点击的订单 id (用于左侧高亮)
+  const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
   // 指定的插入位置 (driverId + index)，null 表示插到最后
   const [dropPosition, setDropPosition] = useState<{ driverId: string; index: number } | null>(null);
   // 侧边栏正在被 HTML5 DnD 拖动的订单 id (用于视觉反馈 + hit-test)
@@ -165,6 +170,33 @@ export function FleetMapPage() {
       return next;
     });
   }, [dropHoverDriverId]);
+
+  // 地图点击订单时, 自动展开对应司机并滚动到该订单卡片
+  useEffect(() => {
+    if (!highlightedOrderId) return;
+    // 找到该订单属于哪个司机
+    const driverId = Object.entries(driverJobSteps).find(([, steps]) =>
+      steps.some(s => s.node_type === 'order' && s.order_id === highlightedOrderId)
+    )?.[0];
+    if (driverId) {
+      setExpandedDrivers(prev => {
+        if (prev.has(driverId)) return prev;
+        const next = new Set(prev);
+        next.add(driverId);
+        return next;
+      });
+    }
+    // 延迟滚动到高亮的卡片
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-order-id="${highlightedOrderId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+    // 3秒后自动取消高亮
+    const clearTimer = setTimeout(() => setHighlightedOrderId(null), 3000);
+    return () => { clearTimeout(timer); clearTimeout(clearTimer); };
+  }, [highlightedOrderId, driverJobSteps]);
 
   const { data: drivers = [] } = useQuery({
     queryKey: ["drivers-assigned"],
@@ -552,6 +584,86 @@ export function FleetMapPage() {
     if (routePoints.length < 2) return null;
     return routePoints;
   }, [dropHoverDriverId, sidebarDragOrderId, mapDragOrderId, driverJobSteps, orderById, dropPosition]);
+
+  // 悬停司机名字时的路线高亮: 把该司机所有任务点连线
+  const hoverRoute = useMemo(() => {
+    if (!hoveredDriverId) return null;
+
+    // 获取 geocode 缓存
+    let geocodeCache: Record<string, { lat: number; lng: number }> = {};
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const raw = localStorage.getItem('geocode-cache');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed._date === today) {
+          const { _date, ...rest } = parsed;
+          geocodeCache = rest;
+        }
+      }
+    } catch {}
+
+    const getCoords = (address: string | null): { lat: number; lng: number } | null => {
+      if (!address) return null;
+      const manualLoc = MANUAL_STEP_LOCATIONS.find(loc =>
+        loc.shortName.toLowerCase() === address.toLowerCase() ||
+        loc.fullAddress.toLowerCase() === address.toLowerCase() ||
+        address.toLowerCase().includes(loc.shortName.toLowerCase())
+      );
+      if (manualLoc) return manualLoc.coordinates;
+      const geoAddr = address.toLowerCase().includes('on') ? address : `${address}, Toronto, ON, Canada`;
+      if (geocodeCache[geoAddr]) return geocodeCache[geoAddr];
+      if (geocodeCache[address]) return geocodeCache[address];
+      const lowerAddr = address.toLowerCase();
+      for (const [key, val] of Object.entries(geocodeCache)) {
+        if (key.toLowerCase().includes(lowerAddr) || lowerAddr.includes(key.toLowerCase())) {
+          return val;
+        }
+      }
+      return null;
+    };
+
+    const driverSteps = driverJobSteps[hoveredDriverId] ?? [];
+    const routePoints: { lat: number; lng: number }[] = [];
+    driverSteps.forEach(step => {
+      const addr = step.node_type === 'order' && step.orders
+        ? step.orders.address
+        : step.location;
+      const coords = getCoords(addr);
+      if (coords) routePoints.push(coords);
+    });
+
+    if (routePoints.length < 2) return null;
+    return routePoints;
+  }, [hoveredDriverId, driverJobSteps]);
+
+  // 当天砖业务订单涉及的砖厂 shortName 集合 (用于地图只显示相关砖厂)
+  const activeBrickFactoryIds = useMemo(() => {
+    if (businessType !== 'brick') return new Set<string>();
+    const ids = new Set<string>();
+    // 从当天所有订单的地址中匹配砖厂
+    allDayOrders.forEach(order => {
+      const addr = (order.address || '').toUpperCase();
+      BRICK_FACTORIES.forEach(factory => {
+        if (addr.includes(factory.shortName.toUpperCase()) ||
+            factory.shortName.toUpperCase().includes(addr) ||
+            factory.fullAddress.toUpperCase().includes(addr)) {
+          ids.add(factory.id);
+        }
+      });
+    });
+    // 也从 jobSteps 的 location 字段匹配
+    jobSteps.forEach(step => {
+      const loc = (step.location || '').toUpperCase();
+      BRICK_FACTORIES.forEach(factory => {
+        if (loc.includes(factory.shortName.toUpperCase()) ||
+            factory.shortName.toUpperCase().includes(loc)) {
+          ids.add(factory.id);
+        }
+      });
+    });
+    return ids;
+  }, [businessType, allDayOrders, jobSteps]);
 
   // 本地拖拽: 更新 draft. 不立即写库.
   //   orderId 可以是订单 id 或 "step:xxx" 格式的手动步骤 id
@@ -1133,6 +1245,8 @@ export function FleetMapPage() {
                   <div 
                     className="flex items-center justify-between p-2 hover:bg-muted/50 cursor-pointer transition-colors"
                     onClick={() => toggleDriver(d.id)}
+                    onMouseEnter={() => setHoveredDriverId(d.id)}
+                    onMouseLeave={() => setHoveredDriverId(null)}
                   >
                     <div className="font-semibold text-sm flex items-center gap-2">
                       {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground"/> : <ChevronRight className="h-4 w-4 text-muted-foreground"/>}
@@ -1162,6 +1276,8 @@ export function FleetMapPage() {
                   
                   {isExpanded && (
                     <div className="p-2 space-y-1.5 border-t bg-muted/10">
+                      {/* 路线时间预估 */}
+                      <DriverRouteEstimate steps={steps} />
                       {/* 统一索引: 每个节点 (订单/手动步骤) 之间都有 DropIndicator */}
                       {(() => {
                         let stepIdx = 0; // 统一列表中的位置
@@ -1210,6 +1326,7 @@ export function FleetMapPage() {
                               items.push(
                                 <div
                                   key={step.id}
+                                  data-order-id={order.id}
                                   {...(isCurrentStep ? { "data-current-step": d.id } : {})}
                                   draggable={!isDone}
                                   onDragStart={(e) => {
@@ -1231,7 +1348,7 @@ export function FleetMapPage() {
                                       : "border-l-blue-500 bg-card"
                                   } shadow-md p-2.5 transition-all duration-300 hover:shadow-xl ${
                                     isDone ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-                                  } ${isDraft ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === order.id ? "opacity-40" : ""}`}
+                                  } ${isDraft ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === order.id ? "opacity-40" : ""} ${highlightedOrderId === order.id ? "ring-2 ring-orange-400 shadow-orange-200 shadow-lg" : ""}`}
                                 >
                                   {isDone && (
                                     <div className="absolute top-1 right-1 text-[8px] text-green-700 bg-green-100 border border-green-300 rounded px-1">
@@ -1433,6 +1550,9 @@ export function FleetMapPage() {
              }}
              onLocationDrop={handleLocationDrop}
              previewRoute={previewRoute}
+             hoverRoute={hoverRoute}
+             activeBrickFactoryIds={activeBrickFactoryIds}
+             onOrderClick={setHighlightedOrderId}
              onMapDragOrder={setMapDragOrderId}
              driverDropZoneAttr={DRIVER_DROP_ZONE_ATTR}
              dropPositionAttr={DROP_POSITION_ATTR}
@@ -1483,6 +1603,78 @@ export function FleetMapPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ============ DriverRouteEstimate: 显示司机路线预估时间 ============
+function DriverRouteEstimate({ steps }: { steps: any[] }) {
+  const [estimate, setEstimate] = useState<{
+    totalSeconds: number;
+    segments: Array<{ from: string; to: string; duration: number }>;
+    loading: boolean;
+    missing: number;
+  }>({ totalSeconds: 0, segments: [], loading: false, missing: 0 });
+
+  // 收集地址列表
+  const addresses = useMemo(() => {
+    return steps
+      .filter(s => s.status !== 'done') // 只算未完成的
+      .map(step => {
+        if (step.node_type === 'order' && step.orders) {
+          return step.orders.address;
+        } else if (step.location) {
+          return getFullAddress(step.location);
+        }
+        return null;
+      })
+      .filter(Boolean) as string[];
+  }, [steps]);
+
+  // 当地址列表变化时重新计算
+  useEffect(() => {
+    if (addresses.length < 2) {
+      setEstimate({ totalSeconds: 0, segments: [], loading: false, missing: 0 });
+      return;
+    }
+
+    let cancelled = false;
+    setEstimate(prev => ({ ...prev, loading: true }));
+
+    getRouteSegments(addresses).then(result => {
+      if (cancelled) return;
+      setEstimate({
+        totalSeconds: result.totalDuration,
+        segments: result.segments,
+        loading: false,
+        missing: result.missingSegments.length,
+      });
+    }).catch(() => {
+      if (cancelled) return;
+      setEstimate(prev => ({ ...prev, loading: false }));
+    });
+
+    return () => { cancelled = true; };
+  }, [addresses]);
+
+  // 没有足够的步骤不显示
+  if (addresses.length < 2) return null;
+
+  return (
+    <div className="text-[10px] bg-blue-50 border border-blue-200 rounded px-2 py-1 flex items-center gap-1.5">
+      <Clock className="h-3 w-3 text-blue-600 shrink-0" />
+      {estimate.loading ? (
+        <span className="text-blue-600">计算中...</span>
+      ) : estimate.totalSeconds > 0 ? (
+        <span className="text-blue-700 font-medium">
+          预估 {formatSeconds(estimate.totalSeconds)}
+          {estimate.missing > 0 && (
+            <span className="text-amber-600 ml-1">({estimate.missing}段待计算)</span>
+          )}
+        </span>
+      ) : (
+        <span className="text-muted-foreground">无缓存数据</span>
+      )}
     </div>
   );
 }
