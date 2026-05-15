@@ -10,7 +10,6 @@ import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { getFullAddress, MANUAL_STEP_LOCATIONS, BRICK_FACTORIES } from "@/lib/manual-step-locations";
-import { getRouteSegments, formatSeconds } from "@/lib/route-cache";
 import { toast } from "sonner";
 import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
 import { useBusinessType } from "@/lib/business-type-storage";
@@ -1611,10 +1610,9 @@ export function FleetMapPage() {
 function DriverRouteEstimate({ steps }: { steps: any[] }) {
   const [estimate, setEstimate] = useState<{
     totalSeconds: number;
-    segments: Array<{ from: string; to: string; duration: number }>;
     loading: boolean;
     missing: number;
-  }>({ totalSeconds: 0, segments: [], loading: false, missing: 0 });
+  }>({ totalSeconds: 0, loading: false, missing: 0 });
 
   // 收集地址列表
   const addresses = useMemo(() => {
@@ -1634,18 +1632,20 @@ function DriverRouteEstimate({ steps }: { steps: any[] }) {
   // 当地址列表变化时重新计算
   useEffect(() => {
     if (addresses.length < 2) {
-      setEstimate({ totalSeconds: 0, segments: [], loading: false, missing: 0 });
+      setEstimate({ totalSeconds: 0, loading: false, missing: 0 });
       return;
     }
 
     let cancelled = false;
     setEstimate(prev => ({ ...prev, loading: true }));
 
-    getRouteSegments(addresses).then(result => {
+    // 动态导入避免 createServerFn 初始化问题
+    import("@/lib/route-cache").then(({ getRouteSegments }) => {
+      return getRouteSegments(addresses);
+    }).then(result => {
       if (cancelled) return;
       setEstimate({
         totalSeconds: result.totalDuration,
-        segments: result.segments,
         loading: false,
         missing: result.missingSegments.length,
       });
@@ -1660,6 +1660,15 @@ function DriverRouteEstimate({ steps }: { steps: any[] }) {
   // 没有足够的步骤不显示
   if (addresses.length < 2) return null;
 
+  // 格式化时间
+  const formatSec = (seconds: number): string => {
+    if (seconds <= 0) return '—';
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.round((seconds % 3600) / 60);
+    if (hours === 0) return `${mins}min`;
+    return `${hours}h${mins > 0 ? ` ${mins}min` : ''}`;
+  };
+
   return (
     <div className="text-[10px] bg-blue-50 border border-blue-200 rounded px-2 py-1 flex items-center gap-1.5">
       <Clock className="h-3 w-3 text-blue-600 shrink-0" />
@@ -1667,7 +1676,7 @@ function DriverRouteEstimate({ steps }: { steps: any[] }) {
         <span className="text-blue-600">计算中...</span>
       ) : estimate.totalSeconds > 0 ? (
         <span className="text-blue-700 font-medium">
-          预估 {formatSeconds(estimate.totalSeconds)}
+          预估 {formatSec(estimate.totalSeconds)}
           {estimate.missing > 0 && (
             <span className="text-amber-600 ml-1">({estimate.missing}段待计算)</span>
           )}
