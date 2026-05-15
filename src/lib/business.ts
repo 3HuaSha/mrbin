@@ -23,7 +23,7 @@ export const ORDER_TYPES = [
   { value: "material", label: "砂石料", emoji: "🟡", className: "bg-type-material text-type-material-foreground" },
 ] as const;
 
-export const BIN_SIZES = ["14", "20", "40"] as const;
+export const BIN_SIZES = ["14", "20", "30", "40"] as const;
 
 export const TIME_WINDOWS = [
   { value: "AM", label: "AM" },

@@ -35,9 +35,9 @@ type Order = {
   customer_name: string;
   customer_phone: string;
   customer_notes: string | null;
-  status: string;
   netsuite_order_id: string | null;
   linked_order_id?: string | null;
+  bin_number?: string | null;
 };
 
 export function OrdersPage() {
@@ -57,7 +57,7 @@ export function OrdersPage() {
     queryFn: async () => {
       let q = supabase
         .from("orders")
-        .select("*, linked_order_id")
+        .select("*, linked_order_id, bin_number")
         .gte("service_date", from)
         .lte("service_date", to)
         .eq("business_type", businessType)
@@ -86,7 +86,7 @@ export function OrdersPage() {
         .lte("scheduled_date", to)
         .not("bin_number_reported", "is", null);
       if (error) throw error;
-      
+
       // 对于有 assignment_id 但没有 order_id 的步骤, 需要查 dispatch_assignments
       const stepsNeedingOrderId = (data ?? []).filter(s => !s.order_id && s.assignment_id);
       let assignmentOrderMap: Record<string, string> = {};
@@ -98,7 +98,7 @@ export function OrdersPage() {
           .in("id", assignmentIds);
         (assignments ?? []).forEach(a => { assignmentOrderMap[a.id] = a.order_id; });
       }
-      
+
       // 按 order_id 汇总桶号
       const map: Record<string, string> = {};
       (data ?? []).forEach((step: any) => {
@@ -338,8 +338,8 @@ export function OrdersPage() {
                   }}
                   typeBadgeClass={tm.className}
                   typeLabel={tm.label}
-                  binNumber={orderBinNumbers[main.id] || null}
-                  childBinNumber={child ? (orderBinNumbers[child.id] || null) : null}
+                  binNumber={main.bin_number || orderBinNumbers[main.id] || null}
+                  childBinNumber={child ? (child.bin_number || orderBinNumbers[child.id] || null) : null}
                   isDelivered={orderDeliveredSet.has(main.id)}
                 />
               );
@@ -389,10 +389,10 @@ function FragmentRow({
   const rowBgClass = order.status === "done"
     ? "bg-green-100 hover:bg-green-200 text-green-900"
     : order.status === "cancelled"
-    ? "bg-gray-100 text-gray-400 hover:bg-gray-200 line-through"
-    : isDelivered
-    ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-900"
-    : "hover:bg-accent/40";
+      ? "bg-gray-100 text-gray-400 hover:bg-gray-200 line-through"
+      : isDelivered
+        ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-900"
+        : "hover:bg-accent/40";
 
   return (
     <>
@@ -635,10 +635,12 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
 
   // 初始化桶号
   useEffect(() => {
-    if (existingBinNumber && !form.bin_number) {
+    if (order.bin_number) {
+      setForm(f => ({ ...f, bin_number: order.bin_number! }));
+    } else if (existingBinNumber && !form.bin_number) {
       setForm(f => ({ ...f, bin_number: existingBinNumber }));
     }
-  }, [existingBinNumber]);
+  }, [existingBinNumber, order.bin_number]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -657,6 +659,7 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
           netsuite_order_id: form.netsuite_order_id || null,
           service_date: form.service_date,
           status: form.status,
+          bin_number: form.bin_number.trim().toUpperCase() || null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", order.id);

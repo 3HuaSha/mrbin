@@ -15,6 +15,8 @@ export function DispatchMapWidget({
   onAssignOrder,
   onUnassignOrder,
   onLocationDrop,
+  previewRoute,
+  onMapDragOrder,
   driverDropZoneAttr = "data-fleet-driver-drop",
   dropPositionAttr = "data-fleet-drop-position",
 }: { 
@@ -37,6 +39,10 @@ export function DispatchMapWidget({
   onUnassignOrder?: (orderId: string) => void,
   /** 固定地点 marker 拖到司机时的回调: (locationId, driverId, index?) */
   onLocationDrop?: (locationId: string, driverId: string, index?: number) => void,
+  /** 拖拽预览路线: 当拖拽订单悬停在司机上时, 显示该司机加上新订单后的路线预览 */
+  previewRoute?: { lat: number; lng: number }[] | null,
+  /** 地图上开始/结束拖拽订单时的回调, 用于通知父组件当前正在拖拽哪个订单 */
+  onMapDragOrder?: (orderId: string | null) => void,
   /** 司机行的 data-* 属性名 */
   driverDropZoneAttr?: string,
   /** 位置指示的 data-* 属性名, 值格式: `${driverId}:${index}` */
@@ -47,6 +53,7 @@ export function DispatchMapWidget({
   const markersRef = useRef<Record<string, any>>({});
   const infoWindowRef = useRef<any>(null);
   const routeLinesRef = useRef<any[]>([]); // 存储路线折线
+  const previewLineRef = useRef<any>(null); // 拖拽预览路线折线
 
   // 拖拽未分配订单到司机卡片的辅助 ref
   // - lastMouseRef: 全局鼠标位置, 用 document mousemove 捕获 (Google Maps 的 dragend 不给 DOM 事件)
@@ -510,6 +517,7 @@ export function DispatchMapWidget({
         currentDraggingOrderRef.current = order.id;
         hoverDriverRef.current = null;
         marker.setZIndex(10000);
+        onMapDragOrder?.(order.id);
 
         // 冻结地图, 防止拖到地图边缘触发地图 pan
         if (mapInstance.current) {
@@ -555,6 +563,7 @@ export function DispatchMapWidget({
         onDragHoverPosition?.(null);
         hoverDriverRef.current = null;
         currentDraggingOrderRef.current = null;
+        onMapDragOrder?.(null);
 
         // 弹回原位
         if (marker._originalPos) {
@@ -851,6 +860,61 @@ export function DispatchMapWidget({
     
     return () => clearTimeout(timeoutId);
   }, [driverETAs, mapLoaded]);
+
+  // 6. 绘制拖拽预览路线 (虚线, 拖拽订单悬停在司机上时显示)
+  useEffect(() => {
+    // 清除旧的预览线
+    if (previewLineRef.current) {
+      previewLineRef.current.setMap(null);
+      previewLineRef.current = null;
+    }
+
+    if (!mapInstance.current || !(window as any).google || !previewRoute || previewRoute.length < 2) {
+      return;
+    }
+
+    // 绘制虚线预览路线
+    const line = new (window as any).google.maps.Polyline({
+      path: previewRoute,
+      geodesic: true,
+      strokeColor: '#FF6D00',
+      strokeOpacity: 0,
+      strokeWeight: 3,
+      map: mapInstance.current,
+      zIndex: 200,
+      icons: [{
+        icon: {
+          path: 'M 0,-1 0,1',
+          strokeOpacity: 0.9,
+          strokeColor: '#FF6D00',
+          strokeWeight: 3,
+          scale: 3,
+        },
+        offset: '0',
+        repeat: '15px',
+      }, {
+        icon: {
+          path: (window as any).google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+          scale: 3,
+          strokeColor: '#FF6D00',
+          strokeWeight: 2,
+          fillColor: '#FF6D00',
+          fillOpacity: 0.9,
+        },
+        offset: '100%',
+        repeat: '120px',
+      }],
+    });
+
+    previewLineRef.current = line;
+
+    return () => {
+      if (previewLineRef.current) {
+        previewLineRef.current.setMap(null);
+        previewLineRef.current = null;
+      }
+    };
+  }, [previewRoute, mapLoaded]);
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   if (!apiKey) {

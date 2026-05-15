@@ -91,6 +91,8 @@ export function FleetMapPage() {
   const [dropPosition, setDropPosition] = useState<{ driverId: string; index: number } | null>(null);
   // 侧边栏正在被 HTML5 DnD 拖动的订单 id (用于视觉反馈 + hit-test)
   const [sidebarDragOrderId, setSidebarDragOrderId] = useState<string | null>(null);
+  // 地图上正在被拖拽的订单 id (从 DispatchMapWidget 回调获取)
+  const [mapDragOrderId, setMapDragOrderId] = useState<string | null>(null);
 
   // 本地草稿: 记录每个订单当前应该属于哪个司机 + 在该司机列表中的位置
   // key = order.id
@@ -465,6 +467,91 @@ export function FleetMapPage() {
 
     return map;
   }, [jobSteps, merged.assigned, orderById, date, draftManualSteps, deleteStepIds, filteredDrivers]);
+
+  // 拖拽预览路线: 当拖拽订单悬停在司机上时, 计算该司机现有任务 + 新订单的路线坐标
+  // 使用 localStorage 中的 geocode 缓存 + MANUAL_STEP_LOCATIONS 的固定坐标
+  const previewRoute = useMemo(() => {
+    // 需要同时有: 悬停的司机 + 正在拖拽的订单
+    if (!dropHoverDriverId) return null;
+    // 拖拽来源: 地图拖拽时 sidebarDragOrderId 为 null, 但 dropHoverDriverId 有值
+    // 侧边栏拖拽时 sidebarDragOrderId 有值
+    // 两种情况都需要显示预览路线
+
+    // 获取 geocode 缓存
+    let geocodeCache: Record<string, { lat: number; lng: number }> = {};
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const raw = localStorage.getItem('geocode-cache');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed._date === today) {
+          const { _date, ...rest } = parsed;
+          geocodeCache = rest;
+        }
+      }
+    } catch {}
+
+    // 辅助: 根据地址获取坐标
+    const getCoords = (address: string | null): { lat: number; lng: number } | null => {
+      if (!address) return null;
+      // 先查固定地点
+      const manualLoc = MANUAL_STEP_LOCATIONS.find(loc =>
+        loc.shortName.toLowerCase() === address.toLowerCase() ||
+        loc.fullAddress.toLowerCase() === address.toLowerCase() ||
+        address.toLowerCase().includes(loc.shortName.toLowerCase())
+      );
+      if (manualLoc) return manualLoc.coordinates;
+      // 再查 geocode 缓存
+      const geoAddr = address.toLowerCase().includes('on') ? address : `${address}, Toronto, ON, Canada`;
+      if (geocodeCache[geoAddr]) return geocodeCache[geoAddr];
+      if (geocodeCache[address]) return geocodeCache[address];
+      // 尝试模糊匹配
+      const lowerAddr = address.toLowerCase();
+      for (const [key, val] of Object.entries(geocodeCache)) {
+        if (key.toLowerCase().includes(lowerAddr) || lowerAddr.includes(key.toLowerCase())) {
+          return val;
+        }
+      }
+      return null;
+    };
+
+    // 收集该司机现有任务的坐标 (按顺序)
+    const driverSteps = driverJobSteps[dropHoverDriverId] ?? [];
+    const routePoints: { lat: number; lng: number }[] = [];
+
+    driverSteps.forEach(step => {
+      const addr = step.node_type === 'order' && step.orders
+        ? step.orders.address
+        : step.location;
+      const coords = getCoords(addr);
+      if (coords) routePoints.push(coords);
+    });
+
+    // 如果正在拖拽一个订单, 把它的坐标也加到预览路线中
+    // sidebarDragOrderId 是侧边栏拖拽的订单 id
+    // mapDragOrderId 是地图上拖拽的订单 id
+    const draggingOrderId = (sidebarDragOrderId && !sidebarDragOrderId.startsWith("step:")
+      ? sidebarDragOrderId
+      : null) || mapDragOrderId;
+    if (draggingOrderId) {
+      const order = orderById.get(draggingOrderId);
+      if (order) {
+        const coords = getCoords(order.address);
+        if (coords) {
+          // 如果有指定插入位置, 插入到对应位置; 否则加到末尾
+          if (dropPosition && dropPosition.driverId === dropHoverDriverId) {
+            routePoints.splice(dropPosition.index, 0, coords);
+          } else {
+            routePoints.push(coords);
+          }
+        }
+      }
+    }
+
+    // 至少需要 2 个点才能画线
+    if (routePoints.length < 2) return null;
+    return routePoints;
+  }, [dropHoverDriverId, sidebarDragOrderId, mapDragOrderId, driverJobSteps, orderById, dropPosition]);
 
   // 本地拖拽: 更新 draft. 不立即写库.
   //   orderId 可以是订单 id 或 "step:xxx" 格式的手动步骤 id
@@ -1345,6 +1432,8 @@ export function FleetMapPage() {
                stageAssignment(orderId, null);
              }}
              onLocationDrop={handleLocationDrop}
+             previewRoute={previewRoute}
+             onMapDragOrder={setMapDragOrderId}
              driverDropZoneAttr={DRIVER_DROP_ZONE_ATTR}
              dropPositionAttr={DROP_POSITION_ATTR}
            />

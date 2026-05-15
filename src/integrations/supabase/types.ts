@@ -387,6 +387,7 @@ export type Database = {
         Row: {
           address: string
           bin_size: Database["public"]["Enums"]["bin_size"] | null
+          bin_number: string | null
           created_at: string | null
           created_by: string | null
           customer_name: string
@@ -405,6 +406,7 @@ export type Database = {
         Insert: {
           address: string
           bin_size?: Database["public"]["Enums"]["bin_size"] | null
+          bin_number?: string | null
           created_at?: string | null
           created_by?: string | null
           customer_name: string
@@ -423,6 +425,7 @@ export type Database = {
         Update: {
           address?: string
           bin_size?: Database["public"]["Enums"]["bin_size"] | null
+          bin_number?: string | null
           created_at?: string | null
           created_by?: string | null
           customer_name?: string
