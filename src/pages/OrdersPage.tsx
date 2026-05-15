@@ -667,6 +667,16 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
 
       // 保存桶号到 job_steps (如果有值)
       if (form.bin_number.trim()) {
+        const binNum = form.bin_number.trim().toUpperCase();
+        // 自动将新桶加入库存（如果不存在）
+        const { error: binError } = await supabase
+          .from("bins")
+          .upsert(
+            { bin_number: binNum, size: (form.bin_size || "20") as any },
+            { onConflict: "bin_number", ignoreDuplicates: true }
+          );
+        if (binError) console.error("Auto-create bin error:", binError);
+
         const { data: assignments } = await supabase
           .from("dispatch_assignments")
           .select("id")
@@ -676,7 +686,7 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
           // 更新所有关联步骤的 bin_number_reported (通常是 customer_delivery 或 customer_pickup)
           await supabase
             .from("job_steps")
-            .update({ bin_number_reported: form.bin_number.trim().toUpperCase() })
+            .update({ bin_number_reported: binNum })
             .in("assignment_id", assignmentIds)
             .in("step_type", ["customer_delivery", "customer_pickup", "depot_pickup"]);
         }

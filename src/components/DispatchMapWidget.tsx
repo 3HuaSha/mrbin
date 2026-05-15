@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { supabase } from "@/integrations/supabase/client";
-import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES } from "@/lib/manual-step-locations";
+import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES, getLocationsForBusinessType } from "@/lib/manual-step-locations";
 
 const KENNEDY_DEPOT = { lat: 43.821044, lng: -79.304742, label: "Kennedy Depot" };
 
@@ -376,6 +376,25 @@ export function DispatchMapWidget({
       });
     });
   }, [mapLoaded]);
+
+  // 2b. 根据业务类型显示/隐藏固定地点标记
+  useEffect(() => {
+    if (!mapInstance.current) return;
+    const visibleLocations = getLocationsForBusinessType(businessType as 'garbage' | 'brick');
+    const visibleIds = new Set(visibleLocations.map(l => l.id));
+
+    MANUAL_STEP_LOCATIONS.forEach(location => {
+      const markerId = `manual_${location.id}`;
+      const marker = markersRef.current[markerId];
+      if (marker && marker.setMap) {
+        if (visibleIds.has(location.id)) {
+          if (!marker.getMap()) marker.setMap(mapInstance.current);
+        } else {
+          marker.setMap(null);
+        }
+      }
+    });
+  }, [businessType, mapLoaded]);
 
   // 3. Samsara 数据由上方的 useQuery 托管, 无需手动 setInterval
 
@@ -1200,12 +1219,14 @@ function updateOrderIcon(marker: any, order: any, assignments: any[], drivers: a
 
 // 辅助函数: 创建手动地点图标
 function createManualLocationIcon(location: any): string {
-  // 根据地点类型选择颜色 - 仓库和垃圾场统一图标
+  // 根据地点类型选择颜色
   const colorSchemes: Record<string, { bg: string; text: string; border: string; icon: string }> = {
     'depot': { bg: '#607D8B', text: '#FFFFFF', border: '#455A64', icon: '🏢' },           // 灰色 - 仓库
     'transfer_station': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻' }, // 绿色 - 转运站
-    'dump_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻' },       // 绿色 - 倾倒点（统一为垃圾场）
-    'material_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻' }    // 绿色 - 物料站（统一为垃圾场）
+    'dump_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻' },       // 绿色 - 倾倒点
+    'material_site': { bg: '#4CAF50', text: '#FFFFFF', border: '#388E3C', icon: '♻' },   // 绿色 - 物料站
+    'brick_yard': { bg: '#2E7D32', text: '#FFFFFF', border: '#1B5E20', icon: '🟢' },     // 深绿 - 砖场地
+    'brick_factory': { bg: '#1565C0', text: '#FFFFFF', border: '#0D47A1', icon: '🏭' },  // 蓝色 - 砖厂
   };
   
   const scheme = colorSchemes[location.type] || { bg: '#9E9E9E', text: '#FFFFFF', border: '#757575', icon: '📍' };
