@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { supabase } from "@/integrations/supabase/client";
-import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES, getLocationsForBusinessType } from "@/lib/manual-step-locations";
+import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES } from "@/lib/manual-step-locations";
 
 const KENNEDY_DEPOT = { lat: 43.821044, lng: -79.304742, label: "Kennedy Depot" };
 
@@ -390,7 +390,9 @@ export function DispatchMapWidget({
   // 2b. 根据业务类型显示/隐藏固定地点标记
   useEffect(() => {
     if (!mapInstance.current) return;
-    const visibleLocations = getLocationsForBusinessType(businessType as 'garbage' | 'brick');
+    const visibleLocations = MANUAL_STEP_LOCATIONS.filter(loc =>
+      loc.businessType === businessType || loc.businessType === 'all'
+    );
     const visibleIds = new Set(visibleLocations.map(l => l.id));
 
     MANUAL_STEP_LOCATIONS.forEach(location => {

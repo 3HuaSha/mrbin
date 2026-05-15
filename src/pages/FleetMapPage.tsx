@@ -87,10 +87,6 @@ export function FleetMapPage() {
   const [businessType, setBusinessType] = useBusinessType();
   // 当前被拖拽悬停的司机 (地图告诉我们)
   const [dropHoverDriverId, setDropHoverDriverId] = useState<string | null>(null);
-  // 鼠标悬停在司机名字上 (用于高亮路线, 非拖拽)
-  const [hoveredDriverId, setHoveredDriverId] = useState<string | null>(null);
-  // 地图上点击的订单 id (用于左侧高亮)
-  const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
   // 指定的插入位置 (driverId + index)，null 表示插到最后
   const [dropPosition, setDropPosition] = useState<{ driverId: string; index: number } | null>(null);
   // 侧边栏正在被 HTML5 DnD 拖动的订单 id (用于视觉反馈 + hit-test)
@@ -169,33 +165,6 @@ export function FleetMapPage() {
       return next;
     });
   }, [dropHoverDriverId]);
-
-  // 地图点击订单时, 自动展开对应司机并滚动到该订单卡片
-  useEffect(() => {
-    if (!highlightedOrderId) return;
-    // 找到该订单属于哪个司机
-    const driverId = Object.entries(driverJobSteps).find(([, steps]) =>
-      steps.some(s => s.node_type === 'order' && s.order_id === highlightedOrderId)
-    )?.[0];
-    if (driverId) {
-      setExpandedDrivers(prev => {
-        if (prev.has(driverId)) return prev;
-        const next = new Set(prev);
-        next.add(driverId);
-        return next;
-      });
-    }
-    // 延迟滚动到高亮的卡片
-    const timer = setTimeout(() => {
-      const el = document.querySelector(`[data-order-id="${highlightedOrderId}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, 100);
-    // 3秒后自动取消高亮
-    const clearTimer = setTimeout(() => setHighlightedOrderId(null), 3000);
-    return () => { clearTimeout(timer); clearTimeout(clearTimer); };
-  }, [highlightedOrderId, driverJobSteps]);
 
   const { data: drivers = [] } = useQuery({
     queryKey: ["drivers-assigned"],
@@ -584,86 +553,9 @@ export function FleetMapPage() {
     return routePoints;
   }, [dropHoverDriverId, sidebarDragOrderId, mapDragOrderId, driverJobSteps, orderById, dropPosition]);
 
-  // 悬停司机名字时的路线高亮: 把该司机所有任务点连线
-  const hoverRoute = useMemo(() => {
-    if (!hoveredDriverId) return null;
-
-    // 获取 geocode 缓存
-    let geocodeCache: Record<string, { lat: number; lng: number }> = {};
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const raw = localStorage.getItem('geocode-cache');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed._date === today) {
-          const { _date, ...rest } = parsed;
-          geocodeCache = rest;
-        }
-      }
-    } catch {}
-
-    const getCoords = (address: string | null): { lat: number; lng: number } | null => {
-      if (!address) return null;
-      const manualLoc = MANUAL_STEP_LOCATIONS.find(loc =>
-        loc.shortName.toLowerCase() === address.toLowerCase() ||
-        loc.fullAddress.toLowerCase() === address.toLowerCase() ||
-        address.toLowerCase().includes(loc.shortName.toLowerCase())
-      );
-      if (manualLoc) return manualLoc.coordinates;
-      const geoAddr = address.toLowerCase().includes('on') ? address : `${address}, Toronto, ON, Canada`;
-      if (geocodeCache[geoAddr]) return geocodeCache[geoAddr];
-      if (geocodeCache[address]) return geocodeCache[address];
-      const lowerAddr = address.toLowerCase();
-      for (const [key, val] of Object.entries(geocodeCache)) {
-        if (key.toLowerCase().includes(lowerAddr) || lowerAddr.includes(key.toLowerCase())) {
-          return val;
-        }
-      }
-      return null;
-    };
-
-    const driverSteps = driverJobSteps[hoveredDriverId] ?? [];
-    const routePoints: { lat: number; lng: number }[] = [];
-    driverSteps.forEach(step => {
-      const addr = step.node_type === 'order' && step.orders
-        ? step.orders.address
-        : step.location;
-      const coords = getCoords(addr);
-      if (coords) routePoints.push(coords);
-    });
-
-    if (routePoints.length < 2) return null;
-    return routePoints;
-  }, [hoveredDriverId, driverJobSteps]);
-
-  // 当天砖业务订单涉及的砖厂 shortName 集合 (用于地图只显示相关砖厂)
-  const activeBrickFactoryIds = useMemo(() => {
-    if (businessType !== 'brick') return new Set<string>();
-    const ids = new Set<string>();
-    const brickFactories = MANUAL_STEP_LOCATIONS.filter(l => l.type === 'brick_factory');
-    // 从当天所有订单的地址中匹配砖厂
-    allDayOrders.forEach(order => {
-      const addr = (order.address || '').toUpperCase();
-      brickFactories.forEach(factory => {
-        if (addr.includes(factory.shortName.toUpperCase()) ||
-            factory.shortName.toUpperCase().includes(addr) ||
-            factory.fullAddress.toUpperCase().includes(addr)) {
-          ids.add(factory.id);
-        }
-      });
-    });
-    // 也从 jobSteps 的 location 字段匹配
-    jobSteps.forEach(step => {
-      const loc = (step.location || '').toUpperCase();
-      brickFactories.forEach(factory => {
-        if (loc.includes(factory.shortName.toUpperCase()) ||
-            factory.shortName.toUpperCase().includes(loc)) {
-          ids.add(factory.id);
-        }
-      });
-    });
-    return ids;
-  }, [businessType, allDayOrders, jobSteps]);
+  // 悬停司机名字时的路线高亮 (暂时禁用)
+  const hoverRoute = null;
+  const activeBrickFactoryIds = useMemo(() => new Set<string>(), []);
 
   // 本地拖拽: 更新 draft. 不立即写库.
   //   orderId 可以是订单 id 或 "step:xxx" 格式的手动步骤 id
@@ -1245,8 +1137,6 @@ export function FleetMapPage() {
                   <div 
                     className="flex items-center justify-between p-2 hover:bg-muted/50 cursor-pointer transition-colors"
                     onClick={() => toggleDriver(d.id)}
-                    onMouseEnter={() => setHoveredDriverId(d.id)}
-                    onMouseLeave={() => setHoveredDriverId(null)}
                   >
                     <div className="font-semibold text-sm flex items-center gap-2">
                       {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground"/> : <ChevronRight className="h-4 w-4 text-muted-foreground"/>}
@@ -1346,7 +1236,7 @@ export function FleetMapPage() {
                                       : "border-l-blue-500 bg-card"
                                   } shadow-md p-2.5 transition-all duration-300 hover:shadow-xl ${
                                     isDone ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-                                  } ${isDraft ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === order.id ? "opacity-40" : ""} ${highlightedOrderId === order.id ? "ring-2 ring-orange-400 shadow-orange-200 shadow-lg" : ""}`}
+                                  } ${isDraft ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === order.id ? "opacity-40" : ""}`}
                                 >
                                   {isDone && (
                                     <div className="absolute top-1 right-1 text-[8px] text-green-700 bg-green-100 border border-green-300 rounded px-1">
@@ -1550,7 +1440,6 @@ export function FleetMapPage() {
              previewRoute={previewRoute}
              hoverRoute={hoverRoute}
              activeBrickFactoryIds={activeBrickFactoryIds}
-             onOrderClick={setHighlightedOrderId}
              onMapDragOrder={setMapDragOrderId}
              driverDropZoneAttr={DRIVER_DROP_ZONE_ATTR}
              dropPositionAttr={DROP_POSITION_ATTR}
