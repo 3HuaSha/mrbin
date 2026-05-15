@@ -264,18 +264,31 @@ export function DriverHomePage() {
           // 只要不是 done 状态就算 pending
           const isPending = s.status !== "done";
           
-          // 步骤类型标签
+          // 步骤类型标签 - 对于订单节点, 用订单类型; 对于手动步骤, 用步骤类型
           const stepTypeLabels: Record<string, string> = {
             'pickup_bin': '取桶',
             'drop_bin': '放桶',
             'dump_waste': '倒垃圾',
             'load_material': '装料',
             'unload_material': '卸料',
+            'depot_pickup': '仓库取桶',
+            'customer_delivery': '送到客户',
+            'customer_pickup': '去客户取桶',
+            'dump_site': '去垃圾场',
             'pickup': '取货',
             'delivery': '送货',
             'swap': '换桶',
           };
-          const stepLabel = stepTypeLabels[s.step_type] || s.step_type;
+          // 订单节点: 显示订单类型 (送桶/收桶/换桶) 而不是步骤类型
+          const orderTypeLabels: Record<string, string> = {
+            'delivery': '送桶',
+            'pickup': '收桶',
+            'swap': '换桶',
+            'material': '物料',
+          };
+          const stepLabel = isOrderNode
+            ? (orderTypeLabels[s.orders!.type] || stepTypeLabels[s.step_type] || s.step_type)
+            : (stepTypeLabels[s.step_type] || s.step_type);
           
           // 桶类型中文映射
           const binTypeNames: Record<string, string> = {

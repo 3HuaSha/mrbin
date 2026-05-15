@@ -30,7 +30,7 @@ type Step = {
   node_type: 'order' | 'step';
   notes: string | null;
   dispatch_assignments: {
-    orders: { order_number: string; type: string; address: string; customer_name: string; customer_phone: string; customer_notes: string | null } | null;
+    orders: { order_number: string; type: string; bin_size: string | null; bin_type: string | null; address: string; customer_name: string; customer_phone: string; customer_notes: string | null } | null;
     bins: { bin_number: string } | null;
   } | null;
 };
@@ -151,7 +151,21 @@ export function DriverStepPage() {
 
       <div className="p-4 space-y-4">
         <div>
-          <div className="text-2xl font-bold mt-1">{STEP_TYPE_EMOJI[step.step_type]} {STEP_TYPE_LABEL[step.step_type]}</div>
+          <div className="text-2xl font-bold mt-1">
+            {STEP_TYPE_EMOJI[step.step_type]} {isManualStep
+              ? (STEP_TYPE_LABEL[step.step_type] || step.step_type)
+              : order
+                ? `${order.type === 'delivery' ? '送桶' : order.type === 'pickup' ? '收桶' : order.type === 'swap' ? '换桶' : STEP_TYPE_LABEL[step.step_type] || step.step_type}`
+                : (STEP_TYPE_LABEL[step.step_type] || step.step_type)
+            }
+          </div>
+          {order && (
+            <div className="text-sm text-muted-foreground mt-1">
+              {order.order_number} · {order.type === 'delivery' ? '送桶' : order.type === 'pickup' ? '收桶' : order.type === 'swap' ? '换桶' : order.type}
+              {order.bin_size ? ` · ${order.bin_size}yd` : ''}
+              {order.bin_type ? ` · ${({'garbage':'垃圾桶','brick':'砖桶','soil':'土桶','cement':'水泥桶','asphalt':'沥青桶'} as Record<string,string>)[order.bin_type] || order.bin_type}` : ''}
+            </div>
+          )}
           <div className="text-base mt-2">{step.location}</div>
         </div>
 
@@ -295,12 +309,11 @@ export function DriverStepPage() {
             </div>
           )}
 
-          {step.requires_bin_number && (
-            <div>
-              <Label>{isSwapDelivery ? "放入的新桶号 (可选)" : "桶号 (可选)"}</Label>
-              <Input value={binNumber} onChange={(e) => setBinNumber(e.target.value.toUpperCase())} className="h-12 mt-1 text-base" placeholder="B-20-01" />
-            </div>
-          )}
+          {/* 桶号输入 - 所有步骤都可以填 (可选) */}
+          <div>
+            <Label>{isSwapDelivery ? "放入的新桶号 (可选)" : "桶号 (可选)"}</Label>
+            <Input value={binNumber} onChange={(e) => setBinNumber(e.target.value.toUpperCase())} className="h-12 mt-1 text-base" placeholder="B-20-01" />
+          </div>
 
           {isSwapDelivery && (
             <div>
