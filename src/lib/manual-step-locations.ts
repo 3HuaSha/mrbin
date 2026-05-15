@@ -21,7 +21,7 @@ export interface ManualStepLocation {
 
 // ============ 垃圾桶业务地点 ============
 
-export const GARBAGE_LOCATIONS: ManualStepLocation[] = [
+const GARBAGE_LOCATIONS: ManualStepLocation[] = [
   {
     id: '3445',
     name: '3445 Kennedy Depot',
@@ -106,7 +106,7 @@ export const GARBAGE_LOCATIONS: ManualStepLocation[] = [
 
 // ============ 砖业务场地 (公司自己的四个场地) ============
 
-export const BRICK_YARDS: ManualStepLocation[] = [
+const BRICK_YARDS: ManualStepLocation[] = [
   {
     id: 'yard_3445',
     name: '3445 Kennedy 场地',
@@ -151,7 +151,7 @@ export const BRICK_YARDS: ManualStepLocation[] = [
 
 // ============ 砖厂地点 ============
 
-export const BRICK_FACTORIES: ManualStepLocation[] = [
+const BRICK_FACTORIES: ManualStepLocation[] = [
   // Unilock 系列
   {
     id: 'unilock_georgetown',

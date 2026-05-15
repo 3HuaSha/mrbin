@@ -9,7 +9,7 @@ import { Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateC
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
-import { getFullAddress, MANUAL_STEP_LOCATIONS, BRICK_FACTORIES } from "@/lib/manual-step-locations";
+import { getFullAddress, MANUAL_STEP_LOCATIONS } from "@/lib/manual-step-locations";
 import { toast } from "sonner";
 import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
 import { useBusinessType } from "@/lib/business-type-storage";
@@ -640,10 +640,11 @@ export function FleetMapPage() {
   const activeBrickFactoryIds = useMemo(() => {
     if (businessType !== 'brick') return new Set<string>();
     const ids = new Set<string>();
+    const brickFactories = MANUAL_STEP_LOCATIONS.filter(l => l.type === 'brick_factory');
     // 从当天所有订单的地址中匹配砖厂
     allDayOrders.forEach(order => {
       const addr = (order.address || '').toUpperCase();
-      BRICK_FACTORIES.forEach(factory => {
+      brickFactories.forEach(factory => {
         if (addr.includes(factory.shortName.toUpperCase()) ||
             factory.shortName.toUpperCase().includes(addr) ||
             factory.fullAddress.toUpperCase().includes(addr)) {
@@ -654,7 +655,7 @@ export function FleetMapPage() {
     // 也从 jobSteps 的 location 字段匹配
     jobSteps.forEach(step => {
       const loc = (step.location || '').toUpperCase();
-      BRICK_FACTORIES.forEach(factory => {
+      brickFactories.forEach(factory => {
         if (loc.includes(factory.shortName.toUpperCase()) ||
             factory.shortName.toUpperCase().includes(loc)) {
           ids.add(factory.id);
@@ -1275,8 +1276,6 @@ export function FleetMapPage() {
                   
                   {isExpanded && (
                     <div className="p-2 space-y-1.5 border-t bg-muted/10">
-                      {/* 路线时间预估 */}
-                      <DriverRouteEstimate steps={steps} />
                       {/* 统一索引: 每个节点 (订单/手动步骤) 之间都有 DropIndicator */}
                       {(() => {
                         let stepIdx = 0; // 统一列表中的位置
@@ -1602,88 +1601,6 @@ export function FleetMapPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-// ============ DriverRouteEstimate: 显示司机路线预估时间 ============
-function DriverRouteEstimate({ steps }: { steps: any[] }) {
-  const [estimate, setEstimate] = useState<{
-    totalSeconds: number;
-    loading: boolean;
-    missing: number;
-  }>({ totalSeconds: 0, loading: false, missing: 0 });
-
-  // 收集地址列表
-  const addresses = useMemo(() => {
-    return steps
-      .filter(s => s.status !== 'done') // 只算未完成的
-      .map(step => {
-        if (step.node_type === 'order' && step.orders) {
-          return step.orders.address;
-        } else if (step.location) {
-          return getFullAddress(step.location);
-        }
-        return null;
-      })
-      .filter(Boolean) as string[];
-  }, [steps]);
-
-  // 当地址列表变化时重新计算
-  useEffect(() => {
-    if (addresses.length < 2) {
-      setEstimate({ totalSeconds: 0, loading: false, missing: 0 });
-      return;
-    }
-
-    let cancelled = false;
-    setEstimate(prev => ({ ...prev, loading: true }));
-
-    // 动态导入避免 createServerFn 初始化问题
-    import("@/lib/route-cache").then(({ getRouteSegments }) => {
-      return getRouteSegments(addresses);
-    }).then(result => {
-      if (cancelled) return;
-      setEstimate({
-        totalSeconds: result.totalDuration,
-        loading: false,
-        missing: result.missingSegments.length,
-      });
-    }).catch(() => {
-      if (cancelled) return;
-      setEstimate(prev => ({ ...prev, loading: false }));
-    });
-
-    return () => { cancelled = true; };
-  }, [addresses]);
-
-  // 没有足够的步骤不显示
-  if (addresses.length < 2) return null;
-
-  // 格式化时间
-  const formatSec = (seconds: number): string => {
-    if (seconds <= 0) return '—';
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.round((seconds % 3600) / 60);
-    if (hours === 0) return `${mins}min`;
-    return `${hours}h${mins > 0 ? ` ${mins}min` : ''}`;
-  };
-
-  return (
-    <div className="text-[10px] bg-blue-50 border border-blue-200 rounded px-2 py-1 flex items-center gap-1.5">
-      <Clock className="h-3 w-3 text-blue-600 shrink-0" />
-      {estimate.loading ? (
-        <span className="text-blue-600">计算中...</span>
-      ) : estimate.totalSeconds > 0 ? (
-        <span className="text-blue-700 font-medium">
-          预估 {formatSec(estimate.totalSeconds)}
-          {estimate.missing > 0 && (
-            <span className="text-amber-600 ml-1">({estimate.missing}段待计算)</span>
-          )}
-        </span>
-      ) : (
-        <span className="text-muted-foreground">无缓存数据</span>
-      )}
     </div>
   );
 }
