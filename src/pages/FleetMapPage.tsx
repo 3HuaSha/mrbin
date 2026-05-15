@@ -10,7 +10,7 @@ import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { getFullAddress, MANUAL_STEP_LOCATIONS, BRICK_FACTORIES } from "@/lib/manual-step-locations";
-import { getRouteSegments, formatSeconds, STOP_DURATION_SEC } from "@/lib/route-cache";
+import { getRouteSegments, formatSeconds } from "@/lib/route-cache";
 import { toast } from "sonner";
 import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
 import { useBusinessType } from "@/lib/business-type-storage";

@@ -13,7 +13,6 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { calculateSamsaraRouteForVehicle } from "@/actions/samsara";
 
 // 每站装卸时间 (秒)
 export const STOP_DURATION_SEC = 15 * 60; // 15分钟
@@ -62,6 +61,7 @@ export async function getRouteDuration(
 
   // 3. 缓存未命中 → 调用 Google Routes API
   try {
+    const { calculateSamsaraRouteForVehicle } = await import("@/actions/samsara");
     const routeData = await calculateSamsaraRouteForVehicle({
       data: {
         vehicleId: 'cache-calc', // 不需要真实车辆 ID
