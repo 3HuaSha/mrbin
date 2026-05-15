@@ -155,17 +155,10 @@ export function DriverStepPage() {
             {STEP_TYPE_EMOJI[step.step_type]} {isManualStep
               ? (STEP_TYPE_LABEL[step.step_type] || step.step_type)
               : order
-                ? `${order.type === 'delivery' ? '送桶' : order.type === 'pickup' ? '收桶' : order.type === 'swap' ? '换桶' : STEP_TYPE_LABEL[step.step_type] || step.step_type}`
+                ? `${order.type === 'delivery' ? '送' : order.type === 'pickup' ? '收' : order.type === 'swap' ? '换' : ''}${order.bin_size ? order.bin_size + 'yd' : ''}${order.bin_type ? ({'garbage':'垃圾桶','brick':'砖桶','soil':'土桶','cement':'水泥桶','asphalt':'沥青桶'} as Record<string,string>)[order.bin_type] || order.bin_type : '桶'}`
                 : (STEP_TYPE_LABEL[step.step_type] || step.step_type)
             }
           </div>
-          {order && (
-            <div className="text-sm text-muted-foreground mt-1">
-              {order.order_number} · {order.type === 'delivery' ? '送桶' : order.type === 'pickup' ? '收桶' : order.type === 'swap' ? '换桶' : order.type}
-              {order.bin_size ? ` · ${order.bin_size}yd` : ''}
-              {order.bin_type ? ` · ${({'garbage':'垃圾桶','brick':'砖桶','soil':'土桶','cement':'水泥桶','asphalt':'沥青桶'} as Record<string,string>)[order.bin_type] || order.bin_type}` : ''}
-            </div>
-          )}
           <div className="text-base mt-2">{step.location}</div>
         </div>
 
