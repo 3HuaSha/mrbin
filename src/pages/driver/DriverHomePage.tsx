@@ -64,6 +64,36 @@ export function DriverHomePage() {
     },
   });
 
+  // 实时订阅: 当调度员分配/修改任务时, 司机端自动刷新
+  useEffect(() => {
+    if (!driverId) return;
+    const channel = supabase
+      .channel(`driver-steps-${driverId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'job_steps',
+          filter: `driver_id=eq.${driverId}`,
+        },
+        () => { refetch(); }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'dispatch_assignments',
+          filter: `driver_id=eq.${driverId}`,
+        },
+        () => { refetch(); }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [driverId, refetch]);
+
   // 当前的车 (从今日的任意一个 step 的 assignment 拿，如果有的话)
   const currentVehicleId = useMemo(() => {
     const stepWithAssignment = steps.find(s => s.assignment_id);
