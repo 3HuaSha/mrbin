@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
@@ -609,7 +609,37 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
     netsuite_order_id: order.netsuite_order_id || "",
     service_date: order.service_date,
     status: order.status,
+    bin_number: "",
   });
+
+  // 查询该订单关联的桶号 (从 job_steps)
+  const { data: existingBinNumber } = useQuery({
+    queryKey: ["order-bin-number-edit", order.id],
+    queryFn: async () => {
+      // 先通过 dispatch_assignments 找到 job_steps
+      const { data: assignments } = await supabase
+        .from("dispatch_assignments")
+        .select("id")
+        .eq("order_id", order.id);
+      if (!assignments || assignments.length === 0) return "";
+      const assignmentIds = assignments.map(a => a.id);
+      const { data: steps } = await supabase
+        .from("job_steps")
+        .select("bin_number_reported")
+        .in("assignment_id", assignmentIds)
+        .not("bin_number_reported", "is", null)
+        .limit(1);
+      return steps?.[0]?.bin_number_reported || "";
+    },
+  });
+
+  // 初始化桶号
+  useEffect(() => {
+    if (existingBinNumber && !form.bin_number) {
+      setForm(f => ({ ...f, bin_number: existingBinNumber }));
+    }
+  }, [existingBinNumber]);
+
   const save = useMutation({
     mutationFn: async () => {
       const { error } = await supabase
@@ -631,8 +661,25 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
         })
         .eq("id", order.id);
       if (error) throw error;
+
+      // 保存桶号到 job_steps (如果有值)
+      if (form.bin_number.trim()) {
+        const { data: assignments } = await supabase
+          .from("dispatch_assignments")
+          .select("id")
+          .eq("order_id", order.id);
+        if (assignments && assignments.length > 0) {
+          const assignmentIds = assignments.map(a => a.id);
+          // 更新所有关联步骤的 bin_number_reported (通常是 customer_delivery 或 customer_pickup)
+          await supabase
+            .from("job_steps")
+            .update({ bin_number_reported: form.bin_number.trim().toUpperCase() })
+            .in("assignment_id", assignmentIds)
+            .in("step_type", ["customer_delivery", "customer_pickup", "depot_pickup"]);
+        }
+      }
     },
-    onSuccess: () => { toast.success("已保存"); qc.invalidateQueries({ queryKey: ["orders"] }); onClose(); },
+    onSuccess: () => { toast.success("已保存"); qc.invalidateQueries({ queryKey: ["orders"] }); qc.invalidateQueries({ queryKey: ["order-bin-numbers"] }); onClose(); },
     onError: (e: Error) => toast.error(e.message),
   });
   return (
@@ -692,6 +739,11 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          {/* 桶号 */}
+          <div>
+            <Label>桶号</Label>
+            <Input className="mt-1" value={form.bin_number} onChange={(e) => setForm({ ...form, bin_number: e.target.value.toUpperCase() })} placeholder="如: B-20-01" />
           </div>
           {/* 时段 */}
           <div className="grid grid-cols-2 gap-3">
