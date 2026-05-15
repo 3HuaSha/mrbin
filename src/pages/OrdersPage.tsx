@@ -447,7 +447,7 @@ function FragmentRow({
         <td className="px-3 py-2 text-right">
           <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
             <Button size="icon" variant="ghost" onClick={onEdit}><Pencil className="h-4 w-4" /></Button>
-            {order.status !== "cancelled" && order.status !== "done" && (
+            {order.status !== "cancelled" && (
               <Button size="icon" variant="ghost" onClick={onCancel}><X className="h-4 w-4" /></Button>
             )}
           </div>
