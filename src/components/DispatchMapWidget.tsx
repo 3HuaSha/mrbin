@@ -803,7 +803,7 @@ export function DispatchMapWidget({
       }
     });
 
-  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments, driverETAs, businessType, unassignedOrderSet, draggableOrderSet, onAssignOrder, onUnassignOrder, onDragHoverDriver, onDragHoverPosition, driverDropZoneAttr, dropPositionAttr]);
+  }, [orders, assignments, filteredVehicles, drivers, mapLoaded, vehicleAssignments, driverETAs, businessType, unassignedOrderSet, draggableOrderSet, onAssignOrder, onUnassignOrder, onDragHoverDriver, onDragHoverPosition, onOrderClick, driverDropZoneAttr, dropPositionAttr]);
 
   // 5. 绘制ETA路线
   useEffect(() => {

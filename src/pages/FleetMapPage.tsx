@@ -629,10 +629,7 @@ export function FleetMapPage() {
         }
       });
     });
-    // 如果没有匹配到任何砖厂, 显示所有砖厂
-    if (ids.size === 0) {
-      brickFactories.forEach(f => ids.add(f.id));
-    }
+    // 没有匹配到任何砖厂就不显示
     return ids;
   }, [businessType, allDayOrders, jobSteps]);
 

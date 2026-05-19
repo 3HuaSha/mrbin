@@ -58,7 +58,7 @@ export function CreateOrderPage() {
       const addr = form.address.trim();
       const { data, error } = await supabase
         .from("orders")
-        .select("id, order_number, address, bin_size, bin_type, service_date, customer_name, status, linked_order_id")
+        .select("id, order_number, address, bin_size, bin_type, service_date, customer_name, customer_phone, customer_notes, status, linked_order_id")
         .eq("type", "delivery")
         .ilike("address", `%${addr}%`)
         .eq("bin_size", form.bin_size)
@@ -685,7 +685,18 @@ export function CreateOrderPage() {
                               <button
                                 key={o.id}
                                 type="button"
-                                onClick={() => setSwapLinkedOrderId(isSel ? null : o.id)}
+                                onClick={() => {
+                                  if (isSel) {
+                                    setSwapLinkedOrderId(null);
+                                  } else {
+                                    setSwapLinkedOrderId(o.id);
+                                    setForm(prev => ({
+                                      ...prev,
+                                      customer_contact: `${o.customer_name || ''} ${o.customer_phone || ''}`.trim() || prev.customer_contact,
+                                      customer_notes: o.customer_notes || prev.customer_notes,
+                                    }));
+                                  }
+                                }}
                                 className={cn(
                                   "w-full flex items-center justify-between px-3 py-2 rounded border-2 text-left transition-all",
                                   isSel
