@@ -560,6 +560,12 @@ export function DispatchMapWidget({
         marker.setZIndex(10000);
         onMapDragOrder?.(order.id);
 
+        // 清理可能残留的旧虚影
+        if (marker._ghostMarker) {
+          marker._ghostMarker.setMap(null);
+          marker._ghostMarker = null;
+        }
+
         // 冻结地图, 防止拖到地图边缘触发地图 pan
         if (mapInstance.current) {
           mapInstance.current.setOptions({

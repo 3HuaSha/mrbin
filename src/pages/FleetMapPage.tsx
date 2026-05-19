@@ -605,6 +605,7 @@ export function FleetMapPage() {
   }, [hoveredDriverId, driverJobSteps]);
 
   // 当天砖业务订单涉及的砖厂 id 集合 (砖业务时只显示有单的砖厂)
+  // 如果没有匹配到任何砖厂, 则显示所有砖厂 (避免空地图)
   const activeBrickFactoryIds = useMemo((): Set<string> => {
     if (businessType !== 'brick') return new Set<string>();
     const ids = new Set<string>();
@@ -628,6 +629,10 @@ export function FleetMapPage() {
         }
       });
     });
+    // 如果没有匹配到任何砖厂, 显示所有砖厂
+    if (ids.size === 0) {
+      brickFactories.forEach(f => ids.add(f.id));
+    }
     return ids;
   }, [businessType, allDayOrders, jobSteps]);
 
@@ -721,10 +726,8 @@ export function FleetMapPage() {
       // 计算目标位置: 如果没指定 index 就放末尾
       let targetIndex = orderIndex ?? 0;
       if (driverId && index === undefined) {
-        targetIndex = (merged.assigned[driverId] ?? []).length;
-        if ((merged.assigned[driverId] ?? []).includes(orderId)) {
-          targetIndex = Math.max(0, targetIndex - 1);
-        }
+        const currentList = merged.assigned[driverId] ?? [];
+        targetIndex = currentList.filter(id => id !== orderId).length;
       }
 
       // 检查是否与"服务器当前状态"一致 → 是的话把 draft 条目清掉, 避免 pending 变更堆积
