@@ -1194,6 +1194,7 @@ function InsertStepButton({
       ];
     } else if (stepType === "dump_waste") {
       return [
+        { value: "3445", label: "3445 Kennedy" },
         { value: "york1 300", label: "YORK1 Nugget (300)" },
         { value: "63A", label: "63A Medulla" },
         { value: "draglam", label: "Draglam Vaughan" },
@@ -1214,15 +1215,17 @@ function InsertStepButton({
       toast.error("请选择地点");
       return;
     }
-    if (!binSize) {
+    if (stepType !== "dump_waste" && !binSize) {
       toast.error("请选择桶大小");
       return;
     }
     
-    // 将桶大小添加到备注中
-    const finalNotes = notes ? `${binSize}yd - ${notes}` : `${binSize}yd`;
+    // 倒垃圾不需要桶大小，其他步骤将桶大小添加到备注中
+    const finalNotes = stepType === "dump_waste"
+      ? notes
+      : (notes ? `${binSize}yd - ${notes}` : `${binSize}yd`);
     
-    onInsert({ driverId, position, location, stepType, notes: finalNotes });
+    onInsert({ driverId, position, location, stepType, notes: finalNotes || undefined });
     
     // 重置表单
     setStepType("");
@@ -1284,21 +1287,23 @@ function InsertStepButton({
         </div>
       )}
       
-      {/* 第三行：桶大小 */}
-      <div>
-        <Label className="text-[10px] font-medium">桶大小</Label>
-        <Select value={binSize} onValueChange={setBinSize}>
-          <SelectTrigger className="mt-0.5 h-7 text-[10px]">
-            <SelectValue placeholder="选择桶大小" />
-          </SelectTrigger>
-          <SelectContent className="z-[110]">
-            <SelectItem value="14" className="text-[10px]">14 yd</SelectItem>
-            <SelectItem value="20" className="text-[10px]">20 yd</SelectItem>
-            <SelectItem value="30" className="text-[10px]">30 yd</SelectItem>
-            <SelectItem value="40" className="text-[10px]">40 yd</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {/* 第三行：桶大小（倒垃圾不需要选桶大小）*/}
+      {stepType !== "dump_waste" && (
+        <div>
+          <Label className="text-[10px] font-medium">桶大小</Label>
+          <Select value={binSize} onValueChange={setBinSize}>
+            <SelectTrigger className="mt-0.5 h-7 text-[10px]">
+              <SelectValue placeholder="选择桶大小" />
+            </SelectTrigger>
+            <SelectContent className="z-[110]">
+              <SelectItem value="14" className="text-[10px]">14 yd</SelectItem>
+              <SelectItem value="20" className="text-[10px]">20 yd</SelectItem>
+              <SelectItem value="30" className="text-[10px]">30 yd</SelectItem>
+              <SelectItem value="40" className="text-[10px]">40 yd</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       
       {/* 第四行：备注 */}
       <div>
