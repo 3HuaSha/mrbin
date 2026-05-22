@@ -166,6 +166,20 @@ export function DispatchPage() {
   const [insertStepAt, setInsertStepAt] = useState<{ driverId: string; position: number } | null>(null);
   const [viewingStep, setViewingStep] = useState<JobStep | null>(null);
 
+  // Supabase Realtime: 监听 job_steps 和 orders 表变化，实时刷新（无需轮询）
+  useEffect(() => {
+    const channel = supabase.channel('dispatch-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_steps' }, () => {
+        qc.invalidateQueries({ queryKey: ["job-steps", date] });
+        qc.invalidateQueries({ queryKey: ["dispatch-assignments", date] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        qc.invalidateQueries({ queryKey: ["dispatch-orders", date] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [date, qc]);
+
   const { data: drivers = [] } = useQuery({
     queryKey: ["drivers-assigned"],
     queryFn: async () => {
