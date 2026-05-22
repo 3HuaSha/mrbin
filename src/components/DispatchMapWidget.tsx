@@ -109,9 +109,8 @@ export function DispatchMapWidget({
     queryFn: async () => {
       const result = await fetchSamsaraVehicles();
       if (!result.success) {
-        console.warn("Samsara 获取失败:", result.error);
-        // 返回空数组而不是抛错, 避免 useQuery 把缓存清掉
-        return [];
+        // 抛错让 React Query 自动重试, 同时 placeholderData 保留上次成功数据
+        throw new Error(result.error || 'Samsara 获取失败');
       }
       return result.data || [];
     },
@@ -119,8 +118,15 @@ export function DispatchMapWidget({
     refetchInterval: 30000,
     // 切换页面 / focus 时不强制重取 (避免闪烁), 用缓存数据
     refetchOnWindowFocus: false,
-    // 即使报错也保留上次成功的数据
-    staleTime: 15000,
+    // 每次组件挂载(含 SPA 路由切换)都立即重新获取, 避免导航过来时缓存为空
+    refetchOnMount: 'always',
+    // 失败时自动重试 3 次, 间隔递增
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+    // 缓存 10s 内认为新鲜, 避免不必要的重复请求
+    staleTime: 10000,
+    // 重新获取期间保留上次成功的数据, 避免闪烁
+    placeholderData: (prev: any) => prev,
   });
 
   // 未分配订单 id 集合 (稳定引用, 便于在 effect 内判断)
@@ -192,6 +198,9 @@ export function DispatchMapWidget({
       }
       return data || [];
     },
+    // SPA 路由切换回来时保证有最新数据
+    refetchOnMount: 'always',
+    staleTime: 30000,
   });
   
   // 调试：打印车辆分配数据（仅在开发环境）
@@ -264,6 +273,16 @@ export function DispatchMapWidget({
       script.defer = true;
       script.onload = () => setMapLoaded(true);
       document.head.appendChild(script);
+    } else {
+      // 脚本标签已存在但 API 尚未就绪 (例如快速切换页面再回来)
+      // 轮询等待 Google Maps 加载完成
+      const interval = setInterval(() => {
+        if ((window as any).google && (window as any).google.maps) {
+          clearInterval(interval);
+          setMapLoaded(true);
+        }
+      }, 100);
+      return () => clearInterval(interval);
     }
   }, []);
 
