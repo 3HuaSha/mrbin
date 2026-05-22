@@ -886,8 +886,8 @@ export function DispatchPage() {
   // ============ Render ============
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="p-4 h-screen flex flex-col">
-        <div className="flex items-center justify-between mb-4 gap-4">
+      <div className="p-3 h-screen flex flex-col">
+        <div className="flex items-center justify-between mb-2 gap-4">
           <h1 className="text-2xl font-bold">排班看板</h1>
           <div className="flex items-center gap-3">
             <BusinessTypeSelector value={businessType} onChange={setBusinessType} />
@@ -924,7 +924,7 @@ export function DispatchPage() {
             </div>
 
             {/* 右侧:司机行 */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/10">
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 bg-muted/10">
               {filteredDrivers.map((d) => {
                 const list = activeAssignments.filter((a) => a.driver_id === d.id)
                   .sort((x, y) => x.sequence - y.sequence);
@@ -1033,7 +1033,7 @@ function OrderNodeDisplay({
   return (
     <div 
       className={cn(
-        "group relative rounded-lg border-l-4 shadow-md p-2.5 transition-all duration-300 hover:shadow-xl hover:scale-105 hover:z-10 w-[180px] shrink-0",
+        "group relative rounded-lg border-l-4 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[160px] shrink-0",
         isDone 
           ? "border-l-green-600 bg-green-100" 
           : "border-l-blue-500 bg-card",
@@ -1041,19 +1041,19 @@ function OrderNodeDisplay({
       )}
       onClick={onClick}
     >
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
-          <div className="text-xs font-semibold leading-tight">
+          <div className="text-[11px] font-semibold leading-tight">
             {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
           </div>
-          {isDone && <CheckCircle2 className="h-4 w-4 text-green-600" />}
+          {isDone && <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />}
         </div>
-        <div className="text-[10px] text-muted-foreground leading-snug break-words" title={order.address}>
+        <div className="text-[10px] text-muted-foreground leading-snug truncate" title={order.address}>
           {order.address}
         </div>
         <div className="text-[10px] text-primary font-medium">{timeLabel(order)}</div>
         {jobStep?.bin_number_reported && (
-          <div className="text-[10px] text-primary">桶号: {jobStep.bin_number_reported}</div>
+          <div className="text-[9px] text-primary">桶号: {jobStep.bin_number_reported}</div>
         )}
         {order.customer_notes && (
           <div className="text-[9px] text-status-progress truncate">
@@ -1346,8 +1346,12 @@ function BacklogColumn({ orders, completedOrders }: { orders: Order[], completed
     return orders;
   }, [orders, timeFilter]);
 
+  // 按类型分列: 送+换 vs 收
+  const deliverySwapOrders = useMemo(() => filteredOrders.filter(o => o.type === 'delivery' || o.type === 'swap'), [filteredOrders]);
+  const pickupOrders = useMemo(() => filteredOrders.filter(o => o.type === 'pickup'), [filteredOrders]);
+
   return (
-    <div className="w-[260px] flex flex-col h-full bg-muted/30 rounded-lg">
+    <div className="w-[440px] flex flex-col h-full bg-muted/30 rounded-lg">
       <div className="px-3 py-2 border-b bg-card rounded-t-lg">
         <div className="flex items-center justify-between mb-2">
           <div>
@@ -1385,45 +1389,69 @@ function BacklogColumn({ orders, completedOrders }: { orders: Order[], completed
           </Button>
         </div>
       </div>
+
       <div
         ref={setNodeRef}
         className={cn(
-          "flex-1 overflow-y-auto p-2 space-y-2 transition-colors",
+          "flex-1 overflow-y-auto transition-colors",
           isOver && "bg-primary/5"
         )}
       >
-        <SortableContext
-          items={filteredOrders.map((o) => cardId.fromOrder(o.id))}
-          strategy={verticalListSortingStrategy}
-        >
-          {filteredOrders.map((o) => (
-            <SortableOrderCard key={o.id} id={cardId.fromOrder(o.id)}>
-              <OrderCardDisplay order={o} binNumber={null} />
-            </SortableOrderCard>
-          ))}
-        </SortableContext>
-        {filteredOrders.length === 0 && orders.length > 0 && (
-          <div className="text-center text-muted-foreground text-[11px] py-6">
-            {timeFilter === 'AM' ? '无 AM 订单' : timeFilter === 'PM' ? '无 PM 订单' : '全部已排班 🎉'}
+        <div className="flex h-full">
+          {/* 左列: 送+换 */}
+          <div className="flex-1 border-r p-1.5 space-y-1.5 overflow-y-auto">
+            <div className="sticky top-0 bg-muted/80 backdrop-blur-sm rounded px-2 py-1 text-[10px] font-bold text-muted-foreground flex items-center justify-between z-10">
+              <span>📦 送桶 / 换桶</span>
+              <Badge variant="outline" className="text-[9px] h-4 px-1">{deliverySwapOrders.length}</Badge>
+            </div>
+            <SortableContext
+              items={deliverySwapOrders.map((o) => cardId.fromOrder(o.id))}
+              strategy={verticalListSortingStrategy}
+            >
+              {deliverySwapOrders.map((o) => (
+                <SortableOrderCard key={o.id} id={cardId.fromOrder(o.id)}>
+                  <OrderCardDisplay order={o} binNumber={null} />
+                </SortableOrderCard>
+              ))}
+            </SortableContext>
+            {deliverySwapOrders.length === 0 && (
+              <div className="text-center text-muted-foreground text-[10px] py-4">无</div>
+            )}
           </div>
-        )}
-        {orders.length === 0 && (
-          <div className="text-center text-muted-foreground text-[11px] py-6">
-            全部已排班 🎉
+
+          {/* 右列: 收 */}
+          <div className="flex-1 p-1.5 space-y-1.5 overflow-y-auto">
+            <div className="sticky top-0 bg-muted/80 backdrop-blur-sm rounded px-2 py-1 text-[10px] font-bold text-muted-foreground flex items-center justify-between z-10">
+              <span>📤 收桶</span>
+              <Badge variant="outline" className="text-[9px] h-4 px-1">{pickupOrders.length}</Badge>
+            </div>
+            <SortableContext
+              items={pickupOrders.map((o) => cardId.fromOrder(o.id))}
+              strategy={verticalListSortingStrategy}
+            >
+              {pickupOrders.map((o) => (
+                <SortableOrderCard key={o.id} id={cardId.fromOrder(o.id)}>
+                  <OrderCardDisplay order={o} binNumber={null} />
+                </SortableOrderCard>
+              ))}
+            </SortableContext>
+            {pickupOrders.length === 0 && (
+              <div className="text-center text-muted-foreground text-[10px] py-4">无</div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* 已完成区域 */}
       {completedOrders.length > 0 && (
-        <div className="border-t bg-card/50 rounded-b-lg flex flex-col max-h-[150px]">
-          <div className="px-3 py-1.5 border-b flex items-center justify-between bg-status-done/10">
-            <div className="text-[11px] font-bold text-status-done flex items-center gap-1">
+        <div className="border-t bg-card/50 rounded-b-lg flex flex-col max-h-[120px]">
+          <div className="px-3 py-1 border-b flex items-center justify-between bg-status-done/10">
+            <div className="text-[10px] font-bold text-status-done flex items-center gap-1">
               ✓ 已完成
             </div>
             <Badge variant="outline" className="text-[9px] h-4 px-1">{completedOrders.length}</Badge>
           </div>
-          <div className="overflow-y-auto p-1.5 space-y-1.5">
+          <div className="overflow-y-auto p-1 space-y-1">
             {completedOrders.map((o) => (
               <OrderCardDisplay key={o.id} order={o} binNumber={null} readonly />
             ))}
@@ -1495,14 +1523,14 @@ function DriverColumn({
 
   return (
     <div className="bg-card border rounded-lg shadow-sm flex flex-col overflow-hidden">
-      <div className="px-4 py-2.5 border-b bg-muted/20 flex items-center justify-between">
-        <div className="font-semibold text-base tracking-tight flex items-center gap-2">
+      <div className="px-3 py-1.5 border-b bg-muted/20 flex items-center justify-between">
+        <div className="font-semibold text-sm tracking-tight flex items-center gap-1.5">
           <span>👤</span> {driver.name}
-          <Badge variant="secondary" className="px-2 text-[11px] font-normal">{allNodes.length} 步骤</Badge>
+          <Badge variant="secondary" className="px-1.5 text-[10px] font-normal">{allNodes.length} 步</Badge>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <Select value={vehicle?.id ?? ""} onValueChange={onChangeVehicle}>
-            <SelectTrigger className="h-7 w-[160px] text-xs bg-background">
+            <SelectTrigger className="h-6 w-[140px] text-[11px] bg-background">
               <SelectValue placeholder="选择车辆" />
             </SelectTrigger>
             <SelectContent>
@@ -1514,7 +1542,7 @@ function DriverColumn({
             </SelectContent>
           </Select>
           {hasChanges && (
-            <Button size="sm" onClick={onSave} disabled={isSaving} className="h-7 text-xs px-3 shadow-sm font-bold">
+            <Button size="sm" onClick={onSave} disabled={isSaving} className="h-6 text-[11px] px-2 shadow-sm font-bold">
               同步修改
             </Button>
           )}
@@ -1524,7 +1552,7 @@ function DriverColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          "relative p-3 flex flex-row gap-0 overflow-x-auto min-h-[160px] transition-colors custom-scrollbar",
+          "relative p-2 flex flex-row gap-0 overflow-x-auto min-h-[120px] transition-colors custom-scrollbar",
           isOver ? "bg-primary/5" : "bg-muted/5"
         )}
       >
