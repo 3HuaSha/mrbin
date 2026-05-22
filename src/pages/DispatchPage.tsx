@@ -931,7 +931,9 @@ export function DispatchPage() {
     targetDriverAsgs.splice(insertIndex, 0, a);
     targetDriverAsgs.forEach((x, i) => x.sequence = i + 1);
 
-    setLocalAssignments(newAssignments);
+    // 重建完整数组：移除目标司机旧数据，拼接更新后的目标司机数据（含被移动的卡片）
+    const finalAssignments = newAssignments.filter(x => x.driver_id !== targetDriver).concat(targetDriverAsgs);
+    setLocalAssignments(finalAssignments);
   };
 
   const activeCard = activeId ? cardId.parse(activeId) : null;
