@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,10 +27,11 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   DndContext, type DragEndEvent, type DragStartEvent, PointerSensor,
-  useSensor, useSensors, DragOverlay, useDroppable, closestCorners,
+  useSensor, useSensors, DragOverlay, useDroppable, pointerWithin, rectIntersection, closestCenter,
+  type CollisionDetection,
 } from "@dnd-kit/core";
 import {
-  SortableContext, useSortable, verticalListSortingStrategy, rectSortingStrategy, arrayMove,
+  SortableContext, useSortable, verticalListSortingStrategy, horizontalListSortingStrategy, arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useAudit } from "@/hooks/use-audit";
@@ -145,6 +146,13 @@ const cardId = {
     if (id.startsWith("o:")) return { kind: "order" as const, id: id.slice(2) };
     return null;
   },
+};
+
+// 自定义碰撞检测：优先用 pointerWithin 检测容器，回退到 closestCenter
+const multiContainerCollision: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  if (pointerCollisions.length > 0) return pointerCollisions;
+  return closestCenter(args);
 };
 
 export function DispatchPage() {
@@ -316,6 +324,9 @@ export function DispatchPage() {
   const [driverVehicle, setDriverVehicle] = useState<Record<string, string>>({});
   const getDriverVehicle = (driverId: string) => {
     if (driverVehicle[driverId]) return driverVehicle[driverId];
+    // 优先使用车队页面已分配的车辆
+    const fleetAssignment = vehicleAssignments.find((a: any) => a.driver_id === driverId);
+    if (fleetAssignment?.vehicle_id) return fleetAssignment.vehicle_id;
     const fromAssignment = currentAssignments.find((a) => a.driver_id === driverId)?.vehicle_id;
     return fromAssignment ?? filteredVehicles[0]?.id ?? "";
   };
@@ -637,9 +648,57 @@ export function DispatchPage() {
         
         console.log('司机ID:', { activeDriverId, overDriverId });
         
-        // 只处理同一司机的拖拽
+        // 跨司机移动（从一行拖到另一行）
         if (activeDriverId !== overDriverId) {
-          console.log('不同司机，跳过');
+          console.log('跨司机拖拽移动');
+          if (!activeDriverId || !overDriverId) return;
+          
+          const newAssignments = [...currentAssignments];
+          const newSteps = [...currentJobSteps];
+          
+          if (activeAssignment) {
+            // 从原司机移除
+            const aIdx = newAssignments.findIndex(x => x.id === activeAssignment!.id);
+            if (aIdx >= 0) {
+              newAssignments.splice(aIdx, 1);
+              // 重排原司机的序号
+              const oldDriverAsgs = newAssignments.filter(x => x.driver_id === activeDriverId).sort((a, b) => a.sequence - b.sequence);
+              oldDriverAsgs.forEach((x, i) => { x.sequence = i + 1; });
+              
+              // 更新 driver_id 和 vehicle_id
+              activeAssignment.driver_id = overDriverId;
+              activeAssignment.vehicle_id = getDriverVehicle(overDriverId);
+              
+              // 插入到目标司机
+              const targetAsgs = newAssignments.filter(x => x.driver_id === overDriverId).sort((a, b) => a.sequence - b.sequence);
+              let insertIdx = targetAsgs.length;
+              if (overAssignment) {
+                insertIdx = targetAsgs.findIndex(x => x.id === overAssignment!.id);
+                if (insertIdx < 0) insertIdx = targetAsgs.length;
+              }
+              targetAsgs.splice(insertIdx, 0, activeAssignment);
+              targetAsgs.forEach((x, i) => { x.sequence = i + 1; });
+              
+              const finalAssignments = newAssignments.filter(x => x.driver_id !== overDriverId).concat(targetAsgs);
+              setLocalAssignments(finalAssignments);
+              
+              // 更新对应的 job_steps 的 driver_id
+              const updatedSteps = newSteps.map(s => {
+                if (s.assignment_id === activeAssignment!.id) {
+                  return { ...s, driver_id: overDriverId };
+                }
+                return s;
+              });
+              setLocalJobSteps(updatedSteps);
+            }
+          } else if (activeStep && activeStep.node_type === 'step') {
+            // 手动步骤跨司机移动
+            const sIdx = newSteps.findIndex(s => s.id === activeStep!.id);
+            if (sIdx >= 0) {
+              newSteps[sIdx] = { ...newSteps[sIdx], driver_id: overDriverId };
+              setLocalJobSteps(newSteps);
+            }
+          }
           return;
         }
         if (!activeDriverId) {
@@ -913,7 +972,7 @@ export function DispatchPage() {
 
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={multiContainerCollision}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
         >
@@ -1442,22 +1501,6 @@ function BacklogColumn({ orders, completedOrders }: { orders: Order[], completed
         </div>
       </div>
 
-      {/* 已完成区域 */}
-      {completedOrders.length > 0 && (
-        <div className="border-t bg-card/50 rounded-b-lg flex flex-col max-h-[120px]">
-          <div className="px-3 py-1 border-b flex items-center justify-between bg-status-done/10">
-            <div className="text-[10px] font-bold text-status-done flex items-center gap-1">
-              ✓ 已完成
-            </div>
-            <Badge variant="outline" className="text-[9px] h-4 px-1">{completedOrders.length}</Badge>
-          </div>
-          <div className="overflow-y-auto p-1 space-y-1">
-            {completedOrders.map((o) => (
-              <OrderCardDisplay key={o.id} order={o} binNumber={null} readonly />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1485,6 +1528,11 @@ function DriverColumn({
   onViewStep: (step: JobStep) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: driver.id });
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const combinedRef = useCallback((node: HTMLDivElement | null) => {
+    setNodeRef(node);
+    scrollRef.current = node;
+  }, [setNodeRef]);
   const [buttonPosition, setButtonPosition] = useState<{ x: number; y: number } | null>(null);
   
   const handleButtonClick = (position: number, event: React.MouseEvent<HTMLButtonElement>) => {
@@ -1521,6 +1569,30 @@ function DriverColumn({
     return nodes.sort((a, b) => a.stepNumber - b.stepNumber);
   }, [assignments, jobSteps]);
 
+  // 计算已完成节点数量，仅首次加载时自动滚动到只显示最后一个已完成的卡片
+  const hasAutoScrolled = useRef(false);
+  useEffect(() => {
+    if (hasAutoScrolled.current) return;
+    if (!scrollRef.current || allNodes.length === 0) return;
+    let doneCount = 0;
+    for (const node of allNodes) {
+      if (node.type === 'order') {
+        const step = jobSteps.find(s => s.assignment_id === (node.data as Assignment).id);
+        if (step?.status === 'done') doneCount++;
+        else break;
+      } else {
+        if ((node.data as JobStep).status === 'done') doneCount++;
+        else break;
+      }
+    }
+    if (doneCount > 1) {
+      const cardWidth = 168;
+      const scrollTo = (doneCount - 1) * cardWidth;
+      scrollRef.current.scrollTo({ left: scrollTo, behavior: 'smooth' });
+    }
+    hasAutoScrolled.current = true;
+  }, [allNodes, jobSteps]);
+
   return (
     <div className="bg-card border rounded-lg shadow-sm flex flex-col overflow-hidden">
       <div className="px-3 py-1.5 border-b bg-muted/20 flex items-center justify-between">
@@ -1550,7 +1622,7 @@ function DriverColumn({
       </div>
 
       <div
-        ref={setNodeRef}
+        ref={combinedRef}
         className={cn(
           "relative p-2 flex flex-row gap-0 overflow-x-auto min-h-[120px] transition-colors custom-scrollbar",
           isOver ? "bg-primary/5" : "bg-muted/5"
@@ -1591,7 +1663,7 @@ function DriverColumn({
               ? cardId.fromAssignment((node.data as Assignment).id)
               : `step:${(node.data as JobStep).id}`
           )}
-          strategy={rectSortingStrategy}
+          strategy={horizontalListSortingStrategy}
         >
           {allNodes.map((node, index) => {
             const nodeId = node.type === 'order' 
