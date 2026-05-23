@@ -382,50 +382,61 @@ export function DispatchPage() {
         if (assignmentError) throw assignmentError;
         
         // 为这个 assignment 创建 job_steps（根据订单类型自动生成）
+        // 注：DB 触发器已禁用，前端负责创建完整步骤链
         const order = i.orders;
-        const steps = [];
+        const displayStep = {
+          assignment_id: newAssignment.id,
+          driver_id: i.driver_id,
+          scheduled_date: i.scheduled_date,
+          order_id: order.id,
+          node_type: 'order' as const,
+          step_number: i.sequence,
+          step_type: order.type === "delivery" ? "delivery" : order.type === "pickup" ? "pickup" : "swap",
+          location: order.address,
+          status: 'locked',
+        };
+        const workflowSteps: any[] = [];
         
         if (order.type === "delivery") {
-          steps.push({
-            assignment_id: newAssignment.id,
-            driver_id: i.driver_id,
-            scheduled_date: i.scheduled_date,
-            order_id: order.id,
-            node_type: 'order' as const,
-            step_number: i.sequence,
-            step_type: 'delivery',
-            location: order.address,
-            status: 'locked',
-          });
+          workflowSteps.push(
+            { assignment_id: newAssignment.id, step_number: 1, step_type: 'depot_pickup', location: 'Kennedy Depot, 3445 Kennedy Rd', status: 'pending', requires_photo: true, requires_bin_number: true, driver_id: i.driver_id, scheduled_date: i.scheduled_date, order_id: order.id },
+            { assignment_id: newAssignment.id, step_number: 2, step_type: 'customer_delivery', location: order.address, status: 'locked', requires_photo: true, requires_bin_number: true, driver_id: i.driver_id, scheduled_date: i.scheduled_date, order_id: order.id }
+          );
         } else if (order.type === "pickup") {
-          steps.push({
-            assignment_id: newAssignment.id,
-            driver_id: i.driver_id,
-            scheduled_date: i.scheduled_date,
-            order_id: order.id,
-            node_type: 'order' as const,
-            step_number: i.sequence,
-            step_type: 'pickup',
-            location: order.address,
-            status: 'locked',
-          });
+          workflowSteps.push(
+            { assignment_id: newAssignment.id, step_number: 1, step_type: 'customer_pickup', location: order.address, status: 'pending', requires_photo: true, requires_bin_number: true, driver_id: i.driver_id, scheduled_date: i.scheduled_date, order_id: order.id }
+          );
         } else if (order.type === "swap") {
-          steps.push({
-            assignment_id: newAssignment.id,
-            driver_id: i.driver_id,
-            scheduled_date: i.scheduled_date,
-            order_id: order.id,
-            node_type: 'order' as const,
-            step_number: i.sequence,
-            step_type: 'swap',
-            location: order.address,
-            status: 'locked',
-          });
+          workflowSteps.push(
+            { assignment_id: newAssignment.id, step_number: 1, step_type: 'swap', location: order.address, status: 'pending', requires_photo: true, requires_bin_number: true, driver_id: i.driver_id, scheduled_date: i.scheduled_date, order_id: order.id }
+          );
         }
         
-        if (steps.length > 0) {
-          const { error: stepsError } = await supabase.from("job_steps").insert(steps);
+        // 插入显示节点 + 工作流步骤
+        const allStepsToInsert = [displayStep, ...workflowSteps];
+        if (allStepsToInsert.length > 0) {
+          const { error: stepsError } = await supabase.from("job_steps").insert(allStepsToInsert);
           if (stepsError) throw stepsError;
+        }
+        
+        // 收桶/换桶订单自动创建 dump_site 步骤（同 assignment，排在工作流最后一步之后）
+        if (order.type === "pickup" || order.type === "swap") {
+          const dumpStepNumber = workflowSteps.length + 1;
+          const { error: dumpError } = await supabase.from("job_steps").insert({
+            assignment_id: newAssignment.id,
+            driver_id: i.driver_id,
+            scheduled_date: i.scheduled_date,
+            order_id: order.id,
+            node_type: 'step',
+            step_number: dumpStepNumber,
+            step_type: 'dump_site',
+            location: '垃圾场(待选)',
+            status: 'locked',
+            requires_photo: true,
+            requires_weigh_ticket: true,
+            requires_weight: true,
+          });
+          if (dumpError) throw dumpError;
         }
       }
       
@@ -611,6 +622,11 @@ export function DispatchPage() {
       console.log('🗑️ 检测到手动步骤拖到待排班:', { stepId, step, nodeType: step?.node_type });
       
       if (step && step.node_type === 'step') {
+        if (step.step_type === 'dump_site') {
+          console.log('❌ dump_site 步骤不可删除');
+          toast.error('倒垃圾步骤不可单独删除，需删除对应的收桶/换桶订单');
+          return;
+        }
         console.log('✅ 确认删除手动步骤:', stepId);
         deleteManualStep.mutate(stepId);
         return;
@@ -1180,11 +1196,13 @@ function StepNodeDisplay({
     'pickup_bin': '取桶',
     'drop_bin': '放桶',
     'dump_waste': '倒垃圾',
+    'dump_site': '倒垃圾',
     'load_material': '装料',
     'unload_material': '卸料',
   };
   const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
   const isDone = step.status === "done";
+  const isDumpSite = step.step_type === 'dump_site';
 
   return (
     <div 
@@ -1192,14 +1210,18 @@ function StepNodeDisplay({
         "group relative rounded-lg border-l-4 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[150px] shrink-0",
         isDone 
           ? "border-l-green-600 bg-green-100" 
-          : "border-l-gray-400 bg-card/80",
+          : isDumpSite
+            ? "border-l-amber-500 bg-amber-50"
+            : "border-l-gray-400 bg-card/80",
         onClick && "cursor-pointer"
       )}
       onClick={onClick}
     >
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
-          <Badge variant="outline" className="text-[8px] w-fit">手动步骤</Badge>
+          <Badge variant="outline" className={cn("text-[8px] w-fit", isDumpSite && "border-amber-400 text-amber-700")}>
+            {isDumpSite ? '🗑️ 自动' : '手动步骤'}
+          </Badge>
           {isDone && <CheckCircle2 className="h-3 w-3 text-green-600" />}
         </div>
         <div className="text-[11px] font-semibold">
@@ -1233,9 +1255,11 @@ function StepNodeDisplay({
               查看详情
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDelete(step.id); }} className="text-destructive">
-            删除步骤
-          </DropdownMenuItem>
+          {!isDumpSite && (
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDelete(step.id); }} className="text-destructive">
+              删除步骤
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
