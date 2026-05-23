@@ -587,7 +587,7 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
           linkedAssignments={externalAssignments}
         />
         {(primary.type === "pickup" || primary.type === "swap") && !primary.linked_order_id && (
-          <LinkPickerPanel order={primary} />
+          <LinkPickerPanel order={primary} assignments={assignments} />
         )}
       </td>
     </tr>
@@ -810,8 +810,10 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
 }) {
   // 收集所有相关 job_steps
   const allSteps: any[] = [];
-  selfAssignments.forEach(a => (a.job_steps || []).forEach((s: any) => allSteps.push({ ...s, _assignment: a })));
-  linkedAssignments.forEach(a => (a.job_steps || []).forEach((s: any) => allSteps.push({ ...s, _assignment: a })));
+  const selfSteps: any[] = [];
+  const linkedSteps: any[] = [];
+  selfAssignments.forEach(a => (a.job_steps || []).forEach((s: any) => { const step = { ...s, _assignment: a }; allSteps.push(step); selfSteps.push(step); }));
+  linkedAssignments.forEach(a => (a.job_steps || []).forEach((s: any) => { const step = { ...s, _assignment: a }; allSteps.push(step); linkedSteps.push(step); }));
 
   // 提取关键节点
   const deliveredStep = allSteps.find(s =>
@@ -822,8 +824,11 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
     (s.step_type === "pickup" || s.step_type === "customer_pickup") &&
     s.status === "done"
   );
-  // 换桶场景：司机在 customer_delivery 同时完成了"送新桶+收旧桶"，用 pickup_photo_url / old_bin_number_reported 作为回收证据
-  const swapPickupEvidence = allSteps.find(s =>
+  // 换桶场景：司机在 swap 步骤同时完成了"送新桶+收旧桶"，用 pickup_photo_url / old_bin_number_reported 作为回收证据
+  // 注意：如果当前订单本身是 swap，那它自己的 swap step 不能作为"回收"证据（新桶还没被回收）
+  // 只有关联方的 swap step 才算回收证据（意味着旧桶已被收走）
+  const swapEvidenceSource = order.type === "swap" ? linkedSteps : allSteps;
+  const swapPickupEvidence = swapEvidenceSource.find(s =>
     (s.step_type === "customer_delivery" || s.step_type === "swap") &&
     s.status === "done" &&
     (s.pickup_photo_url || s.old_bin_number_reported)
@@ -954,8 +959,17 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
 
 
 // 收桶/换桶订单的"关联送桶单"面板: 可以手动绑定或解绑对应的 delivery
-function LinkPickerPanel({ order }: { order: Order }) {
+function LinkPickerPanel({ order, assignments = [] }: { order: Order; assignments?: any[] }) {
   const qc = useQueryClient();
+
+  // 从换桶步骤中提取收旧桶的照片和桶号，帮助用户识别应该关联哪个旧送桶订单
+  const swapStep = assignments.flatMap((a: any) => a.job_steps || []).find((s: any) =>
+    (s.step_type === "swap" || s.step_type === "customer_delivery") &&
+    s.status === "done" &&
+    (s.pickup_photo_url || s.old_bin_number_reported)
+  );
+  const pickupPhotoUrl = swapStep?.pickup_photo_url;
+  const oldBinNumber = swapStep?.old_bin_number_reported;
 
   // 按地址 + 尺寸搜索同地址未回收的 delivery 候选
   const { data: candidates = [] } = useQuery({
@@ -964,7 +978,7 @@ function LinkPickerPanel({ order }: { order: Order }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("orders")
-        .select("id, order_number, address, bin_size, service_date, customer_name, linked_order_id")
+        .select("id, order_number, address, bin_size, service_date, customer_name, linked_order_id, dispatch_assignments(job_steps(bin_number_reported))")
         .eq("type", "delivery")
         .ilike("address", `%${order.address.trim()}%`)
         .eq("bin_size", order.bin_size!)
@@ -998,31 +1012,54 @@ function LinkPickerPanel({ order }: { order: Order }) {
       <div className="text-sm font-semibold text-amber-800 mb-2">
         ⚠️ 未关联送桶单 · 可手动绑定
       </div>
-      {candidates.length === 0 ? (
-        <div className="text-xs text-amber-700 italic">
-          未找到同地址 {order.bin_size}yd 的未回收桶。确认地址/尺寸, 或保持未关联。
+      <div className="flex items-start gap-3">
+        <div className="flex-1">
+          {candidates.length === 0 ? (
+            <div className="text-xs text-amber-700 italic">
+              未找到同地址 {order.bin_size}yd 的未回收桶。确认地址/尺寸, 或保持未关联。
+            </div>
+          ) : (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {candidates.map((c: any) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => bind.mutate(c.id)}
+                  disabled={bind.isPending}
+                  className="w-full flex items-center justify-between px-3 py-2 rounded border-2 bg-white border-gray-200 hover:border-blue-400 text-left transition-all"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-sm">{c.order_number}</span>
+                      {(() => {
+                        const bn = (c.dispatch_assignments ?? []).flatMap((a: any) => a.job_steps ?? []).map((s: any) => s.bin_number_reported).filter(Boolean)[0];
+                        return bn ? <span className="text-xs font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">桶号: {bn}</span> : null;
+                      })()}
+                    </div>
+                    <div className="text-[10px] text-gray-500 truncate">
+                      {c.service_date} · {c.customer_name} · {c.bin_size}yd · {c.address}
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-blue-600">绑定 →</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="space-y-1 max-h-40 overflow-y-auto">
-          {candidates.map((c: any) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => bind.mutate(c.id)}
-              disabled={bind.isPending}
-              className="w-full flex items-center justify-between px-3 py-2 rounded border-2 bg-white border-gray-200 hover:border-blue-400 text-left transition-all"
-            >
-              <div className="min-w-0">
-                <div className="font-mono font-bold text-sm">{c.order_number}</div>
-                <div className="text-[10px] text-gray-500 truncate">
-                  {c.service_date} · {c.customer_name} · {c.bin_size}yd · {c.address}
-                </div>
-              </div>
-              <span className="text-xs font-bold text-blue-600">绑定 →</span>
-            </button>
-          ))}
-        </div>
-      )}
+        {(pickupPhotoUrl || oldBinNumber) && (
+          <div className="shrink-0 border-2 border-amber-300 rounded-lg p-2 bg-white min-w-[120px] text-center">
+            <div className="text-[10px] font-semibold text-amber-800 mb-1">收旧桶参考</div>
+            {oldBinNumber && (
+              <div className="text-sm font-mono font-bold text-primary mb-1">桶号: {oldBinNumber}</div>
+            )}
+            {pickupPhotoUrl && (
+              <a href={pickupPhotoUrl} target="_blank" rel="noreferrer">
+                <img src={pickupPhotoUrl} alt="收旧桶照片" className="w-24 h-24 object-cover rounded border cursor-pointer hover:opacity-80" />
+              </a>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
