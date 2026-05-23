@@ -422,6 +422,9 @@ export function DispatchPage() {
         // 收桶/换桶订单自动创建 dump_site 步骤（同 assignment，排在工作流最后一步之后）
         if (order.type === "pickup" || order.type === "swap") {
           const dumpStepNumber = workflowSteps.length + 1;
+          // 检查本地是否已选择了垃圾场地点
+          const localDump = localJobSteps?.find(s => s.id === `temp-dump-${i.id}` && s.step_type === 'dump_site');
+          const dumpLocation = (localDump && localDump.location !== '垃圾场(待选)') ? localDump.location : '垃圾场(待选)';
           const { error: dumpError } = await supabase.from("job_steps").insert({
             assignment_id: newAssignment.id,
             driver_id: i.driver_id,
@@ -430,7 +433,7 @@ export function DispatchPage() {
             node_type: 'step',
             step_number: dumpStepNumber,
             step_type: 'dump_site',
-            location: '垃圾场(待选)',
+            location: dumpLocation,
             status: 'locked',
             requires_photo: true,
             requires_weigh_ticket: true,
@@ -450,11 +453,14 @@ export function DispatchPage() {
             vehicle_id: u.vehicle_id
           }).eq("id", u.id);
           
-          // 同时更新对应的 job_steps
+          // 同时更新对应的 job_steps 的 driver_id
           await supabase.from("job_steps").update({
             driver_id: u.driver_id,
-            step_number: u.sequence,
           }).eq("assignment_id", u.id);
+          // 只更新 display 节点的 step_number（工作流步骤保持内部编号）
+          await supabase.from("job_steps").update({
+            step_number: u.sequence,
+          }).eq("assignment_id", u.id).eq("node_type", "order");
         }
       }
       
@@ -464,11 +470,12 @@ export function DispatchPage() {
           // 只处理手动步骤（node_type === 'step'）
           if (localStep.node_type === 'step' && !localStep.id.startsWith('temp-')) {
             const originalStep = jobSteps.find(s => s.id === localStep.id);
-            // 如果 step_number 或 driver_id 发生变化，则更新
-            if (originalStep && (originalStep.step_number !== localStep.step_number || originalStep.driver_id !== localStep.driver_id)) {
+            // 如果 step_number、driver_id 或 location 发生变化，则更新
+            if (originalStep && (originalStep.step_number !== localStep.step_number || originalStep.driver_id !== localStep.driver_id || originalStep.location !== localStep.location)) {
               await supabase.from("job_steps").update({
                 step_number: localStep.step_number,
                 driver_id: localStep.driver_id,
+                location: localStep.location,
               }).eq("id", localStep.id);
             }
           }
@@ -894,6 +901,34 @@ export function DispatchPage() {
 
       const finalAssignments = newAssignments.filter(a => a.driver_id !== targetDriver).concat(driverAsgs);
       setLocalAssignments(finalAssignments);
+
+      // 收桶/换桶订单拖入时，立即在本地创建 dump_site 步骤
+      if (order.type === 'pickup' || order.type === 'swap') {
+        const newSteps = [...currentJobSteps];
+        const dumpStep: JobStep = {
+          id: `temp-dump-${newAsg.id}`,
+          assignment_id: newAsg.id,
+          driver_id: targetDriver,
+          scheduled_date: date,
+          order_id: order.id,
+          node_type: 'step',
+          step_number: newAsg.sequence + 0.5,
+          step_type: 'dump_site',
+          location: '垃圾场(待选)',
+          status: 'locked',
+          bin_id: null,
+          bin_number_reported: null,
+          old_bin_number_reported: null,
+          photo_url: null,
+          weigh_ticket_url: null,
+          weight_kg: null,
+          dump_site: null,
+          completed_at: null,
+          notes: null,
+        };
+        newSteps.push(dumpStep);
+        setLocalJobSteps(newSteps);
+      }
       return;
     }
 
@@ -908,6 +943,15 @@ export function DispatchPage() {
       const driverAsgs = newAssignments.filter(x => x.driver_id === a.driver_id).sort((x, y) => x.sequence - y.sequence);
       driverAsgs.forEach((x, i) => x.sequence = i + 1);
       setLocalAssignments(newAssignments);
+
+      // 同时移除关联的 dump_site 本地步骤
+      const newSteps = currentJobSteps.filter(s => {
+        if (s.step_type === 'dump_site' && s.assignment_id === a.id) return false;
+        return true;
+      });
+      if (newSteps.length !== currentJobSteps.length) {
+        setLocalJobSteps(newSteps);
+      }
       return;
     }
 
@@ -1060,6 +1104,7 @@ export function DispatchPage() {
                     isSaving={saveAllChanges.isPending}
                     onInsertStep={(params) => insertManualStep.mutate(params)}
                     onDeleteStep={(stepId) => deleteManualStep.mutate(stepId)}
+                    onUpdateSteps={(steps) => setLocalJobSteps(steps)}
                     insertStepAt={insertStepAt}
                     setInsertStepAt={setInsertStepAt}
                     onViewStep={(step) => setViewingStep(step)}
@@ -1186,11 +1231,12 @@ function OrderNodeDisplay({
 
 // ============ Step Node Display ============
 function StepNodeDisplay({
-  step, onDelete, onClick
+  step, onDelete, onClick, onChangeLocation
 }: {
   step: JobStep;
   onDelete: (id: string) => void;
   onClick?: () => void;
+  onChangeLocation?: (stepId: string, location: string) => void;
 }) {
   const stepTypeLabels: Record<string, string> = {
     'pickup_bin': '取桶',
@@ -1227,10 +1273,27 @@ function StepNodeDisplay({
         <div className="text-[11px] font-semibold">
           {stepLabel}
         </div>
-        <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
-          <MapPin className="h-2 w-2 inline mr-0.5" />
-          {step.location}
-        </div>
+        {isDumpSite && onChangeLocation ? (
+          <Select value={step.location === '垃圾场(待选)' ? '' : step.location} onValueChange={(v) => onChangeLocation(step.id, v)}>
+            <SelectTrigger className="h-5 text-[9px] px-1 w-full">
+              <SelectValue placeholder="选择垃圾场" />
+            </SelectTrigger>
+            <SelectContent className="z-[110]">
+              <SelectItem value="3445" className="text-[10px]">3445 Kennedy</SelectItem>
+              <SelectItem value="york1 300" className="text-[10px]">YORK1 Nugget (300)</SelectItem>
+              <SelectItem value="63A" className="text-[10px]">63A Medulla</SelectItem>
+              <SelectItem value="draglam" className="text-[10px]">Draglam Vaughan</SelectItem>
+              <SelectItem value="draglam brampton" className="text-[10px]">Draglam Brampton</SelectItem>
+              <SelectItem value="maple waste" className="text-[10px]">Maple Transfer</SelectItem>
+              <SelectItem value="york1 whitby" className="text-[10px]">YORK1 Whitby</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : (
+          <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
+            <MapPin className="h-2 w-2 inline mr-0.5" />
+            {step.location}
+          </div>
+        )}
         {step.bin_number_reported && (
           <div className="text-[9px] text-primary">桶: {step.bin_number_reported}</div>
         )}
@@ -1547,7 +1610,7 @@ function BacklogColumn({ orders, completedOrders }: { orders: Order[], completed
 
 // ============ Driver Column ============
 function DriverColumn({
-  driver, vehicle, vehicles, onChangeVehicle, assignments, jobSteps, commonLocations, bins, onCancel, hasChanges, onSave, isSaving, onInsertStep, onDeleteStep, insertStepAt, setInsertStepAt, onViewStep
+  driver, vehicle, vehicles, onChangeVehicle, assignments, jobSteps, commonLocations, bins, onCancel, hasChanges, onSave, isSaving, onInsertStep, onDeleteStep, onUpdateSteps, insertStepAt, setInsertStepAt, onViewStep
 }: {
   driver: Profile;
   vehicle: Vehicle | undefined;
@@ -1563,6 +1626,7 @@ function DriverColumn({
   isSaving?: boolean;
   onInsertStep: (params: { driverId: string; position: number; location: string; stepType: string; binId?: string; notes?: string }) => void;
   onDeleteStep: (stepId: string) => void;
+  onUpdateSteps: (steps: JobStep[]) => void;
   insertStepAt: { driverId: string; position: number } | null;
   setInsertStepAt: (value: { driverId: string; position: number } | null) => void;
   onViewStep: (step: JobStep) => void;
@@ -1742,6 +1806,10 @@ function DriverColumn({
                       step={node.data as JobStep}
                       onDelete={onDeleteStep}
                       onClick={() => onViewStep(node.data as JobStep)}
+                      onChangeLocation={(stepId, loc) => {
+                        const newSteps = jobSteps.map(s => s.id === stepId ? { ...s, location: loc } : s);
+                        onUpdateSteps(newSteps);
+                      }}
                     />
                   )}
                   
