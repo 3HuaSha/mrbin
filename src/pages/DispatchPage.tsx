@@ -163,8 +163,9 @@ export function DispatchPage() {
   const [localAssignments, setLocalAssignments] = useState<Assignment[] | null>(null);
   const [localJobSteps, setLocalJobSteps] = useState<JobStep[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [insertStepAt, setInsertStepAt] = useState<{ driverId: string; position: number } | null>(null);
+  const [insertStepAt, setInsertStepAt] = useState<{ driverId: string; position: number; adjacentOrderId?: string; adjacentOrderType?: string } | null>(null);
   const [viewingStep, setViewingStep] = useState<JobStep | null>(null);
+  const [linkingStepId, setLinkingStepId] = useState<string | null>(null);
 
   // Supabase Realtime: 监听 job_steps 和 orders 表变化，实时刷新（无需轮询）
   useEffect(() => {
@@ -419,28 +420,6 @@ export function DispatchPage() {
           if (stepsError) throw stepsError;
         }
         
-        // 收桶/换桶订单自动创建 dump_site 步骤（同 assignment，排在工作流最后一步之后）
-        if (order.type === "pickup" || order.type === "swap") {
-          const dumpStepNumber = workflowSteps.length + 1;
-          // 检查本地是否已选择了垃圾场地点
-          const localDump = localJobSteps?.find(s => s.id === `temp-dump-${i.id}` && s.step_type === 'dump_site');
-          const dumpLocation = (localDump && localDump.location !== '垃圾场(待选)') ? localDump.location : '垃圾场(待选)';
-          const { error: dumpError } = await supabase.from("job_steps").insert({
-            assignment_id: newAssignment.id,
-            driver_id: i.driver_id,
-            scheduled_date: i.scheduled_date,
-            order_id: order.id,
-            node_type: 'step',
-            step_number: dumpStepNumber,
-            step_type: 'dump_site',
-            location: dumpLocation,
-            status: 'locked',
-            requires_photo: true,
-            requires_weigh_ticket: true,
-            requires_weight: true,
-          });
-          if (dumpError) throw dumpError;
-        }
       }
       
       // 更新现有的 assignments
@@ -501,8 +480,9 @@ export function DispatchPage() {
       stepType: string;
       binId?: string;
       notes?: string;
+      orderId?: string;
     }) => {
-      const { driverId, position, location, stepType, binId, notes } = params;
+      const { driverId, position, location, stepType, binId, notes, orderId } = params;
       
       // 获取该司机当天的所有步骤
       const driverSteps = currentJobSteps.filter(
@@ -519,6 +499,7 @@ export function DispatchPage() {
         step_type: stepType,
         bin_id: binId || null,
         notes: notes || null,
+        order_id: orderId || null,
         status: 'locked',
       }).select().single();
       
@@ -629,11 +610,6 @@ export function DispatchPage() {
       console.log('🗑️ 检测到手动步骤拖到待排班:', { stepId, step, nodeType: step?.node_type });
       
       if (step && step.node_type === 'step') {
-        if (step.step_type === 'dump_site') {
-          console.log('❌ dump_site 步骤不可删除');
-          toast.error('倒垃圾步骤不可单独删除，需删除对应的收桶/换桶订单');
-          return;
-        }
         console.log('✅ 确认删除手动步骤:', stepId);
         deleteManualStep.mutate(stepId);
         return;
@@ -901,34 +877,6 @@ export function DispatchPage() {
 
       const finalAssignments = newAssignments.filter(a => a.driver_id !== targetDriver).concat(driverAsgs);
       setLocalAssignments(finalAssignments);
-
-      // 收桶/换桶订单拖入时，立即在本地创建 dump_site 步骤
-      if (order.type === 'pickup' || order.type === 'swap') {
-        const newSteps = [...currentJobSteps];
-        const dumpStep: JobStep = {
-          id: `temp-dump-${newAsg.id}`,
-          assignment_id: newAsg.id,
-          driver_id: targetDriver,
-          scheduled_date: date,
-          order_id: order.id,
-          node_type: 'step',
-          step_number: newAsg.sequence + 0.5,
-          step_type: 'dump_site',
-          location: '垃圾场(待选)',
-          status: 'locked',
-          bin_id: null,
-          bin_number_reported: null,
-          old_bin_number_reported: null,
-          photo_url: null,
-          weigh_ticket_url: null,
-          weight_kg: null,
-          dump_site: null,
-          completed_at: null,
-          notes: null,
-        };
-        newSteps.push(dumpStep);
-        setLocalJobSteps(newSteps);
-      }
       return;
     }
 
@@ -943,15 +891,6 @@ export function DispatchPage() {
       const driverAsgs = newAssignments.filter(x => x.driver_id === a.driver_id).sort((x, y) => x.sequence - y.sequence);
       driverAsgs.forEach((x, i) => x.sequence = i + 1);
       setLocalAssignments(newAssignments);
-
-      // 同时移除关联的 dump_site 本地步骤
-      const newSteps = currentJobSteps.filter(s => {
-        if (s.step_type === 'dump_site' && s.assignment_id === a.id) return false;
-        return true;
-      });
-      if (newSteps.length !== currentJobSteps.length) {
-        setLocalJobSteps(newSteps);
-      }
       return;
     }
 
@@ -1088,6 +1027,7 @@ export function DispatchPage() {
                       }
                     }}
                     assignments={list}
+                    allAssignments={currentAssignments}
                     jobSteps={driverSteps}
                     commonLocations={commonLocations}
                     bins={bins}
@@ -1104,7 +1044,7 @@ export function DispatchPage() {
                     isSaving={saveAllChanges.isPending}
                     onInsertStep={(params) => insertManualStep.mutate(params)}
                     onDeleteStep={(stepId) => deleteManualStep.mutate(stepId)}
-                    onUpdateSteps={(steps) => setLocalJobSteps(steps)}
+                    onOpenLinkDialog={(stepId) => setLinkingStepId(stepId)}
                     insertStepAt={insertStepAt}
                     setInsertStepAt={setInsertStepAt}
                     onViewStep={(step) => setViewingStep(step)}
@@ -1133,6 +1073,23 @@ export function DispatchPage() {
           <StepDetailDialog
             step={viewingStep}
             onClose={() => setViewingStep(null)}
+          />
+        )}
+
+        {/* 关联订单弹窗 */}
+        {linkingStepId && (
+          <LinkOrderDialog
+            stepId={linkingStepId}
+            currentOrderId={currentJobSteps.find(s => s.id === linkingStepId)?.order_id ?? null}
+            onSelect={async (orderId) => {
+              await supabase.from("job_steps").update({ order_id: orderId }).eq("id", linkingStepId);
+              const updated = currentJobSteps.map(s => s.id === linkingStepId ? { ...s, order_id: orderId } : s);
+              setLocalJobSteps(updated);
+              qc.invalidateQueries({ queryKey: ["job-steps", date] });
+              setLinkingStepId(null);
+              toast.success(orderId ? "已关联订单" : "已取消关联");
+            }}
+            onClose={() => setLinkingStepId(null)}
           />
         )}
 
@@ -1231,24 +1188,24 @@ function OrderNodeDisplay({
 
 // ============ Step Node Display ============
 function StepNodeDisplay({
-  step, onDelete, onClick, onChangeLocation
+  step, onDelete, onClick, linkedOrderLabel, onOpenLinkDialog
 }: {
   step: JobStep;
   onDelete: (id: string) => void;
   onClick?: () => void;
-  onChangeLocation?: (stepId: string, location: string) => void;
+  linkedOrderLabel?: string;
+  onOpenLinkDialog?: (stepId: string) => void;
 }) {
   const stepTypeLabels: Record<string, string> = {
     'pickup_bin': '取桶',
     'drop_bin': '放桶',
     'dump_waste': '倒垃圾',
-    'dump_site': '倒垃圾',
     'load_material': '装料',
     'unload_material': '卸料',
   };
   const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
   const isDone = step.status === "done";
-  const isDumpSite = step.step_type === 'dump_site';
+  const isDumpWaste = step.step_type === 'dump_waste';
 
   return (
     <div 
@@ -1256,7 +1213,7 @@ function StepNodeDisplay({
         "group relative rounded-lg border-l-4 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[150px] shrink-0",
         isDone 
           ? "border-l-green-600 bg-green-100" 
-          : isDumpSite
+          : isDumpWaste
             ? "border-l-amber-500 bg-amber-50"
             : "border-l-gray-400 bg-card/80",
         onClick && "cursor-pointer"
@@ -1265,33 +1222,26 @@ function StepNodeDisplay({
     >
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
-          <Badge variant="outline" className={cn("text-[8px] w-fit", isDumpSite && "border-amber-400 text-amber-700")}>
-            {isDumpSite ? '🗑️ 自动' : '手动步骤'}
+          <Badge variant="outline" className={cn("text-[8px] w-fit", isDumpWaste && "border-amber-400 text-amber-700")}>
+            {isDumpWaste ? '🗑️ 倒垃圾' : '手动步骤'}
           </Badge>
           {isDone && <CheckCircle2 className="h-3 w-3 text-green-600" />}
         </div>
         <div className="text-[11px] font-semibold">
           {stepLabel}
         </div>
-        {isDumpSite && onChangeLocation ? (
-          <Select value={step.location === '垃圾场(待选)' ? '' : step.location} onValueChange={(v) => onChangeLocation(step.id, v)}>
-            <SelectTrigger className="h-5 text-[9px] px-1 w-full">
-              <SelectValue placeholder="选择垃圾场" />
-            </SelectTrigger>
-            <SelectContent className="z-[110]">
-              <SelectItem value="3445" className="text-[10px]">3445 Kennedy</SelectItem>
-              <SelectItem value="york1 300" className="text-[10px]">YORK1 Nugget (300)</SelectItem>
-              <SelectItem value="63A" className="text-[10px]">63A Medulla</SelectItem>
-              <SelectItem value="draglam" className="text-[10px]">Draglam Vaughan</SelectItem>
-              <SelectItem value="draglam brampton" className="text-[10px]">Draglam Brampton</SelectItem>
-              <SelectItem value="maple waste" className="text-[10px]">Maple Transfer</SelectItem>
-              <SelectItem value="york1 whitby" className="text-[10px]">YORK1 Whitby</SelectItem>
-            </SelectContent>
-          </Select>
-        ) : (
-          <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
-            <MapPin className="h-2 w-2 inline mr-0.5" />
-            {step.location}
+        <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
+          <MapPin className="h-2 w-2 inline mr-0.5" />
+          {step.location}
+        </div>
+        {isDumpWaste && linkedOrderLabel && (
+          <div className="text-[8px] text-amber-700 bg-amber-100 rounded px-1 py-0.5 truncate" title={linkedOrderLabel}>
+            🔗 {linkedOrderLabel}
+          </div>
+        )}
+        {isDumpWaste && !linkedOrderLabel && (
+          <div className="text-[8px] text-muted-foreground/60 italic">
+            未关联订单
           </div>
         )}
         {step.bin_number_reported && (
@@ -1312,17 +1262,20 @@ function StepNodeDisplay({
             <MoreVertical className="h-3 w-3" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="text-xs min-w-[120px]">
+        <DropdownMenuContent align="end" className="text-xs min-w-[140px]">
           {onClick && (
             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onClick(); }}>
               查看详情
             </DropdownMenuItem>
           )}
-          {!isDumpSite && (
-            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDelete(step.id); }} className="text-destructive">
-              删除步骤
+          {isDumpWaste && onOpenLinkDialog && (
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenLinkDialog(step.id); }}>
+              🔗 关联订单…
             </DropdownMenuItem>
           )}
+          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onDelete(step.id); }} className="text-destructive">
+            删除步骤
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -1331,16 +1284,18 @@ function StepNodeDisplay({
 
 // ============ Insert Step Button ============
 function InsertStepButton({
-  driverId, position, isActive, onClick, onClose, onInsert, commonLocations, bins
+  driverId, position, isActive, onClick, onClose, onInsert, commonLocations, bins, adjacentOrderId, adjacentOrderType
 }: {
   driverId: string;
   position: number;
   isActive: boolean;
   onClick: () => void;
   onClose: () => void;
-  onInsert: (params: { driverId: string; position: number; location: string; stepType: string; binId?: string; notes?: string }) => void;
+  onInsert: (params: { driverId: string; position: number; location: string; stepType: string; binId?: string; notes?: string; orderId?: string }) => void;
   commonLocations: CommonLocation[];
   bins: Bin[];
+  adjacentOrderId?: string;
+  adjacentOrderType?: string;
 }) {
   const [stepType, setStepType] = useState("");
   const [location, setLocation] = useState("");
@@ -1387,7 +1342,12 @@ function InsertStepButton({
       ? notes
       : (notes ? `${binSize}yd - ${notes}` : `${binSize}yd`);
     
-    onInsert({ driverId, position, location, stepType, notes: finalNotes || undefined });
+    // 倒垃圾步骤自动关联相邻的收桶/换桶订单
+    const linkedOrderId = (stepType === "dump_waste" && adjacentOrderId && (adjacentOrderType === 'pickup' || adjacentOrderType === 'swap'))
+      ? adjacentOrderId
+      : undefined;
+    
+    onInsert({ driverId, position, location, stepType, notes: finalNotes || undefined, orderId: linkedOrderId });
     
     // 重置表单
     setStepType("");
@@ -1429,6 +1389,13 @@ function InsertStepButton({
           </SelectContent>
         </Select>
       </div>
+      
+      {/* 自动关联提示 */}
+      {stepType === 'dump_waste' && adjacentOrderId && (adjacentOrderType === 'pickup' || adjacentOrderType === 'swap') && (
+        <div className="text-[9px] text-amber-700 bg-amber-50 rounded px-1.5 py-1">
+          🔗 将自动关联相邻的{adjacentOrderType === 'pickup' ? '收桶' : '换桶'}订单
+        </div>
+      )}
       
       {/* 第二行：地点（根据动作显示不同选项）*/}
       {stepType && (
@@ -1610,13 +1577,14 @@ function BacklogColumn({ orders, completedOrders }: { orders: Order[], completed
 
 // ============ Driver Column ============
 function DriverColumn({
-  driver, vehicle, vehicles, onChangeVehicle, assignments, jobSteps, commonLocations, bins, onCancel, hasChanges, onSave, isSaving, onInsertStep, onDeleteStep, onUpdateSteps, insertStepAt, setInsertStepAt, onViewStep
+  driver, vehicle, vehicles, onChangeVehicle, assignments, allAssignments, jobSteps, commonLocations, bins, onCancel, hasChanges, onSave, isSaving, onInsertStep, onDeleteStep, onOpenLinkDialog, insertStepAt, setInsertStepAt, onViewStep
 }: {
   driver: Profile;
   vehicle: Vehicle | undefined;
   vehicles: Vehicle[];
   onChangeVehicle: (id: string) => void;
   assignments: Assignment[];
+  allAssignments: Assignment[];
   jobSteps: JobStep[];
   commonLocations: CommonLocation[];
   bins: Bin[];
@@ -1624,11 +1592,11 @@ function DriverColumn({
   hasChanges?: boolean;
   onSave?: () => void;
   isSaving?: boolean;
-  onInsertStep: (params: { driverId: string; position: number; location: string; stepType: string; binId?: string; notes?: string }) => void;
+  onInsertStep: (params: { driverId: string; position: number; location: string; stepType: string; binId?: string; notes?: string; orderId?: string }) => void;
   onDeleteStep: (stepId: string) => void;
-  onUpdateSteps: (steps: JobStep[]) => void;
-  insertStepAt: { driverId: string; position: number } | null;
-  setInsertStepAt: (value: { driverId: string; position: number } | null) => void;
+  onOpenLinkDialog: (stepId: string) => void;
+  insertStepAt: { driverId: string; position: number; adjacentOrderId?: string; adjacentOrderType?: string } | null;
+  setInsertStepAt: (value: { driverId: string; position: number; adjacentOrderId?: string; adjacentOrderType?: string } | null) => void;
   onViewStep: (step: JobStep) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: driver.id });
@@ -1639,10 +1607,10 @@ function DriverColumn({
   }, [setNodeRef]);
   const [buttonPosition, setButtonPosition] = useState<{ x: number; y: number } | null>(null);
   
-  const handleButtonClick = (position: number, event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleButtonClick = (position: number, event: React.MouseEvent<HTMLButtonElement>, adjacentOrderId?: string, adjacentOrderType?: string) => {
     const rect = event.currentTarget.getBoundingClientRect();
     setButtonPosition({ x: rect.left + rect.width / 2, y: rect.top });
-    setInsertStepAt({ driverId: driver.id, position });
+    setInsertStepAt({ driverId: driver.id, position, adjacentOrderId, adjacentOrderType });
   };
   
   // 合并订单节点和步骤节点，按 step_number 排序
@@ -1757,6 +1725,8 @@ function DriverColumn({
               }}
               commonLocations={commonLocations}
               bins={bins}
+              adjacentOrderId={insertStepAt.adjacentOrderId}
+              adjacentOrderType={insertStepAt.adjacentOrderType}
             />
           </div>
         )}
@@ -1806,17 +1776,25 @@ function DriverColumn({
                       step={node.data as JobStep}
                       onDelete={onDeleteStep}
                       onClick={() => onViewStep(node.data as JobStep)}
-                      onChangeLocation={(stepId, loc) => {
-                        const newSteps = jobSteps.map(s => s.id === stepId ? { ...s, location: loc } : s);
-                        onUpdateSteps(newSteps);
-                      }}
+                      linkedOrderLabel={(() => {
+                        const s = node.data as JobStep;
+                        if (s.step_type !== 'dump_waste' || !s.order_id) return undefined;
+                        const linked = allAssignments.find(a => a.order_id === s.order_id);
+                        if (linked) return `#${linked.orders?.order_number} ${linked.orders?.customer_name?.slice(0, 8) ?? ''}`;
+                        return `订单 ${s.order_id.slice(0, 6)}…`;
+                      })()}
+                      onOpenLinkDialog={onOpenLinkDialog}
                     />
                   )}
                   
                   {/* 后置插入按钮 - 只在悬停时显示 */}
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-20">
                     <button
-                      onClick={(e) => handleButtonClick(node.stepNumber + 1, e)}
+                      onClick={(e) => {
+                        const orderId = node.type === 'order' ? (node.data as Assignment).order_id : undefined;
+                        const orderType = node.type === 'order' ? (node.data as Assignment).orders?.type : undefined;
+                        handleButtonClick(node.stepNumber + 1, e, orderId, orderType);
+                      }}
                       className="w-8 h-8 rounded-full border-2 border-dashed border-primary/50 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary bg-card shadow-md"
                     >
                       <Plus className="h-4 w-4" />
@@ -1946,6 +1924,114 @@ function OrderCardDisplay({
         ) : <div className="h-3.5"></div>}
       </div>
     </div>
+  );
+}
+
+// ============ Link Order Dialog ============
+function LinkOrderDialog({
+  stepId, currentOrderId, onSelect, onClose
+}: {
+  stepId: string;
+  currentOrderId: string | null;
+  onSelect: (orderId: string | null) => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+
+  // 查询最近 7 天的收桶/换桶订单（跨所有司机）
+  const { data: recentOrders = [], isLoading } = useQuery({
+    queryKey: ["link-orders-search"],
+    queryFn: async () => {
+      const today = new Date();
+      const weekAgo = new Date(today);
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      const fromDate = weekAgo.toISOString().slice(0, 10);
+
+      const { data, error } = await supabase
+        .from("orders")
+        .select("id, order_number, type, customer_name, address, service_date, status")
+        .in("type", ["pickup", "swap"])
+        .gte("service_date", fromDate)
+        .order("service_date", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const filtered = recentOrders.filter(o => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      o.order_number?.toLowerCase().includes(q) ||
+      o.customer_name?.toLowerCase().includes(q) ||
+      o.address?.toLowerCase().includes(q)
+    );
+  });
+
+  const typeLabel = (t: string) => t === 'pickup' ? '收桶' : t === 'swap' ? '换桶' : t;
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>关联订单</DialogTitle>
+        </DialogHeader>
+        <div className="text-xs text-muted-foreground mb-1">
+          搜索最近 7 天的收桶/换桶订单
+        </div>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="搜索订单号、客户名、地址…"
+          className="w-full h-8 px-2 rounded-md border bg-background text-sm"
+          autoFocus
+        />
+        <div className="flex-1 overflow-y-auto border rounded-md mt-1 min-h-[200px] max-h-[400px]">
+          {isLoading ? (
+            <div className="text-center text-muted-foreground text-xs py-8">加载中…</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center text-muted-foreground text-xs py-8">无匹配订单</div>
+          ) : (
+            filtered.map(o => (
+              <button
+                key={o.id}
+                onClick={() => onSelect(o.id)}
+                className={cn(
+                  "w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-muted/50 transition-colors",
+                  currentOrderId === o.id && "bg-amber-50 border-l-2 border-l-amber-500"
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold">#{o.order_number}</span>
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="outline" className="text-[9px] px-1 py-0">
+                      {typeLabel(o.type)}
+                    </Badge>
+                    <span className="text-[9px] text-muted-foreground">{o.service_date}</span>
+                  </div>
+                </div>
+                <div className="text-[10px] text-muted-foreground truncate">{o.customer_name}</div>
+                <div className="text-[9px] text-muted-foreground/70 truncate">{o.address}</div>
+                {currentOrderId === o.id && (
+                  <div className="text-[9px] text-amber-600 font-semibold mt-0.5">✓ 当前关联</div>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+        <DialogFooter className="flex gap-2">
+          {currentOrderId && (
+            <Button variant="outline" size="sm" onClick={() => onSelect(null)} className="text-xs">
+              取消关联
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={onClose} className="text-xs">
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

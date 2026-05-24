@@ -75,7 +75,7 @@ BEGIN
       INSERT INTO public.bin_history (bin_id, order_id, event, from_location, to_location)
       SELECT id, asg.order_id, 'picked_up', o.address, 'In transit' FROM public.bins WHERE bin_number = bn;
 
-    ELSIF NEW.step_type = 'dump_site' THEN
+    ELSIF NEW.step_type IN ('dump_site', 'dump_waste') THEN
       UPDATE public.bins b
         SET status = 'depot', current_order_id = NULL, current_address = NULL, last_moved_at = now()
         WHERE b.current_order_id = asg.order_id AND b.status = 'in_transit';
@@ -88,7 +88,7 @@ BEGIN
         AND status <> 'done'
         AND id <> NEW.id
         AND (node_type IS NULL OR node_type <> 'order')
-        AND step_type <> 'dump_site';
+        AND step_type NOT IN ('dump_site', 'dump_waste');
     IF remaining = 0 THEN
       UPDATE public.orders SET status = 'done', updated_at = now() WHERE id = asg.order_id;
       -- 同时把该 assignment 下的 node_type='order' 显示节点也标记为 done
