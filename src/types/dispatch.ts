@@ -12,7 +12,6 @@ export type Order = Tables<"orders"> & {
   destination_yard_id?: string;
   linked_order_id?: string | null;
   bin_type?: string | null;
-  load_location?: string | null;
 };
 
 export type Profile = Tables<"profiles">;

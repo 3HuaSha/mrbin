@@ -26,13 +26,6 @@ const BIN_TYPES = [
   { value: "asphalt" as BinType, label: "沥青桶", emoji: "🛣️" },
 ];
 
-const MATERIAL_TYPES = [
-  { value: "sand", label: "沙子", emoji: "🏖️" },
-  { value: "gravel", label: "码石", emoji: "🪨" },
-  { value: "topsoil", label: "表土", emoji: "🌾" },
-  { value: "fill", label: "填方", emoji: "⛏️" },
-  { value: "stone", label: "石头", emoji: "🪨" },
-];
 
 const empty = (preserveType?: OrderType) => ({
   type: preserveType ?? ("delivery" as OrderType),
@@ -47,8 +40,7 @@ const empty = (preserveType?: OrderType) => ({
   // 订单号：空字符串时由数据库触发器自动生成 KD-YYYYMMDD-XXX
   use_manual_order_number: false,
   manual_order_number: "",
-  load_location: "",
-  material_type: "sand",
+  material_description: "",
 });
 
 export function CreateOrderPage() {
@@ -147,8 +139,7 @@ export function CreateOrderPage() {
         customer_phone: phone,
         customer_notes: payload.customer_notes.trim() || null,
         netsuite_order_id: null,
-        load_location: payload.type === "material" ? payload.load_location.trim() || null : null,
-        bin_type: payload.type === "material" ? payload.material_type : payload.bin_type,
+        bin_type: payload.type === "material" ? (payload.material_description.trim() || null) : payload.bin_type,
       };
 
       // 手动单号: 提前检查是否与同类型订单重复（数据库约束是 (order_number, type) 复合唯一）
@@ -409,37 +400,16 @@ export function CreateOrderPage() {
               </div>
             )}
 
-            {/* 左列：砂石料类型和装料地点 */}
+            {/* 砂石料：输入送什么东西 */}
             {form.type === "material" && (
               <div className="bg-white rounded-xl shadow-md p-4">
-                <h2 className="text-base font-bold mb-3 text-gray-800">砂石料类型</h2>
-                <div className="grid grid-cols-5 gap-1.5 mb-4">
-                  {MATERIAL_TYPES.map((mt) => (
-                    <button
-                      key={mt.value}
-                      type="button"
-                      onClick={() => setForm({ ...form, material_type: mt.value })}
-                      className={cn(
-                        "py-2 px-1 rounded-lg font-bold border-3 transition-all text-xs shadow-sm hover:scale-105",
-                        form.material_type === mt.value
-                          ? "bg-yellow-500 text-white border-transparent shadow-md scale-105"
-                          : "bg-white border-gray-200 text-gray-700 hover:border-gray-300"
-                      )}
-                    >
-                      <div className="text-lg mb-0.5">{mt.emoji}</div>
-                      <div className="text-[10px]">{mt.label}</div>
-                    </button>
-                  ))}
-                </div>
-                <div>
-                  <Label className="text-sm font-bold text-gray-700 mb-1 block">装料地点</Label>
-                  <Input
-                    value={form.load_location}
-                    onChange={(e) => setForm({ ...form, load_location: e.target.value })}
-                    placeholder="如: Kennedy Depot, 砂石场地址"
-                    className="h-10 text-sm rounded-lg border-2"
-                  />
-                </div>
+                <h2 className="text-base font-bold mb-3 text-gray-800">送什么</h2>
+                <Input
+                  value={form.material_description}
+                  onChange={(e) => setForm({ ...form, material_description: e.target.value })}
+                  placeholder="如: 沙子、码石、表土..."
+                  className="h-10 text-sm rounded-lg border-2"
+                />
               </div>
             )}
 

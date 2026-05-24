@@ -26,14 +26,6 @@ interface MaterialStepDisplayProps {
   onDateChange?: (stepId: string, newDate: string) => void;
 }
 
-const MATERIAL_TYPE_NAMES: Record<string, string> = {
-  sand: "沙子",
-  gravel: "码石",
-  topsoil: "表土",
-  fill: "填方",
-  stone: "石头",
-};
-
 export function MaterialStepDisplay({
   step,
   assignment,
@@ -50,7 +42,7 @@ export function MaterialStepDisplay({
   const isLoad = (step.step_type as string) === "load_material";
   const emoji = STEP_TYPE_EMOJI[step.step_type || ""] || "🟡";
   const label = STEP_TYPE_LABEL[step.step_type || ""] || (isLoad ? "装料" : "送料");
-  const materialName = order.bin_type ? (MATERIAL_TYPE_NAMES[order.bin_type] || order.bin_type) : "";
+  const materialName = order.bin_type || "";
 
   return (
     <div

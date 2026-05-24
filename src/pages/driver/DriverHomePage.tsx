@@ -300,11 +300,6 @@ export function DriverHomePage() {
             'soil': '土桶',
             'cement': '水泥桶',
             'asphalt': '沥青桶',
-            'sand': '沙子',
-            'gravel': '码石',
-            'topsoil': '表土',
-            'fill': '填方',
-            'stone': '石头',
           };
           const binTypeName = isOrderNode && s.orders?.bin_type ? binTypeNames[s.orders.bin_type] || s.orders.bin_type : '';
           

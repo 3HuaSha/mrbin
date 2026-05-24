@@ -172,7 +172,7 @@ export function DispatchPage() {
             node_type: 'order' as const,
             step_number: i.sequence,
             step_type: 'load_material' as any,
-            location: (order as any).load_location || 'Kennedy Depot',
+            location: '',
             status: 'pending',
           };
           const unloadStep = {

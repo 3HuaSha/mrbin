@@ -1,4 +1,3 @@
--- 砂石料订单支持：添加装料地点字段
-ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS load_location TEXT;
-
-COMMENT ON COLUMN public.orders.load_location IS '装料地点，仅用于砂石料(material)订单';
+-- 砂石料订单支持：使用 bin_type 字段存储自由文本描述(如 沙子、码石)
+-- load_location 不再需要，如已添加可忽略
+-- ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS load_location TEXT;

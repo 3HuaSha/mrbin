@@ -19,11 +19,6 @@ export function OrderCardDisplay({ order, binNumber, ghost }: OrderCardDisplayPr
     'soil': '土桶',
     'cement': '水泥桶',
     'asphalt': '沥青桶',
-    'sand': '沙子',
-    'gravel': '码石',
-    'topsoil': '表土',
-    'fill': '填方',
-    'stone': '石头',
   };
   const binTypeName = order.bin_type ? binTypeNames[order.bin_type] || order.bin_type : '—';
 
