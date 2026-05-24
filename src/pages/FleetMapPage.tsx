@@ -242,15 +242,18 @@ export function FleetMapPage() {
   });
   const orders = useMemo(() => {
     // 合并已分配订单和全部当日订单 - 这样地图上能看到即使没有分配的订单
+    // 排除已完成的订单，不在地图上显示
     const uniqueOrders = new Map<string, Order>();
     // 先加入 jobSteps 里已分配的订单（带司机/状态信息）
     jobSteps.forEach(step => {
       if (step.node_type === 'order' && step.orders) {
+        if (step.status === 'done' || step.orders.status === 'done') return;
         uniqueOrders.set(step.orders.id, step.orders);
       }
     });
     // 再补齐未分配的订单
     allDayOrders.forEach(o => {
+      if (o.status === 'done') return;
       if (!uniqueOrders.has(o.id)) {
         uniqueOrders.set(o.id, o);
       }
@@ -347,13 +350,17 @@ export function FleetMapPage() {
     return { assigned, unassigned };
   }, [serverAssignments, allDayOrders, draft]);
 
-  // 给地图用的 assignments 数组 (按合并后的顺序生成 sequence)
+  // 给地图用的 assignments 数组 (按合并后的顺序生成 sequence, 排除已完成的)
   const assignments = useMemo(() => {
     const result: any[] = [];
     Object.entries(merged.assigned).forEach(([driverId, orderIds]) => {
       orderIds.forEach((orderId, idx) => {
         const order = orderById.get(orderId);
         if (!order) return;
+        // 已完成的订单不在地图上显示
+        if (order.status === 'done') return;
+        const origStep = jobSteps.find(s => s.node_type === 'order' && s.order_id === orderId && s.driver_id === driverId);
+        if (origStep?.status === 'done') return;
         // 找服务器原始 assignment (如果有)
         const existing = serverAssignments.find(
           a => a.driver_id === driverId && a.order_id === orderId
@@ -368,7 +375,7 @@ export function FleetMapPage() {
       });
     });
     return result;
-  }, [merged.assigned, serverAssignments, orderById]);
+  }, [merged.assigned, serverAssignments, orderById, jobSteps]);
 
   // 地图拖拽判断用: 未分配订单 id 列表 (基于本地合并状态)
   const unassignedOrders = useMemo(
@@ -1305,6 +1312,12 @@ export function FleetMapPage() {
                               const isDone = step.status === 'done' || order.status === 'done';
                               const isInProgress = !isDone && (step.status === 'pending' || order.status === 'in_progress');
 
+                              // 已完成的任务不显示
+                              if (isDone) {
+                                stepIdx += 1;
+                                return;
+                              }
+
                               // 标记第一个未完成的步骤 (用于展开时自动滚动)
                               const isCurrentStep = !isDone && !foundCurrentStep;
                               if (isCurrentStep) foundCurrentStep = true;
@@ -1387,8 +1400,9 @@ export function FleetMapPage() {
                               const isDraftStep = step.id.startsWith('draft-step-');
                               const isMarkedForDelete = deleteStepIds.includes(step.id);
                               const isStepDone = step.status === 'done';
-                              // 已标记删除的不显示
-                              if (isMarkedForDelete) {
+                              // 已标记删除的或已完成的不显示
+                              if (isMarkedForDelete || isStepDone) {
+                                stepIdx += 1;
                                 return;
                               }
                               // 标记第一个未完成的步骤

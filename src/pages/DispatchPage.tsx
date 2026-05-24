@@ -605,6 +605,19 @@ export function DispatchPage() {
 
     console.log('🔍 拖拽结束:', { activeIdStr, overIdStr, BACKLOG_ID });
 
+    // ============ 已完成的任务不允许拖拽 ============
+    if (activeIdStr.startsWith('a:')) {
+      const asgId = activeIdStr.slice(2);
+      const asg = currentAssignments.find(x => x.id === asgId);
+      const step = asg ? currentJobSteps.find(s => s.assignment_id === asg.id) : undefined;
+      if (step?.status === 'done') return;
+    }
+    if (activeIdStr.startsWith('step:')) {
+      const sId = activeIdStr.slice(5);
+      const s = currentJobSteps.find(x => x.id === sId);
+      if (s?.status === 'done') return;
+    }
+
     // ============ 处理手动步骤拖到待排班区域（删除步骤）============
     if (activeIdStr.startsWith('step:') && (overIdStr === BACKLOG_ID || overIdStr.startsWith('o:'))) {
       const stepId = activeIdStr.slice(5);
@@ -1748,9 +1761,12 @@ function DriverColumn({
             const nodeId = node.type === 'order' 
               ? cardId.fromAssignment((node.data as Assignment).id)
               : `step:${(node.data as JobStep).id}`;
+            const nodeDone = node.type === 'order'
+              ? jobSteps.find(s => s.assignment_id === (node.data as Assignment).id)?.status === 'done'
+              : (node.data as JobStep).status === 'done';
             
             return (
-              <SortableNode key={nodeId} id={nodeId}>
+              <SortableNode key={nodeId} id={nodeId} disabled={nodeDone}>
                 <div className="relative flex items-center shrink-0 group/item">
                   {/* 前置插入按钮 - 只在第一个节点前显示，且只在悬停时显示 */}
                   {index === 0 && (
@@ -1842,17 +1858,17 @@ function SortableOrderCard({ id, children }: { id: string; children: React.React
 }
 
 // ============ Sortable Node (for driver rows) ============
-function SortableNode({ id, children }: { id: string; children: React.ReactNode }) {
+function SortableNode({ id, children, disabled }: { id: string; children: React.ReactNode; disabled?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id });
+    useSortable({ id, disabled });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
-    cursor: isDragging ? 'grabbing' : 'grab',
+    opacity: disabled ? 0.45 : isDragging ? 0.5 : 1,
+    cursor: disabled ? 'default' : isDragging ? 'grabbing' : 'grab',
   };
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div ref={setNodeRef} style={style} {...attributes} {...(disabled ? {} : listeners)}>
       {children}
     </div>
   );
