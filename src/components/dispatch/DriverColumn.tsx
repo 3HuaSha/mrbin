@@ -168,55 +168,41 @@ export function DriverColumn({
         hasChanges && "border-amber-400 bg-amber-50/30 shadow-amber-100",
       )}
     >
-      {/* 顶部:司机和车辆信息 */}
-      <div className="flex items-center justify-between mb-1 border-b pb-1">
-        <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs border-2 border-primary/20">
-            {driver.name.slice(0, 1)}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-sm tracking-tight">{driver.name}</span>
-              {hasChanges && (
-                <Badge variant="outline" className="text-[9px] h-4 bg-amber-100 text-amber-700 border-amber-300 animate-pulse">
-                  未保存
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <Select value={vehicle?.id || ""} onValueChange={onChangeVehicle}>
-                <SelectTrigger className="h-6 w-[120px] text-[10px] bg-muted/50 border-none hover:bg-muted transition-colors">
-                  <SelectValue placeholder="选择车辆" />
-                </SelectTrigger>
-                <SelectContent>
-                  {vehicles.map(v => (
-                    <SelectItem key={v.id} value={v.id} className="text-[10px]">
-                      {v.name} ({v.type})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+      {/* 顶部:司机和车辆信息 - 单行紧凑 */}
+      <div className="flex items-center gap-2 mb-1 border-b pb-1">
+        <div className="h-6 w-6 shrink-0 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-[10px] border border-primary/20">
+          {driver.name.slice(0, 1)}
         </div>
-
-        <div className="flex items-center gap-2">
-          <div className="flex flex-col items-end mr-2">
-            <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">今日任务</span>
-            <span className="text-base font-black leading-none">{timelineItems.length}</span>
-          </div>
-          {hasChanges && onSave && (
-            <Button 
-              size="sm" 
-              onClick={onSave} 
-              disabled={isSaving}
-              className="h-8 gap-1.5 bg-amber-600 hover:bg-amber-700 text-white shadow-lg shadow-amber-200"
-            >
-              {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              保存同步
-            </Button>
-          )}
-        </div>
+        <span className="font-bold text-xs whitespace-nowrap">{driver.name}</span>
+        <Select value={vehicle?.id || ""} onValueChange={onChangeVehicle}>
+          <SelectTrigger className="h-5 w-auto max-w-[160px] text-[10px] px-1.5 bg-muted/50 border-none hover:bg-muted transition-colors">
+            <SelectValue placeholder="选择车辆" />
+          </SelectTrigger>
+          <SelectContent>
+            {vehicles.map(v => (
+              <SelectItem key={v.id} value={v.id} className="text-[10px]">
+                {v.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-[10px] text-muted-foreground ml-auto">{timelineItems.length}任务</span>
+        {hasChanges && (
+          <Badge variant="outline" className="text-[9px] h-4 px-1 bg-amber-100 text-amber-700 border-amber-300 animate-pulse">
+            未保存
+          </Badge>
+        )}
+        {hasChanges && onSave && (
+          <Button 
+            size="sm" 
+            onClick={onSave} 
+            disabled={isSaving}
+            className="h-6 px-2 text-[10px] gap-1 bg-amber-600 hover:bg-amber-700 text-white"
+          >
+            {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+            保存
+          </Button>
+        )}
       </div>
 
       {/* 任务时间轴 */}
@@ -295,38 +281,12 @@ export function DriverColumn({
 
         {/* 未完成区域: 可拖拽 */}
         <div className="flex-1 flex items-center gap-2 overflow-x-auto custom-scrollbar scroll-smooth">
-          {/* 开头插入: 鼠标悬停行时显示 */}
-          {activeItems.length > 0 && (
-            <div className="shrink-0 self-center">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/20 hover:border-primary hover:bg-primary/10 hover:text-primary bg-background opacity-0 group-hover:opacity-100 transition-all"
-                    onClick={(e) => {
-                      const firstActive = activeItems[0];
-                      handleButtonClick(
-                        firstActive?.stepNumber ?? 1, 
-                        e, 
-                        firstActive?.type === 'assignment' ? firstActive.data.order_id : undefined, 
-                        firstActive?.type === 'assignment' ? firstActive.data.orders.type : undefined
-                      );
-                    }}
-                  >
-                    <Plus className="h-3 w-3" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-[10px]">在开头插入步骤</TooltipContent>
-              </Tooltip>
-            </div>
-          )}
-
           <SortableContext
             items={activeItems.map(item => item.type === 'assignment' ? `a:${item.data.id}` : `step:${item.data.id}`)}
             strategy={horizontalListSortingStrategy}
           >
             {activeItems.map((item, index) => {
+              const prevItem = activeItems[index - 1];
               const nextItem = activeItems[index + 1];
               
               return (
@@ -351,7 +311,34 @@ export function DriverColumn({
                     )}
                   </SortableOrderCard>
 
-                  {/* 悬停卡片时显示插入按钮 */}
+                  {/* 左侧插入按钮 */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute -left-2.5 top-1/2 -translate-y-1/2 z-10 h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 hover:border-primary hover:bg-primary/10 hover:text-primary bg-background shadow-sm opacity-0 group-hover/card:opacity-100 transition-all"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          let adjId: string | undefined;
+                          let adjType: string | undefined;
+                          if (item.type === 'assignment') {
+                            adjId = item.data.order_id;
+                            adjType = item.data.orders.type;
+                          } else if (prevItem?.type === 'assignment') {
+                            adjId = prevItem.data.order_id;
+                            adjType = prevItem.data.orders.type;
+                          }
+                          handleButtonClick(item.stepNumber, e, adjId, adjType);
+                        }}
+                      >
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-[10px]">在前面插入</TooltipContent>
+                  </Tooltip>
+
+                  {/* 右侧插入按钮 */}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -375,7 +362,7 @@ export function DriverColumn({
                         <Plus className="h-3 w-3" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-[10px]">插入步骤</TooltipContent>
+                    <TooltipContent side="bottom" className="text-[10px]">在后面插入</TooltipContent>
                   </Tooltip>
                 </div>
               );
