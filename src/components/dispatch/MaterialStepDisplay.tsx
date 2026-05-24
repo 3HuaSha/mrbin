@@ -47,7 +47,7 @@ export function MaterialStepDisplay({
   return (
     <div
       className={cn(
-        "group relative rounded-lg border-l-4 shadow-sm p-2 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[160px] shrink-0",
+        "group relative rounded-lg border-l-4 shadow-sm p-3 transition-all duration-300 hover:shadow-lg hover:scale-105 hover:z-10 w-[200px] shrink-0",
         isDone
           ? "border-l-green-600 bg-green-100"
           : isLoad

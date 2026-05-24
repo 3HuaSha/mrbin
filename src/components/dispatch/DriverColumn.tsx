@@ -218,7 +218,7 @@ export function DriverColumn({
       </div>
 
       {/* 任务时间轴 */}
-      <div className="flex items-center gap-0 pb-1 pt-0.5 min-h-[50px]">
+      <div className="flex items-center gap-0 pb-1 pt-0.5 min-h-[70px]">
         {/* 已完成区域: 默认只显示最近一个，点击展开全部 */}
         {doneItems.length > 0 && (
           <div className="shrink-0 flex items-center border-r border-muted-foreground/15 pr-2 mr-2">

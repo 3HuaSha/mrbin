@@ -1,14 +1,13 @@
--- 将 bin_type 从 enum 改为 text，以支持砂石料自由文本输入
--- 现有枚举值 (garbage, brick, soil, cement, asphalt) 作为普通字符串继续有效
+-- ============================================================
+-- 步骤1: 先单独执行以下语句（必须先提交 enum 变更）
+-- 在 Supabase SQL Editor 中逐条执行
+-- ============================================================
 
--- 1. 先删除依赖 bin_type enum 的列默认值（如果有）
+-- 1. bin_type 从 enum 改为 text
 ALTER TABLE public.orders ALTER COLUMN bin_type DROP DEFAULT;
-
--- 2. 将列类型从 enum 改为 text
 ALTER TABLE public.orders ALTER COLUMN bin_type TYPE text USING bin_type::text;
 
--- 3. 删除旧的 enum 类型（如果不再有其他列引用它）
--- 先检查是否还有其他列使用该类型
+-- 2. 删除旧的 bin_type enum 类型（如果不再有其他列引用）
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -21,13 +20,17 @@ BEGIN
   END IF;
 END $$;
 
--- 4. 添加 material 到 business_type enum
+-- 3. 添加 material 到 business_type enum（必须单独提交后才能使用）
 ALTER TYPE public.business_type ADD VALUE IF NOT EXISTS 'material';
 
--- 5. 修复已创建的砂石料订单的 business_type
+-- ============================================================
+-- 步骤2: enum 值提交后，再执行以下语句
+-- ============================================================
+
+-- 4. 修复已创建的砂石料订单的 business_type
 UPDATE public.orders SET business_type = 'material' WHERE type = 'material' AND business_type != 'material';
 
--- 6. 更新 CHECK 约束：material 订单也不需要 brick_order_type
+-- 5. 更新 CHECK 约束
 ALTER TABLE public.orders DROP CONSTRAINT IF EXISTS check_brick_order_type;
 ALTER TABLE public.orders ADD CONSTRAINT check_brick_order_type
   CHECK (
