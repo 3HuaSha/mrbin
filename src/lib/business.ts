@@ -91,6 +91,22 @@ export function vehicleCanCarry(vehicleType: "HINO" | "MACK", binSize: string | 
   return true;
 }
 
+export function isAMTimeWindow(timeWindow: string, customTime: string | null): boolean {
+  const time = timeWindow === "custom" ? (customTime || "") : timeWindow;
+  const timeLower = time.toLowerCase();
+  if (timeLower.includes('am')) return true;
+  if (timeLower.includes('noon') || timeLower.includes('中午')) return true;
+  return false;
+}
+
+export function isPMTimeWindow(timeWindow: string, customTime: string | null): boolean {
+  const time = timeWindow === "custom" ? (customTime || "") : timeWindow;
+  const timeLower = time.toLowerCase();
+  if (timeLower.includes('pm')) return true;
+  if (!isAMTimeWindow(timeWindow, customTime)) return true;
+  return false;
+}
+
 // 获取业务类型标签
 export function getBusinessTypeLabel(businessType: BusinessType): string {
   return BUSINESS_TYPES.find(t => t.value === businessType)?.label ?? "未知业务";

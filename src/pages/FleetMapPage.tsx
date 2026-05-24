@@ -1,11 +1,11 @@
-import { useMemo, useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { todayISO, typeMeta } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateCcw } from "lucide-react";
+import { Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateCcw, Plus } from "lucide-react";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
@@ -16,13 +16,19 @@ import { useBusinessType } from "@/lib/business-type-storage";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useDispatchData } from "@/hooks/use-dispatch-data";
+import { 
+  Order, 
+  JobStep, 
+  Assignment,
+  Profile as Driver,
+  DriverVehicleAssignment
+} from "@/types/dispatch";
 
 // 司机卡片放置区域的 data-* 标识, DispatchMapWidget 会根据它判断拖拽释放位置
 export const DRIVER_DROP_ZONE_ATTR = "data-fleet-driver-drop";
 // 司机任务列表里的插入位置指示条 data-* 标识
 export const DROP_POSITION_ATTR = "data-fleet-drop-position";
-
-type Driver = { id: string; name: string };
 
 const BIN_TYPE_NAMES: Record<string, string> = {
   garbage: '垃圾桶',
@@ -40,43 +46,6 @@ const STEP_TYPE_LABELS: Record<string, string> = {
   unload_material: '卸料',
 };
 
-type Order = { 
-  id: string; 
-  order_number: string; 
-  address: string; 
-  type: string; 
-  status: string; 
-  customer_notes?: string;
-  bin_size?: string;
-  bin_type?: string;
-  time_window?: string;
-  time_window_custom?: string;
-};
-
-type Assignment = {
-  id: string;
-  driver_id: string;
-  order_id: string;
-  sequence: number;
-  orders: Order;
-};
-
-type JobStep = {
-  id: string;
-  driver_id: string;
-  scheduled_date: string;
-  step_number: number;
-  order_id: string | null;
-  assignment_id: string | null;
-  node_type: 'order' | 'step';
-  location: string | null;
-  step_type: string;
-  bin_id: string | null;
-  notes: string | null;
-  status: string;
-  orders?: Order | null;
-};
-
 export function FleetMapPage() {
   const qc = useQueryClient();
   const [date, setDate] = useState(todayISO());
@@ -85,6 +54,28 @@ export function FleetMapPage() {
   const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>({});
   const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set());
   const [businessType, setBusinessType] = useBusinessType();
+  
+  // 使用封装的数据钩子
+  const {
+    drivers: filteredDrivers,
+    vehicleAssignments,
+    orders: allDayOrders,
+    assignments: serverAssignmentsData,
+    jobSteps,
+    commonLocations,
+  } = useDispatchData(date, businessType);
+
+  // 转换 assignments 格式以匹配原有逻辑
+  const serverAssignments = useMemo(() => {
+    return serverAssignmentsData.map(a => ({
+      id: a.id,
+      driver_id: a.driver_id,
+      order_id: a.order_id,
+      sequence: a.sequence,
+      orders: a.orders
+    }));
+  }, [serverAssignmentsData]);
+
   // 当前被拖拽悬停的司机 (地图告诉我们)
   const [dropHoverDriverId, setDropHoverDriverId] = useState<string | null>(null);
   // 鼠标悬停在司机名字上 (用于高亮路线, 非拖拽)
@@ -99,24 +90,19 @@ export function FleetMapPage() {
   const [mapDragOrderId, setMapDragOrderId] = useState<string | null>(null);
 
   // 本地草稿: 记录每个订单当前应该属于哪个司机 + 在该司机列表中的位置
-  // key = order.id
-  //   driverId = null  → 未分配 (若原本有分配，同步时需要删 dispatch_assignments)
-  //   driverId = 'xxx' → 分配给这位司机
-  //   index            → 在该司机订单任务列表中的顺序 (0 开头)
   type DraftEntry = { orderId: string; driverId: string | null; index: number };
   const [draft, setDraft] = useState<Record<string, DraftEntry>>({});
 
-  // 手动步骤草稿: 从地图固定地点拖到司机产生的待同步步骤
+  // 手动步骤草稿
   type DraftManualStep = {
-    id: string; // 临时 id
+    id: string;
     driverId: string;
-    location: string; // shortName
-    stepType: string; // dump_waste / pickup_bin / drop_bin
-    notes: string; // 桶大小等
-    index: number; // 在该司机列表中的位置
+    location: string;
+    stepType: string;
+    notes: string;
+    index: number;
   };
   const [draftManualSteps, setDraftManualSteps] = useState<DraftManualStep[]>([]);
-  // 已存在的手动步骤要删除的 id (拖到地图上 = 删除)
   const [deleteStepIds, setDeleteStepIds] = useState<string[]>([]);
 
   // 弹窗: 拖 3445/12441 到司机时需要选择动作和桶大小
@@ -170,89 +156,19 @@ export function FleetMapPage() {
     });
   }, [dropHoverDriverId]);
 
-  const { data: drivers = [] } = useQuery({
-    queryKey: ["drivers-assigned"],
-    queryFn: async () => {
-      // 获取已分配车辆的司机 ID
-      const { data: assignments } = await supabase
-        .from("driver_vehicle_assignments")
-        .select("driver_id");
-      const assignedIds = (assignments || []).map(a => a.driver_id);
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id,name")
-        .eq("role", "driver")
-        .eq("is_active", true)
-        .in("id", assignedIds.length > 0 ? assignedIds : ["none"])
-        .order("name");
-      if (error) throw error;
-      return data as Driver[];
-    },
-  });
-
-  // 获取所有任务步骤（包含订单节点和手动步骤节点）
-  const { data: jobSteps = [] } = useQuery({
-    queryKey: ["map-job-steps", date, businessType],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("job_steps")
-        .select("*, orders(*)")
-        .eq("scheduled_date", date)
-        .order("step_number");
-      if (error) throw error;
-      
-      // 过滤订单节点，只保留匹配业务类型的
-      const filtered = (data ?? []).filter(step => {
-        if (step.node_type === 'order' && step.orders) {
-          return (step.orders as any).business_type === businessType;
-        }
-        // 手动步骤节点保留（它们不属于特定业务类型）
-        return true;
-      });
-      
-      return filtered as unknown as JobStep[];
-    },
-    refetchInterval: 15000, // 每15秒自动刷新, 及时反映司机完成状态
-  });
-  
-  // 获取当日所有订单（包括未分配的），用于在地图上显示未排班订单
-  const { data: allDayOrders = [] } = useQuery({
-    queryKey: ["map-all-orders", date, businessType],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("service_date", date)
-        .eq("business_type", businessType)
-        .neq("status", "cancelled")
-        .order("created_at");
-      if (error) throw error;
-      // 地图侧隐藏换桶自动生成的 pickup 子单:
-      // 有 linked_order_id 的 pickup 属于某条 swap 订单,不单独出现
-      const mainSwapIds = new Set(
-        (data ?? []).filter((o: any) => o.type === "swap").map((o: any) => o.id)
-      );
-      return (data ?? []).filter((o: any) => {
-        if (o.type === "pickup" && o.linked_order_id && mainSwapIds.has(o.linked_order_id)) return false;
-        return true;
-      }) as Order[];
-    },
-    refetchInterval: 15000, // 与 jobSteps 同步刷新
-  });
   const orders = useMemo(() => {
     // 合并已分配订单和全部当日订单 - 这样地图上能看到即使没有分配的订单
     // 排除已完成的订单，不在地图上显示
     const uniqueOrders = new Map<string, Order>();
     // 先加入 jobSteps 里已分配的订单（带司机/状态信息）
-    jobSteps.forEach(step => {
+    jobSteps.forEach((step: JobStep) => {
       if (step.node_type === 'order' && step.orders) {
         if (step.status === 'done' || step.orders.status === 'done') return;
         uniqueOrders.set(step.orders.id, step.orders);
       }
     });
     // 再补齐未分配的订单
-    allDayOrders.forEach(o => {
+    allDayOrders.forEach((o: Order) => {
       if (o.status === 'done') return;
       if (!uniqueOrders.has(o.id)) {
         uniqueOrders.set(o.id, o);
@@ -261,46 +177,11 @@ export function FleetMapPage() {
     return Array.from(uniqueOrders.values());
   }, [jobSteps, allDayOrders]);
 
-  const { data: vehicleAssignments = [] } = useQuery({
-    queryKey: ["driver-vehicle-assignments-map"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("driver_vehicle_assignments")
-        .select("*, vehicles(*)");
-      if (error) throw error;
-      return data || [];
-    },
-  });
-
-  const filteredDrivers = useMemo(() => {
-    return drivers.filter(d => {
-      const assignment = vehicleAssignments.find((a: any) => a.driver_id === d.id);
-      if (!assignment) return false;
-      const vName = (assignment.vehicles?.name || "").toUpperCase();
-      if (businessType === 'garbage') return vName.startsWith('BIN');
-      if (businessType === 'brick') return vName.startsWith('FLAT');
-      return true;
-    });
-  }, [drivers, vehicleAssignments, businessType]);
-  
-  // 服务器持久化数据: assignments 基于 jobSteps (order 节点) 生成
-  const serverAssignments = useMemo(() => {
-    return jobSteps
-      .filter(step => step.node_type === 'order' && step.assignment_id)
-      .map(step => ({
-        id: step.assignment_id!,
-        driver_id: step.driver_id,
-        order_id: step.order_id!,
-        sequence: step.step_number,
-        orders: step.orders!
-      }));
-  }, [jobSteps]);
-
   // 订单 id → 订单完整对象 (给地图和任务列表共用的快速查找)
   const orderById = useMemo(() => {
     const m = new Map<string, Order>();
-    allDayOrders.forEach(o => m.set(o.id, o));
-    serverAssignments.forEach(a => { if (a.orders) m.set(a.order_id, a.orders as Order); });
+    allDayOrders.forEach((o: Order) => m.set(o.id, o));
+    serverAssignments.forEach((a: any) => { if (a.orders) m.set(a.order_id, a.orders as Order); });
     return m;
   }, [allDayOrders, serverAssignments]);
 
@@ -312,8 +193,8 @@ export function FleetMapPage() {
     const assignedSet = new Set<string>();
     serverAssignments
       .slice()
-      .sort((a, b) => a.sequence - b.sequence)
-      .forEach(a => {
+      .sort((a: any, b: any) => a.sequence - b.sequence)
+      .forEach((a: any) => {
         const arr = perDriver.get(a.driver_id) ?? [];
         arr.push({ orderId: a.order_id, seq: a.sequence });
         perDriver.set(a.driver_id, arr);
@@ -321,9 +202,9 @@ export function FleetMapPage() {
       });
 
     // 然后逐条应用 draft 覆盖
-    Object.values(draft).forEach(d => {
+    Object.values(draft).forEach((d: DraftEntry) => {
       // 先把它从所有司机列表里抠出去
-      perDriver.forEach((arr, dId) => {
+      perDriver.forEach((arr) => {
         const idx = arr.findIndex(x => x.orderId === d.orderId);
         if (idx >= 0) arr.splice(idx, 1);
       });
@@ -344,26 +225,26 @@ export function FleetMapPage() {
       assigned[dId] = arr.map(x => x.orderId);
     });
     const unassigned = allDayOrders
-      .filter(o => !assignedSet.has(o.id) && o.status !== "done")
-      .map(o => o.id);
+      .filter((o: Order) => !assignedSet.has(o.id) && o.status !== "done")
+      .map((o: Order) => o.id);
 
     return { assigned, unassigned };
   }, [serverAssignments, allDayOrders, draft]);
 
   // 给地图用的 assignments 数组 (按合并后的顺序生成 sequence, 排除已完成的)
   const assignments = useMemo(() => {
-    const result: any[] = [];
+    const result: Assignment[] = [];
     Object.entries(merged.assigned).forEach(([driverId, orderIds]) => {
       orderIds.forEach((orderId, idx) => {
         const order = orderById.get(orderId);
         if (!order) return;
         // 已完成的订单不在地图上显示
         if (order.status === 'done') return;
-        const origStep = jobSteps.find(s => s.node_type === 'order' && s.order_id === orderId && s.driver_id === driverId);
+        const origStep = jobSteps.find((s: JobStep) => s.node_type === 'order' && s.order_id === orderId && s.driver_id === driverId);
         if (origStep?.status === 'done') return;
         // 找服务器原始 assignment (如果有)
         const existing = serverAssignments.find(
-          a => a.driver_id === driverId && a.order_id === orderId
+          (a: any) => a.driver_id === driverId && a.order_id === orderId
         );
         result.push({
           id: existing?.id ?? `local-${orderId}`,
@@ -371,11 +252,18 @@ export function FleetMapPage() {
           order_id: orderId,
           sequence: idx + 1,
           orders: order,
-        });
+          vehicle_id: '', 
+          bin_id: null,
+          scheduled_date: date,
+          created_at: new Date().toISOString(),
+          vehicles: {} as any,
+          bins: null,
+          dispatch_notes: null
+        } as Assignment);
       });
     });
     return result;
-  }, [merged.assigned, serverAssignments, orderById, jobSteps]);
+  }, [merged.assigned, serverAssignments, orderById, jobSteps, date]);
 
   // 地图拖拽判断用: 未分配订单 id 列表 (基于本地合并状态)
   const unassignedOrders = useMemo(
@@ -394,7 +282,7 @@ export function FleetMapPage() {
 
     // 1. 先按司机收集已有的手动步骤 (排除已标记删除的)
     const existingManualSteps: Record<string, JobStep[]> = {};
-    jobSteps.forEach(step => {
+    jobSteps.forEach((step: JobStep) => {
       if (step.node_type === 'step' && !deleteStepIds.includes(step.id)) {
         (existingManualSteps[step.driver_id] ??= []).push(step);
       }
@@ -407,7 +295,7 @@ export function FleetMapPage() {
         const order = orderById.get(orderId);
         if (!order) return;
         const originalStep = jobSteps.find(
-          s => s.node_type === 'order' && s.order_id === orderId && s.driver_id === driverId
+          (s: JobStep) => s.node_type === 'order' && s.order_id === orderId && s.driver_id === driverId
         );
         arr.push({
           id: originalStep?.id ?? `draft-${driverId}-${orderId}`,
@@ -423,6 +311,7 @@ export function FleetMapPage() {
           notes: originalStep?.notes ?? null,
           status: originalStep?.status ?? 'locked',
           orders: order,
+          created_at: originalStep?.created_at ?? new Date().toISOString(),
         } as JobStep);
       });
       map[driverId] = arr;
@@ -474,7 +363,7 @@ export function FleetMapPage() {
     });
 
     // 确保没有任务的司机也有空数组
-    filteredDrivers.forEach(d => { map[d.id] ??= []; });
+    filteredDrivers.forEach((d: Driver) => { map[d.id] ??= []; });
 
     return map;
   }, [jobSteps, merged.assigned, orderById, date, draftManualSteps, deleteStepIds, filteredDrivers]);
@@ -627,7 +516,7 @@ export function FleetMapPage() {
         }
       });
     });
-    jobSteps.forEach(step => {
+    jobSteps.forEach((step: JobStep) => {
       const loc = (step.location || '').toUpperCase();
       brickFactories.forEach(factory => {
         if (loc.includes(factory.shortName.toUpperCase()) ||
@@ -690,7 +579,7 @@ export function FleetMapPage() {
         });
       } else {
         // 已有步骤: 需要更新 step_number, 暂时通过 deleteStepIds + draftManualSteps 实现
-        const existingStep = jobSteps.find(s => s.id === stepId);
+        const existingStep = jobSteps.find((s: JobStep) => s.id === stepId);
         if (existingStep) {
           // 标记旧的为删除
           setDeleteStepIds(prev => prev.includes(stepId) ? prev : [...prev, stepId]);
@@ -925,7 +814,7 @@ export function FleetMapPage() {
           order_id: ins.orderId,
           node_type: "order",
           step_number: ins.sequence,
-          step_type: stepTypeMap[order.type] || "customer_delivery",
+          step_type: (stepTypeMap[order.type] || "customer_delivery") as any,
           location: order.address,
           status: "locked",
         });
@@ -975,7 +864,7 @@ export function FleetMapPage() {
           step_number: targetStepNum,
           node_type: "step",
           location: ms.location,
-          step_type: ms.stepType,
+          step_type: ms.stepType as any,
           notes: ms.notes || null,
           status: "locked",
         });
@@ -1043,7 +932,7 @@ export function FleetMapPage() {
       }
 
       // 获取车辆分配信息
-      const { data: vehicleAssignments } = await supabase
+      const { data: vAssignments } = await supabase
         .from("driver_vehicle_assignments")
         .select(`
           driver_id,
@@ -1081,7 +970,7 @@ export function FleetMapPage() {
       }
 
       // 找到司机的车辆
-      const assignment = vehicleAssignments?.find((a: any) => a.driver_id === driverId);
+      const assignment = (vAssignments as any[])?.find((a: any) => a.driver_id === driverId);
       if (!assignment) {
         toast.error('未找到司机的车辆分配');
         return;
@@ -1094,7 +983,7 @@ export function FleetMapPage() {
       }
 
       // 找到车辆的实时位置
-      const vehicle = samsaraResult.data.find(v => v.id === samsaraVehicleId);
+      const vehicle = (samsaraResult.data as any[]).find(v => v.id === samsaraVehicleId);
       if (!vehicle || !vehicle.location) {
         toast.error('无法获取车辆位置');
         return;
@@ -1200,7 +1089,7 @@ export function FleetMapPage() {
           </div>
           
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
-            {filteredDrivers.map(d => {
+            {filteredDrivers.map((d: Driver) => {
               const steps = driverJobSteps[d.id] ?? [];
               const isExpanded = expandedDrivers.has(d.id);
               
@@ -1298,12 +1187,12 @@ export function FleetMapPage() {
                         } else {
                           // 顶部
                           items.push(<div key="top-ind">{topIndicator}</div>);
-                          steps.forEach((step, i) => {
+                          steps.forEach((step) => {
                             if (step.node_type === 'order' && step.orders) {
                               const order = step.orders;
                               const tm = typeMeta(order.type);
                               const binTypeName = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : '';
-                              const timeLabel = order.time_window_custom || order.time_window || '';
+                              const timeLabelStr = order.time_window_custom || order.time_window || '';
                               const driverETA = driverETAs[d.id];
                               const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
                               // 这个卡片是否为本地 draft 新增 / 变动
@@ -1373,7 +1262,7 @@ export function FleetMapPage() {
                                     <div className="text-[10px] text-muted-foreground leading-snug break-words" title={order.address}>
                                       {order.address}
                                     </div>
-                                    <div className="text-[10px] text-primary font-medium">{timeLabel}</div>
+                                    <div className="text-[10px] text-primary font-medium">{timeLabelStr}</div>
                                     {order.customer_notes && (
                                       <div className="text-[9px] text-status-progress truncate">
                                         📝 {order.customer_notes}
