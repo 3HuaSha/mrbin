@@ -288,7 +288,9 @@ export function DriverHomePage() {
             'material': '物料',
           };
           const stepLabel = isOrderNode
-            ? (orderTypeLabels[s.orders!.type] || stepTypeLabels[s.step_type] || s.step_type)
+            ? (s.orders!.type === 'material' 
+                ? (stepTypeLabels[s.step_type] || s.step_type)
+                : (orderTypeLabels[s.orders!.type] || stepTypeLabels[s.step_type] || s.step_type))
             : (stepTypeLabels[s.step_type] || s.step_type);
           
           // 桶类型中文映射
@@ -297,7 +299,12 @@ export function DriverHomePage() {
             'brick': '砖桶',
             'soil': '土桶',
             'cement': '水泥桶',
-            'asphalt': '沥青桶'
+            'asphalt': '沥青桶',
+            'sand': '沙子',
+            'gravel': '码石',
+            'topsoil': '表土',
+            'fill': '填方',
+            'stone': '石头',
           };
           const binTypeName = isOrderNode && s.orders?.bin_type ? binTypeNames[s.orders.bin_type] || s.orders.bin_type : '';
           

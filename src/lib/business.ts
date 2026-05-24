@@ -53,6 +53,8 @@ export const STEP_TYPE_LABEL: Record<string, string> = {
   customer_delivery: "送到客户",
   customer_pickup: "去客户取桶",
   dump_site: "去垃圾场倒垃圾",
+  load_material: "装料",
+  unload_material: "送料",
 };
 
 export const STEP_TYPE_EMOJI: Record<string, string> = {
@@ -60,6 +62,8 @@ export const STEP_TYPE_EMOJI: Record<string, string> = {
   customer_delivery: "📦",
   customer_pickup: "📥",
   dump_site: "♻️",
+  load_material: "⛏️",
+  unload_material: "🚛",
 };
 
 export function typeMeta(type: string) {

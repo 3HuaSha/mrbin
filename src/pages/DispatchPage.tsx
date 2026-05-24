@@ -161,20 +161,48 @@ export function DispatchPage() {
         if (assignmentError) throw assignmentError;
         
         const order = i.orders;
-        const displayStep = {
-          assignment_id: newAssignment.id,
-          driver_id: i.driver_id,
-          scheduled_date: i.scheduled_date,
-          order_id: order.id,
-          node_type: 'order' as const,
-          step_number: i.sequence,
-          step_type: (order.type === "delivery" ? "delivery" : order.type === "pickup" ? "pickup" : "swap") as any,
-          location: order.address,
-          status: 'pending',
-        };
         
-        const { error: stepsError } = await supabase.from("job_steps").insert(displayStep);
-        if (stepsError) throw stepsError;
+        if (order.type === "material") {
+          // 砂石料订单：创建两个步骤 - 装料 + 送料
+          const loadStep = {
+            assignment_id: newAssignment.id,
+            driver_id: i.driver_id,
+            scheduled_date: i.scheduled_date,
+            order_id: order.id,
+            node_type: 'order' as const,
+            step_number: i.sequence,
+            step_type: 'load_material' as any,
+            location: (order as any).load_location || 'Kennedy Depot',
+            status: 'pending',
+          };
+          const unloadStep = {
+            assignment_id: newAssignment.id,
+            driver_id: i.driver_id,
+            scheduled_date: i.scheduled_date,
+            order_id: order.id,
+            node_type: 'order' as const,
+            step_number: i.sequence + 0.5,
+            step_type: 'unload_material' as any,
+            location: order.address,
+            status: 'pending',
+          };
+          const { error: stepsError } = await supabase.from("job_steps").insert([loadStep, unloadStep]);
+          if (stepsError) throw stepsError;
+        } else {
+          const displayStep = {
+            assignment_id: newAssignment.id,
+            driver_id: i.driver_id,
+            scheduled_date: i.scheduled_date,
+            order_id: order.id,
+            node_type: 'order' as const,
+            step_number: i.sequence,
+            step_type: (order.type === "delivery" ? "delivery" : order.type === "pickup" ? "pickup" : "swap") as any,
+            location: order.address,
+            status: 'pending',
+          };
+          const { error: stepsError } = await supabase.from("job_steps").insert(displayStep);
+          if (stepsError) throw stepsError;
+        }
       }
       
       for (const u of updates) {
@@ -313,6 +341,28 @@ export function DispatchPage() {
       setLocalJobSteps(updatedSteps);
       toast.success("已删除步骤");
       qc.invalidateQueries({ queryKey: ["job-steps", date] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // 砂石料步骤改日期
+  const changeMaterialStepDate = useMutation({
+    mutationFn: async ({ stepId, newDate }: { stepId: string; newDate: string }) => {
+      const { error } = await supabase.from("job_steps")
+        .update({ scheduled_date: newDate })
+        .eq("id", stepId);
+      if (error) throw error;
+      return { stepId, newDate };
+    },
+    onSuccess: ({ stepId, newDate: nd }: { stepId: string; newDate: string }) => {
+      if (nd !== date) {
+        setLocalJobSteps(currentJobSteps.filter((s: JobStep) => s.id !== stepId));
+        toast.success(`步骤已移至 ${nd}`);
+      } else {
+        setLocalJobSteps(currentJobSteps.map((s: JobStep) => s.id === stepId ? { ...s, scheduled_date: nd } : s));
+        toast.success("日期已更新");
+      }
+      qc.invalidateQueries({ queryKey: ["job-steps"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -704,6 +754,7 @@ export function DispatchPage() {
                     insertStepAt={insertStepAt}
                     setInsertStepAt={setInsertStepAt}
                     onViewStep={(step: JobStep) => setViewingStep(step)}
+                    onDateChange={(stepId: string, newDate: string) => changeMaterialStepDate.mutate({ stepId, newDate })}
                   />
                 );
               })}
