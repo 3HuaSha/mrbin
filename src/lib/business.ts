@@ -52,6 +52,7 @@ export const STEP_TYPE_LABEL: Record<string, string> = {
   depot_pickup: "去 Depot 取桶",
   customer_delivery: "送到客户",
   customer_pickup: "去客户取桶",
+  customer_swap: "去客户换桶",
   dump_site: "去垃圾场倒垃圾",
 };
 
@@ -59,6 +60,7 @@ export const STEP_TYPE_EMOJI: Record<string, string> = {
   depot_pickup: "🏭",
   customer_delivery: "📦",
   customer_pickup: "📥",
+  customer_swap: "🔄",
   dump_site: "♻️",
 };
 
