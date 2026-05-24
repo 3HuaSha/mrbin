@@ -146,15 +146,15 @@ export function DriverColumn({
     <div 
       ref={combinedRef}
       className={cn(
-        "group relative bg-card border rounded-xl p-3 min-h-[140px] transition-all duration-300",
+        "group relative bg-card border rounded-lg p-2 transition-all duration-300",
         isOver && "ring-2 ring-primary ring-inset bg-primary/5 shadow-inner scale-[1.01] z-20",
         hasChanges && "border-amber-400 bg-amber-50/30 shadow-amber-100",
       )}
     >
       {/* 顶部:司机和车辆信息 */}
-      <div className="flex items-center justify-between mb-3 border-b pb-2">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm border-2 border-primary/20 group-hover:scale-110 transition-transform">
+      <div className="flex items-center justify-between mb-1 border-b pb-1">
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs border-2 border-primary/20">
             {driver.name.slice(0, 1)}
           </div>
           <div>
@@ -186,7 +186,7 @@ export function DriverColumn({
         <div className="flex items-center gap-2">
           <div className="flex flex-col items-end mr-2">
             <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">今日任务</span>
-            <span className="text-lg font-black leading-none">{timelineItems.length}</span>
+            <span className="text-base font-black leading-none">{timelineItems.length}</span>
           </div>
           {hasChanges && onSave && (
             <Button 
@@ -203,35 +203,39 @@ export function DriverColumn({
       </div>
 
       {/* 任务时间轴 */}
-      <div className="flex items-center gap-3 overflow-x-auto pb-4 pt-1 custom-scrollbar scroll-smooth min-h-[100px]">
-        {/* 开头插入按钮 */}
-        <div className="shrink-0 self-center">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 rounded-full border-2 border-dashed border-muted-foreground/30 hover:border-primary hover:bg-primary/5 hover:text-primary transition-all"
-                onClick={(e) => handleButtonClick(1, e, timelineItems[0]?.type === 'assignment' ? timelineItems[0].data.order_id : undefined, timelineItems[0]?.type === 'assignment' ? timelineItems[0].data.orders.type : undefined)}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-[10px]">在此插入步骤</TooltipContent>
-          </Tooltip>
-        </div>
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5 custom-scrollbar scroll-smooth min-h-[50px]">
+        {/* 开头插入: 鼠标悬停行时显示 */}
+        {timelineItems.length > 0 && (
+          <div className="shrink-0 self-center">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/20 hover:border-primary hover:bg-primary/10 hover:text-primary bg-background opacity-0 group-hover:opacity-100 transition-all"
+                  onClick={(e) => handleButtonClick(1, e, timelineItems[0]?.type === 'assignment' ? timelineItems[0].data.order_id : undefined, timelineItems[0]?.type === 'assignment' ? timelineItems[0].data.orders.type : undefined)}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-[10px]">在开头插入步骤</TooltipContent>
+            </Tooltip>
+          </div>
+        )}
 
         <SortableContext
           items={assignments.map(a => `a:${a.id}`).concat(jobSteps.filter(s => s.node_type === 'step').map(s => `step:${s.id}`))}
           strategy={horizontalListSortingStrategy}
         >
           {timelineItems.map((item, index) => {
-            const isLast = index === timelineItems.length - 1;
             const nextItem = timelineItems[index + 1];
+            const isDone = item.type === 'assignment'
+              ? jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')?.status === 'done'
+              : item.data.status === 'done';
             
             return (
-              <div key={item.type === 'assignment' ? `a:${item.data.id}` : `step:${item.data.id}`} className="flex items-center gap-3 shrink-0">
-                <SortableOrderCard id={item.type === 'assignment' ? `a:${item.data.id}` : `step:${item.data.id}`}>
+              <div key={item.type === 'assignment' ? `a:${item.data.id}` : `step:${item.data.id}`} className="relative shrink-0 group/card">
+                <SortableOrderCard id={item.type === 'assignment' ? `a:${item.data.id}` : `step:${item.data.id}`} disabled={isDone}>
                   {item.type === 'assignment' ? (
                     <OrderNodeDisplay 
                       assignment={item.data}
@@ -251,48 +255,42 @@ export function DriverColumn({
                   )}
                 </SortableOrderCard>
 
-                {/* 节点间的插入按钮 */}
-                <div className="flex items-center gap-3 shrink-0 self-center">
-                  <div className="h-0.5 w-4 bg-muted-foreground/20 rounded-full" />
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-full border-2 border-dashed border-muted-foreground/30 hover:border-primary hover:bg-primary/5 hover:text-primary transition-all"
-                        onClick={(e) => {
-                          // Determine order context from either current item or next item
-                          let adjId: string | undefined;
-                          let adjType: string | undefined;
-                          
-                          if (item.type === 'assignment') {
-                            adjId = item.data.order_id;
-                            adjType = item.data.orders.type;
-                          } else if (nextItem?.type === 'assignment') {
-                            adjId = nextItem.data.order_id;
-                            adjType = nextItem.data.orders.type;
-                          }
-                          
-                          handleButtonClick(item.stepNumber + 1, e, adjId, adjType);
-                        }}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-[10px]">在此插入步骤</TooltipContent>
-                  </Tooltip>
-                  {!isLast && <div className="h-0.5 w-4 bg-muted-foreground/20 rounded-full" />}
-                </div>
+                {/* 悬停卡片时显示插入按钮 */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 hover:border-primary hover:bg-primary/10 hover:text-primary bg-background shadow-sm opacity-0 group-hover/card:opacity-100 transition-all"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        let adjId: string | undefined;
+                        let adjType: string | undefined;
+                        if (item.type === 'assignment') {
+                          adjId = item.data.order_id;
+                          adjType = item.data.orders.type;
+                        } else if (nextItem?.type === 'assignment') {
+                          adjId = nextItem.data.order_id;
+                          adjType = nextItem.data.orders.type;
+                        }
+                        handleButtonClick(item.stepNumber + 1, e, adjId, adjType);
+                      }}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-[10px]">插入步骤</TooltipContent>
+                </Tooltip>
               </div>
             );
           })}
         </SortableContext>
 
         {timelineItems.length === 0 && (
-          <div className="flex-1 h-full flex items-center justify-center border-2 border-dashed border-muted/50 rounded-lg py-6 bg-muted/5 group-hover:bg-muted/10 transition-colors mx-4">
+          <div className="flex-1 h-full flex items-center justify-center border-2 border-dashed border-muted/50 rounded-lg py-3 bg-muted/5 group-hover:bg-muted/10 transition-colors mx-2">
             <div className="text-center">
               <div className="text-[11px] font-semibold text-muted-foreground">暂无任务</div>
-              <p className="text-[9px] text-muted-foreground/60 mt-1">拖拽订单到此行或点击 + 号添加</p>
+              <p className="text-[9px] text-muted-foreground/60 mt-1">拖拽订单到此行</p>
             </div>
           </div>
         )}

@@ -606,7 +606,7 @@ export function DispatchPage() {
               />
             </div>
 
-            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 bg-muted/10">
+            <div className="flex-1 overflow-y-auto p-1.5 space-y-1 bg-muted/10">
               {drivers.map((d) => {
                 const list = currentAssignments.filter((a) => a.driver_id === d.id).sort((x, y) => x.sequence - y.sequence);
                 const driverSteps = currentJobSteps.filter(s => s.driver_id === d.id);

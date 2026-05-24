@@ -5,9 +5,10 @@ import { CSS } from "@dnd-kit/utilities";
 interface SortableOrderCardProps {
   id: string;
   children: ReactNode;
+  disabled?: boolean;
 }
 
-export function SortableOrderCard({ id, children }: SortableOrderCardProps) {
+export function SortableOrderCard({ id, children, disabled }: SortableOrderCardProps) {
   const {
     attributes,
     listeners,
@@ -15,12 +16,12 @@ export function SortableOrderCard({ id, children }: SortableOrderCardProps) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0 : 1,
+    opacity: isDragging ? 0 : disabled ? 0.45 : 1,
   };
 
   return (
@@ -28,7 +29,7 @@ export function SortableOrderCard({ id, children }: SortableOrderCardProps) {
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}
+      {...(disabled ? {} : listeners)}
     >
       {children}
     </div>

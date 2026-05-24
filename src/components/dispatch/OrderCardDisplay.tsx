@@ -24,48 +24,40 @@ export function OrderCardDisplay({ order, binNumber, ghost }: OrderCardDisplayPr
 
   return (
     <div className={cn(
-      "p-2 rounded-md border bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md cursor-grab active:cursor-grabbing select-none",
+      "p-1.5 rounded-md border bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md cursor-grab active:cursor-grabbing select-none",
       ghost && "opacity-50 border-primary border-2",
       order.status === "done" && "bg-green-50 border-green-200"
     )}>
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center justify-between">
-          <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded leading-none", tm.className)}>
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className={cn("text-[10px] font-bold px-1 py-0.5 rounded leading-none", tm.className)}>
             {tm.label}
           </span>
-          <span className="text-[10px] font-mono font-medium text-muted-foreground">
-            {order.order_number}
-          </span>
+          {order.bin_size && (
+            <span className="text-[10px] bg-muted px-1 rounded font-semibold">
+              {order.bin_size}yd
+            </span>
+          )}
+          <span className="text-[10px] text-muted-foreground">{binTypeName}</span>
         </div>
-        
-        <div className="text-[11px] font-semibold leading-tight line-clamp-1">
-          {order.customer_name}
-        </div>
-        
-        <div className="text-[10px] text-muted-foreground leading-snug line-clamp-2 min-h-[2.4em]">
+
+        <div className="text-[10px] leading-snug line-clamp-1 font-medium" title={order.address}>
           {order.address}
         </div>
 
-        <div className="flex items-center justify-between mt-1 pt-1 border-t border-muted/50">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-medium text-primary">
-              {order.time_window === "custom" ? order.time_window_custom : order.time_window}
-            </span>
-            {order.bin_size && (
-              <span className="text-[10px] bg-muted px-1 rounded font-medium">
-                {order.bin_size}yd
-              </span>
-            )}
-          </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-semibold text-primary">
+            {order.time_window === "custom" ? order.time_window_custom : order.time_window}
+          </span>
           {binNumber && (
             <span className="text-[9px] font-bold text-green-700 bg-green-100 px-1 rounded">
               {binNumber}
             </span>
           )}
         </div>
-        
+
         {order.customer_notes && (
-          <div className="mt-1 text-[9px] text-amber-700 bg-amber-50 px-1 py-0.5 rounded italic truncate">
+          <div className="text-[9px] text-amber-700 bg-amber-50 px-1 py-0.5 rounded italic truncate">
             📝 {order.customer_notes}
           </div>
         )}

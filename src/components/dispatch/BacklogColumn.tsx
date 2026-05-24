@@ -51,7 +51,7 @@ export function BacklogColumn({
   );
 
   return (
-    <div className="w-[440px] flex flex-col h-full bg-muted/30 rounded-lg">
+    <div className="w-[340px] flex flex-col h-full bg-muted/30 rounded-lg">
       <div className="px-3 py-2 border-b bg-card rounded-t-lg">
         <div className="flex items-center justify-between mb-2">
           <div>
@@ -99,7 +99,7 @@ export function BacklogColumn({
       >
         <div className="flex h-full">
           {/* 左列: 送+换 */}
-          <div className="flex-1 border-r p-1.5 space-y-1.5 overflow-y-auto">
+          <div className="flex-1 border-r p-1 space-y-1 overflow-y-auto">
             <div className="sticky top-0 bg-muted/80 backdrop-blur-sm rounded px-2 py-1 text-[10px] font-bold text-muted-foreground flex items-center justify-between z-10">
               <span>📦 送桶 / 换桶</span>
               <Badge variant="outline" className="text-[9px] h-4 px-1">{deliverySwapOrders.length}</Badge>
@@ -120,7 +120,7 @@ export function BacklogColumn({
           </div>
 
           {/* 右列: 收 */}
-          <div className="flex-1 p-1.5 space-y-1.5 overflow-y-auto">
+          <div className="flex-1 p-1 space-y-1 overflow-y-auto">
             <div className="sticky top-0 bg-muted/80 backdrop-blur-sm rounded px-2 py-1 text-[10px] font-bold text-muted-foreground flex items-center justify-between z-10">
               <span>📤 收桶</span>
               <Badge variant="outline" className="text-[9px] h-4 px-1">{pickupOrders.length}</Badge>
