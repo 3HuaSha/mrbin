@@ -261,6 +261,12 @@ export function OrdersPage() {
                   <th className="px-3 py-2">终点</th>
                 </>
               )}
+              {businessType === 'material' && (
+                <>
+                  <th className="px-3 py-2">类型</th>
+                  <th className="px-3 py-2">物料</th>
+                </>
+              )}
               <th className="px-3 py-2">日期</th>
               <th className="px-3 py-2">时段</th>
               <th className="px-3 py-2">地址</th>

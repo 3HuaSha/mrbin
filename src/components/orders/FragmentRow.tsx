@@ -118,6 +118,14 @@ export function FragmentRow({
             </td>
           </>
         )}
+        {businessType === 'material' && (
+          <>
+            <td className="px-3 py-2">
+              <Badge className={cn("text-xs font-semibold", typeBadgeClass)}>{typeLabel}</Badge>
+            </td>
+            <td className="px-3 py-2">{binTypeName}</td>
+          </>
+        )}
         <td className="px-3 py-2">{order.service_date}</td>
         <td className="px-3 py-2">{order.time_window === "custom" ? order.time_window_custom : order.time_window}</td>
         <td className="px-3 py-2 max-w-[240px] truncate">{order.address}</td>
@@ -157,9 +165,8 @@ export function FragmentRow({
               </td>
             </>
           )}
-          {businessType === 'brick' && (
+          {businessType === 'material' && (
             <>
-              <td className="px-3 py-1"></td>
               <td className="px-3 py-1"></td>
               <td className="px-3 py-1"></td>
             </>

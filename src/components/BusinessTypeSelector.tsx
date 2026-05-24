@@ -15,7 +15,7 @@ export function BusinessTypeSelector({
 }: BusinessTypeSelectorProps) {
   return (
     <Tabs value={value} onValueChange={(v) => onChange(v as BusinessType)} className={cn("w-auto", className)}>
-      <TabsList className="grid w-full grid-cols-2">
+      <TabsList className="grid w-full grid-cols-3">
         {BUSINESS_TYPES.map((type) => (
           <TabsTrigger 
             key={type.value} 

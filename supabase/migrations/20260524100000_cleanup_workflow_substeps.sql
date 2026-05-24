@@ -68,9 +68,13 @@ BEGIN
         WHERE b.current_order_id = asg.order_id AND b.status = 'in_transit';
     END IF;
 
-    -- 如果是 order 节点被完成，直接标记订单完成
-    IF NEW.node_type = 'order' THEN
+    -- 如果是 order 节点被完成，标记订单完成
+    -- 但砂石料的 load_material 完成不算，要等 unload_material 完成才算
+    IF NEW.node_type = 'order' AND NEW.step_type NOT IN ('load_material') THEN
       UPDATE public.orders SET status = 'done', updated_at = now() WHERE id = asg.order_id AND status <> 'done';
+    ELSIF NEW.node_type = 'order' AND NEW.step_type = 'load_material' THEN
+      -- 装料完成，不标记订单 done，但可以解锁下一步
+      NULL;
     ELSE
       -- 对于手动步骤 (node_type='step')，检查是否所有 order 节点都完成
       -- 不影响订单状态

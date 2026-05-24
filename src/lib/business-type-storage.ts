@@ -12,7 +12,7 @@ export function getBusinessType(): BusinessType {
   
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'garbage' || stored === 'brick') {
+    if (stored === 'garbage' || stored === 'brick' || stored === 'material') {
       return stored;
     }
   } catch (error) {

@@ -139,6 +139,7 @@ export function CreateOrderPage() {
         customer_phone: phone,
         customer_notes: payload.customer_notes.trim() || null,
         netsuite_order_id: null,
+        business_type: payload.type === "material" ? "material" : undefined,
         bin_type: payload.type === "material" ? (payload.material_description.trim() || null) : payload.bin_type,
       };
 
