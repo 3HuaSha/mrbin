@@ -99,35 +99,24 @@ type CommonLocation = {
 
 const BACKLOG_ID = "__backlog__";
 
-// 判断时间段是否属于 AM
 function isAMTimeWindow(timeWindow: string, customTime: string | null): boolean {
   const time = timeWindow === "custom" ? (customTime || "") : timeWindow;
   const timeLower = time.toLowerCase();
   
-  // AM 时段包括：
-  // - 明确包含 "am" 的
-  // - 7-9am, 8-10am 等
-  // - noon 或 中午（如果在上午范围）
   if (timeLower.includes('am')) return true;
   if (timeLower.includes('noon') || timeLower.includes('中午')) {
-    // noon 可能是 11-1 或 12-2，算作 AM
     return true;
   }
   
   return false;
 }
 
-// 判断时间段是否属于 PM
 function isPMTimeWindow(timeWindow: string, customTime: string | null): boolean {
   const time = timeWindow === "custom" ? (customTime || "") : timeWindow;
   const timeLower = time.toLowerCase();
   
-  // PM 时段包括：
-  // - 明确包含 "pm" 的
-  // - 不包含 am 和 noon 的其他时段
   if (timeLower.includes('pm')) return true;
   
-  // 如果不是 AM 也不是明确的 noon，就算 PM
   if (!isAMTimeWindow(timeWindow, customTime)) return true;
   
   return false;
