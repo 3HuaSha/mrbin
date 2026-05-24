@@ -393,6 +393,12 @@ export function DispatchPage() {
                 insertIdx = targetAsgs.findIndex(x => x.id === overAssignment!.id);
                 if (insertIdx < 0) insertIdx = targetAsgs.length;
               }
+              // 确保插在已完成任务之后
+              const doneCountCross = targetAsgs.filter(x => {
+                const s = currentJobSteps.find(s => s.assignment_id === x.id && s.node_type === 'order');
+                return s?.status === 'done';
+              }).length;
+              insertIdx = Math.max(insertIdx, doneCountCross);
               targetAsgs.splice(insertIdx, 0, activeAssignment);
               targetAsgs.forEach((x, i) => { x.sequence = i + 1; });
               
@@ -494,6 +500,12 @@ export function DispatchPage() {
         const step = currentJobSteps.find((x) => x.id === overIdStr.slice(5));
         if (step) insertIndex = Math.min(step.step_number, driverAsgs.length);
       }
+      // 确保新任务插在所有已完成任务之后
+      const doneCountForInsert = driverAsgs.filter(a => {
+        const s = currentJobSteps.find(s => s.assignment_id === a.id && s.node_type === 'order');
+        return s?.status === 'done';
+      }).length;
+      insertIndex = Math.max(insertIndex, doneCountForInsert);
 
       const targetVehicleId = getDriverVehicle(targetDriver);
       const newAsg: Assignment = {
@@ -554,6 +566,12 @@ export function DispatchPage() {
     const targetDriverAsgs = newAssignments.filter(x => x.driver_id === targetDriver).sort((x, y) => x.sequence - y.sequence);
     let insertIndex = (overParsed && overParsed.kind === "assignment") ? targetDriverAsgs.findIndex(x => x.id === overParsed.id) : targetDriverAsgs.length;
     if (insertIndex < 0) insertIndex = targetDriverAsgs.length;
+    // 确保插在已完成任务之后
+    const doneCountMove = targetDriverAsgs.filter(x => {
+      const s = currentJobSteps.find(s => s.assignment_id === x.id && s.node_type === 'order');
+      return s?.status === 'done';
+    }).length;
+    insertIndex = Math.max(insertIndex, doneCountMove);
 
     targetDriverAsgs.splice(insertIndex, 0, a);
     targetDriverAsgs.forEach((x, i) => x.sequence = i + 1);

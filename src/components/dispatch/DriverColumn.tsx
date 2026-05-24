@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState, useMemo, useEffect } from "react";
+import React, { useRef, useCallback, useState, useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
 import { 
@@ -155,12 +155,7 @@ export function DriverColumn({
         : item.data.status !== 'done'
     ), [timelineItems, jobSteps]);
 
-  const doneScrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (doneScrollRef.current && doneItems.length > 1) {
-      doneScrollRef.current.scrollLeft = doneScrollRef.current.scrollWidth;
-    }
-  }, [doneItems.length]);
+  const [doneExpanded, setDoneExpanded] = useState(false);
 
   const isInserting = insertStepAt?.driverId === driver.id;
 
@@ -226,36 +221,75 @@ export function DriverColumn({
 
       {/* 任务时间轴 */}
       <div className="flex items-center gap-0 pb-1 pt-0.5 min-h-[50px]">
-        {/* 已完成区域: 固定左侧，可横向滚动，自动滚到最右 */}
+        {/* 已完成区域: 默认只显示最近一个，点击展开全部 */}
         {doneItems.length > 0 && (
-          <div className="shrink-0 flex items-center border-r border-dashed border-muted-foreground/20 pr-2 mr-2">
-            <div 
-              ref={doneScrollRef}
-              className="flex items-center gap-1.5 overflow-x-auto max-w-[180px] scroll-smooth"
-            >
-              {doneItems.map((item) => (
-                <div key={item.type === 'assignment' ? `done-a:${item.data.id}` : `done-step:${item.data.id}`} className="shrink-0 opacity-40">
-                  {item.type === 'assignment' ? (
-                    <OrderNodeDisplay 
-                      assignment={item.data}
-                      vehicle={vehicle}
-                      onCancel={onCancel}
-                      jobStep={jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')}
-                      onClick={() => onViewStep(jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')!)}
-                    />
-                  ) : (
-                    <StepNodeDisplay 
-                      step={item.data}
-                      onDelete={onDeleteStep}
-                      onClick={() => onViewStep(item.data)}
-                      linkedOrderLabel={item.data.order_id ? (allAssignments.find(a => a.order_id === item.data.order_id)?.orders.order_number || '未知订单') : undefined}
-                      onOpenLinkDialog={onOpenLinkDialog}
-                    />
-                  )}
+          <div className="shrink-0 flex items-center border-r border-muted-foreground/15 pr-2 mr-2">
+            {!doneExpanded ? (
+              <>
+                <div className="shrink-0 opacity-40">
+                  {(() => {
+                    const lastDone = doneItems[doneItems.length - 1];
+                    return lastDone.type === 'assignment' ? (
+                      <OrderNodeDisplay 
+                        assignment={lastDone.data}
+                        vehicle={vehicle}
+                        onCancel={onCancel}
+                        jobStep={jobSteps.find(s => s.assignment_id === lastDone.data.id && s.node_type === 'order')}
+                        onClick={() => onViewStep(jobSteps.find(s => s.assignment_id === lastDone.data.id && s.node_type === 'order')!)}
+                      />
+                    ) : (
+                      <StepNodeDisplay 
+                        step={lastDone.data}
+                        onDelete={onDeleteStep}
+                        onClick={() => onViewStep(lastDone.data)}
+                        linkedOrderLabel={lastDone.data.order_id ? (allAssignments.find(a => a.order_id === lastDone.data.order_id)?.orders.order_number || '未知订单') : undefined}
+                        onOpenLinkDialog={onOpenLinkDialog}
+                      />
+                    );
+                  })()}
                 </div>
-              ))}
-            </div>
-            <span className="ml-1.5 text-[9px] text-muted-foreground font-medium whitespace-nowrap">✓{doneItems.length}</span>
+                {doneItems.length > 1 && (
+                  <button
+                    onClick={() => setDoneExpanded(true)}
+                    className="ml-1 text-[9px] text-muted-foreground hover:text-primary font-medium whitespace-nowrap transition-colors"
+                    title="展开全部已完成任务"
+                  >
+                    +{doneItems.length - 1}
+                  </button>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                {doneItems.map((item) => (
+                  <div key={item.type === 'assignment' ? `done-a:${item.data.id}` : `done-step:${item.data.id}`} className="shrink-0 opacity-40">
+                    {item.type === 'assignment' ? (
+                      <OrderNodeDisplay 
+                        assignment={item.data}
+                        vehicle={vehicle}
+                        onCancel={onCancel}
+                        jobStep={jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')}
+                        onClick={() => onViewStep(jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')!)}
+                      />
+                    ) : (
+                      <StepNodeDisplay 
+                        step={item.data}
+                        onDelete={onDeleteStep}
+                        onClick={() => onViewStep(item.data)}
+                        linkedOrderLabel={item.data.order_id ? (allAssignments.find(a => a.order_id === item.data.order_id)?.orders.order_number || '未知订单') : undefined}
+                        onOpenLinkDialog={onOpenLinkDialog}
+                      />
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => setDoneExpanded(false)}
+                  className="ml-1 text-[9px] text-muted-foreground hover:text-primary font-medium whitespace-nowrap transition-colors"
+                  title="收起已完成任务"
+                >
+                  收起
+                </button>
+              </div>
+            )}
           </div>
         )}
 
