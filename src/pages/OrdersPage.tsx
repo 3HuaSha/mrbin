@@ -817,7 +817,7 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
 
   // 提取关键节点
   const deliveredStep = allSteps.find(s =>
-    (s.step_type === "delivery" || s.step_type === "customer_delivery" || s.step_type === "swap" || s.step_type === "customer_swap") &&
+    (s.step_type === "delivery" || s.step_type === "customer_delivery" || s.step_type === "swap") &&
     s.status === "done"
   );
   const pickedUpStep = allSteps.find(s =>
@@ -829,7 +829,7 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
   // 只有关联方的 swap step 才算回收证据（意味着旧桶已被收走）
   const swapEvidenceSource = order.type === "swap" ? linkedSteps : allSteps;
   const swapPickupEvidence = swapEvidenceSource.find(s =>
-    (s.step_type === "customer_delivery" || s.step_type === "swap" || s.step_type === "customer_swap") &&
+    (s.step_type === "customer_delivery" || s.step_type === "swap") &&
     s.status === "done" &&
     (s.pickup_photo_url || s.old_bin_number_reported)
   );
@@ -964,7 +964,7 @@ function LinkPickerPanel({ order, assignments = [] }: { order: Order; assignment
 
   // 从换桶步骤中提取收旧桶的照片和桶号，帮助用户识别应该关联哪个旧送桶订单
   const swapStep = assignments.flatMap((a: any) => a.job_steps || []).find((s: any) =>
-    (s.step_type === "swap" || s.step_type === "customer_swap" || s.step_type === "customer_delivery") &&
+    (s.step_type === "swap" || s.step_type === "customer_delivery") &&
     s.status === "done" &&
     (s.pickup_photo_url || s.old_bin_number_reported)
   );

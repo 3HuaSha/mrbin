@@ -274,7 +274,6 @@ export function DriverHomePage() {
             'depot_pickup': '仓库取桶',
             'customer_delivery': '送到客户',
             'customer_pickup': '去客户取桶',
-            'customer_swap': '去客户换桶',
             'dump_site': '去垃圾场',
             'pickup': '取货',
             'delivery': '送货',

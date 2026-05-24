@@ -71,7 +71,7 @@ export function DriverStepPage() {
 
   const order = step?.dispatch_assignments?.orders ?? null;
   const isManualStep = step?.node_type === 'step' || !order;
-  const isSwapDelivery = order?.type === "swap" && (step?.step_type === "customer_delivery" || step?.step_type === "swap" || step?.step_type === "customer_swap");
+  const isSwapDelivery = order?.type === "swap" && (step?.step_type === "customer_delivery" || step?.step_type === "swap");
 
   const handleUpload = async (file: File, kind: "photo" | "pickup_photo" | "weigh") => {
     setUploading(kind);
@@ -137,7 +137,6 @@ export function DriverStepPage() {
     step.step_type === "customer_delivery" ||
     step.step_type === "customer_pickup" ||
     step.step_type === "swap" ||
-    step.step_type === "customer_swap" ||
     step.step_type === "delivery" ||
     step.step_type === "pickup"
   );

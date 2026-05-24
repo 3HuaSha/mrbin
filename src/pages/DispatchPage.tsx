@@ -409,7 +409,7 @@ export function DispatchPage() {
           );
         } else if (order.type === "swap") {
           workflowSteps.push(
-            { assignment_id: newAssignment.id, step_number: 1, step_type: 'customer_swap', location: order.address, status: 'pending', requires_photo: true, requires_bin_number: true, driver_id: i.driver_id, scheduled_date: i.scheduled_date, order_id: order.id }
+            { assignment_id: newAssignment.id, step_number: 1, step_type: 'customer_delivery', location: order.address, status: 'pending', requires_photo: true, requires_bin_number: true, driver_id: i.driver_id, scheduled_date: i.scheduled_date, order_id: order.id }
           );
         }
         
