@@ -90,6 +90,21 @@ export function DispatchPage() {
   const currentAssignments = localAssignments ?? assignments;
   const currentJobSteps = localJobSteps ?? jobSteps;
 
+  // 实时合并: 当司机端更新任务状态时，将状态变化同步到本地副本
+  useEffect(() => {
+    if (!localJobSteps) return;
+    let changed = false;
+    const merged = localJobSteps.map(local => {
+      const server = jobSteps.find(s => s.id === local.id);
+      if (server && server.status !== local.status) {
+        changed = true;
+        return { ...local, status: server.status };
+      }
+      return local;
+    });
+    if (changed) setLocalJobSteps(merged);
+  }, [jobSteps]);
+
   const completedOrders = useMemo(() => orders.filter(o => o.status === "done"), [orders]);
   const activeOrders = useMemo(() => orders.filter(o => o.status !== "done"), [orders]);
 
