@@ -578,14 +578,14 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
   const timelineLinkedOrder = externalLinkedOrders.find(o => o.type === "delivery" || o.type === "swap") ?? null;
 
   // 查询通过 order_id 直接关联的手动步骤（如 dump_waste），这些步骤没有 assignment_id
-  const allRelatedIds = [...chainIds, ...externalLinkedIds];
+  // 只查本链的，不查外部关联的（避免换桶订单误显示旧桶的称重状态）
   const { data: orphanSteps = [] } = useQuery({
-    queryKey: ["orphan-steps", allRelatedIds.join(",")],
+    queryKey: ["orphan-steps", chainIds.join(",")],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("job_steps")
         .select("*")
-        .in("order_id", allRelatedIds)
+        .in("order_id", chainIds)
         .is("assignment_id", null);
       if (error) throw error;
       return data ?? [];
@@ -968,8 +968,11 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
               <div className="space-y-0.5">
                 {dumpStep.weight_kg != null && <div>{dumpStep.weight_kg} kg</div>}
                 {dumpStep.dump_site && <div className="truncate max-w-[80px] mx-auto">{dumpStep.dump_site}</div>}
+                {dumpStep.photo_url && (
+                  <a href={dumpStep.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">垃圾照片</a>
+                )}
                 {dumpStep.weigh_ticket_url && (
-                  <a href={dumpStep.weigh_ticket_url} target="_blank" rel="noreferrer" className="text-primary underline">单据</a>
+                  <a href={dumpStep.weigh_ticket_url} target="_blank" rel="noreferrer" className="text-primary underline">垃圾单</a>
                 )}
               </div>
             ) : undefined}

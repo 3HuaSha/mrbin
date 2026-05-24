@@ -72,6 +72,7 @@ export function DriverStepPage() {
   const order = step?.dispatch_assignments?.orders ?? null;
   const isManualStep = step?.node_type === 'step' || !order;
   const isSwapDelivery = order?.type === "swap" && (step?.step_type === "customer_delivery" || step?.step_type === "swap");
+  const isDumpWaste = step?.step_type === "dump_waste";
 
   const handleUpload = async (file: File, kind: "photo" | "pickup_photo" | "weigh") => {
     setUploading(kind);
@@ -90,6 +91,7 @@ export function DriverStepPage() {
   const canComplete = () => {
     if (!step) return false;
     if (step.requires_photo && !photoUrl) return false;
+    if (step.step_type === "dump_waste" && !photoUrl) return false;
     // 桶号改为非强制 (staff 可在订单页后期补绑或司机补报)
     if (step.requires_weigh_ticket && !weighTicketUrl) return false;
     if (step.requires_weight && !weight) return false;
@@ -194,8 +196,76 @@ export function DriverStepPage() {
         <div className="bg-card border rounded-xl p-4 space-y-4">
           <div className="font-semibold text-sm">需要完成</div>
 
-          {/* 拍照上传: swap 的 customer_delivery 需要分别拍"送新桶"和"收旧桶"两张；其他步骤一张即可 */}
-          {isSwapDelivery ? (
+          {/* 拍照上传: dump_waste 需要"垃圾照片"(必填)+"垃圾单照片"(可选); swap 需要"送新桶"+"收旧桶"; 其他一张即可 */}
+          {isDumpWaste ? (
+            <>
+              <div>
+                <Label className="text-base font-semibold">📷 垃圾照片 *</Label>
+                <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
+                  {uploading === "photo" ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <span className="text-sm text-muted-foreground">上传中...</span>
+                    </div>
+                  ) : photoUrl ? (
+                    <div className="flex flex-col items-center gap-2 w-full">
+                      <div className="text-status-done font-semibold text-base flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5" />
+                        垃圾照片已上传
+                      </div>
+                      <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <Camera className="h-10 w-10 text-primary" />
+                      <span className="font-medium text-base">点击拍摄垃圾</span>
+                      <span className="text-xs text-muted-foreground">倒垃圾现场照片</span>
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
+                </label>
+                {photoUrl && (
+                  <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
+                    <img src={photoUrl} alt="垃圾预览" className="w-full h-auto max-h-[300px] object-contain" />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <Label className="text-base font-semibold">📋 垃圾单照片 (可选)</Label>
+                <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
+                  {uploading === "weigh" ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      <span className="text-sm text-muted-foreground">上传中...</span>
+                    </div>
+                  ) : weighTicketUrl ? (
+                    <div className="flex flex-col items-center gap-2 w-full">
+                      <div className="text-status-done font-semibold text-base flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5" />
+                        垃圾单已上传
+                      </div>
+                      <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <Camera className="h-10 w-10 text-primary" />
+                      <span className="font-medium text-base">点击拍摄垃圾单</span>
+                      <span className="text-xs text-muted-foreground">垃圾场收据（可选）</span>
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "weigh")} />
+                </label>
+                {weighTicketUrl && (
+                  <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
+                    <img src={weighTicketUrl} alt="垃圾单预览" className="w-full h-auto max-h-[300px] object-contain" />
+                  </div>
+                )}
+              </div>
+            </>
+          ) : isSwapDelivery ? (
             <>
               <div>
                 <Label className="text-base font-semibold">📷 送新桶照片 {step.requires_photo && '*'}</Label>
@@ -315,9 +385,9 @@ export function DriverStepPage() {
             </div>
           )}
 
-          {step.step_type === "dump_site" && (
+          {(step.step_type === "dump_site" || step.step_type === "dump_waste") && (
             <div>
-              <Label>垃圾场名称 *</Label>
+              <Label>垃圾场名称 {step.step_type === "dump_site" ? '*' : '(可选)'}</Label>
               <Input value={dumpSite} onChange={(e) => setDumpSite(e.target.value)} className="h-12 mt-1 text-base" placeholder="例如 GFL Brock West" />
             </div>
           )}
