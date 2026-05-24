@@ -578,14 +578,15 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
   const timelineLinkedOrder = externalLinkedOrders.find(o => o.type === "delivery" || o.type === "swap") ?? null;
 
   // 查询通过 order_id 直接关联的手动步骤（如 dump_waste），这些步骤没有 assignment_id
-  // 只查本链的，不查外部关联的（避免换桶订单误显示旧桶的称重状态）
+  // 包含 externalLinkedIds，以便老送桶链能找到关联在换桶订单上的 dump_waste 步骤
+  const allRelatedIds = [...chainIds, ...externalLinkedIds];
   const { data: orphanSteps = [] } = useQuery({
-    queryKey: ["orphan-steps", chainIds.join(",")],
+    queryKey: ["orphan-steps", allRelatedIds.join(",")],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("job_steps")
         .select("*")
-        .in("order_id", chainIds)
+        .in("order_id", allRelatedIds)
         .is("assignment_id", null);
       if (error) throw error;
       return data ?? [];
@@ -835,14 +836,13 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
   orphanSteps.forEach((s: any) => { allSteps.push(s); });
 
   // 提取关键节点
-  // 优先从自身步骤中找送达证据，避免 swap 显示节点的照片覆盖原始送桶照片
+  // 送达证据只从自身步骤中找，绝不用关联订单的照片（避免换桶照片覆盖老送桶照片）
   const deliveredStep = selfSteps.find(s =>
     (s.step_type === "delivery" || s.step_type === "customer_delivery") &&
     s.status === "done"
-  ) || allSteps.find(s =>
-    (s.step_type === "delivery" || s.step_type === "customer_delivery" || s.step_type === "swap") &&
-    s.status === "done"
-  );
+  ) || (order.type === "swap" ? selfSteps.find(s =>
+    s.step_type === "swap" && s.status === "done"
+  ) : undefined);
   const pickedUpStep = allSteps.find(s =>
     (s.step_type === "pickup" || s.step_type === "customer_pickup") &&
     s.status === "done"
@@ -856,7 +856,8 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
     s.status === "done" &&
     (s.pickup_photo_url || s.old_bin_number_reported)
   );
-  const dumpStep = allSteps.find(s => (s.step_type === "dump_site" || s.step_type === "dump_waste") && s.status === "done");
+  // 换桶订单送的是新桶，称重（倒垃圾）属于旧桶，不应该在换桶订单上显示
+  const dumpStep = order.type === "swap" ? undefined : allSteps.find(s => (s.step_type === "dump_site" || s.step_type === "dump_waste") && s.status === "done");
 
   const deliveredAt = deliveredStep?.completed_at;
   const pickedUpAt = pickedUpStep?.completed_at ?? swapPickupEvidence?.completed_at;
