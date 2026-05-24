@@ -58,6 +58,7 @@ export function DriverHomePage() {
         .select("*, orders(*)")
         .eq("driver_id", driverId)
         .eq("scheduled_date", date)
+        .not("node_type", "is", null)
         .order("step_number");
       if (error) throw error;
       return (data ?? []) as unknown as StepRow[];

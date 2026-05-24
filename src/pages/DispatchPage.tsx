@@ -170,26 +170,11 @@ export function DispatchPage() {
           step_number: i.sequence,
           step_type: (order.type === "delivery" ? "delivery" : order.type === "pickup" ? "pickup" : "swap") as any,
           location: order.address,
-          status: 'locked',
+          status: 'pending',
         };
-        const workflowSteps: any[] = [];
         
-        if (order.type === "delivery") {
-          workflowSteps.push(
-            { assignment_id: newAssignment.id, step_number: 1, step_type: 'depot_pickup', location: 'Kennedy Depot, 3445 Kennedy Rd', status: 'pending' as const, requires_photo: true, requires_bin_number: true, driver_id: i.driver_id, scheduled_date: i.scheduled_date, order_id: order.id },
-            { assignment_id: newAssignment.id, step_number: 2, step_type: 'customer_delivery', location: order.address, status: 'locked' as const, requires_photo: true, requires_bin_number: true, driver_id: i.driver_id, scheduled_date: i.scheduled_date, order_id: order.id }
-          );
-        } else if (order.type === "pickup") {
-          workflowSteps.push(
-            { assignment_id: newAssignment.id, step_number: 1, step_type: 'customer_pickup', location: order.address, status: 'pending' as const, requires_photo: true, requires_bin_number: true, driver_id: i.driver_id, scheduled_date: i.scheduled_date, order_id: order.id }
-          );
-        }
-        
-        const allStepsToInsert = [displayStep, ...workflowSteps];
-        if (allStepsToInsert.length > 0) {
-          const { error: stepsError } = await supabase.from("job_steps").insert(allStepsToInsert);
-          if (stepsError) throw stepsError;
-        }
+        const { error: stepsError } = await supabase.from("job_steps").insert(displayStep);
+        if (stepsError) throw stepsError;
       }
       
       for (const u of updates) {
@@ -247,9 +232,18 @@ export function DispatchPage() {
       orderId?: string;
     }) => {
       const { driverId, position, location, stepType, binId, notes, orderId } = params;
+      // 只处理有 node_type 的步骤（order 和 step），忽略旧的 workflow 子步骤
       const driverSteps = currentJobSteps.filter(
-        s => s.driver_id === driverId && s.scheduled_date === date
+        s => s.driver_id === driverId && s.scheduled_date === date && s.node_type
       ).sort((a, b) => a.step_number - b.step_number);
+      
+      // 先将现有步骤的 step_number 后移，再插入新步骤
+      const stepsToUpdate = driverSteps.filter(s => s.step_number >= position);
+      for (const step of stepsToUpdate.reverse()) {
+        await supabase.from("job_steps")
+          .update({ step_number: step.step_number + 1 })
+          .eq("id", step.id);
+      }
       
       const { data, error } = await supabase.from("job_steps").insert({
         driver_id: driverId,
@@ -261,17 +255,10 @@ export function DispatchPage() {
         bin_id: binId || null,
         notes: notes || null,
         order_id: orderId || null,
-        status: 'locked',
+        status: 'pending',
       }).select().single();
       
       if (error) throw error;
-      
-      const stepsToUpdate = driverSteps.filter(s => s.step_number >= position);
-      for (const step of stepsToUpdate) {
-        await supabase.from("job_steps")
-          .update({ step_number: step.step_number + 1 })
-          .eq("id", step.id);
-      }
       
       return { newStep: data as JobStep, stepsToUpdate };
     },
@@ -303,7 +290,8 @@ export function DispatchPage() {
       const laterSteps = currentJobSteps.filter(
         s => s.driver_id === step.driver_id && 
              s.scheduled_date === step.scheduled_date && 
-             s.step_number > step.step_number
+             s.step_number > step.step_number &&
+             s.node_type
       );
       
       for (const laterStep of laterSteps) {
