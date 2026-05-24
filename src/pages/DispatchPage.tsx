@@ -490,23 +490,6 @@ export function DispatchPage() {
       if (!order) return;
 
       const targetDriver = targetColumnId;
-      const driverAsgs = newAssignments.filter(a => a.driver_id === targetDriver).sort((a, b) => a.sequence - b.sequence);
-
-      let insertIndex = driverAsgs.length;
-      if (overParsed && overParsed.kind === "assignment") {
-        insertIndex = driverAsgs.findIndex(a => a.id === overParsed.id);
-        if (insertIndex < 0) insertIndex = driverAsgs.length;
-      } else if (overIdStr.startsWith('step:')) {
-        const step = currentJobSteps.find((x) => x.id === overIdStr.slice(5));
-        if (step) insertIndex = Math.min(step.step_number, driverAsgs.length);
-      }
-      // 确保新任务插在所有已完成任务之后
-      const doneCountForInsert = driverAsgs.filter(a => {
-        const s = currentJobSteps.find(s => s.assignment_id === a.id && s.node_type === 'order');
-        return s?.status === 'done';
-      }).length;
-      insertIndex = Math.max(insertIndex, doneCountForInsert);
-
       const targetVehicleId = getDriverVehicle(targetDriver);
       const newAsg: Assignment = {
         id: `temp-${Date.now()}-${order.id}`,
@@ -523,10 +506,60 @@ export function DispatchPage() {
         dispatch_notes: null
       };
 
-      driverAsgs.splice(insertIndex, 0, newAsg);
-      driverAsgs.forEach((a, i) => { a.sequence = i + 1; });
-      const finalAssignments = newAssignments.filter(a => a.driver_id !== targetDriver).concat(driverAsgs);
-      setLocalAssignments(finalAssignments);
+      // 构建完整时间轴 (assignments + manual steps)，按 step_number 排序
+      const driverAsgs = newAssignments.filter(a => a.driver_id === targetDriver);
+      const driverManualSteps = currentJobSteps.filter(s => s.driver_id === targetDriver && s.node_type === 'step');
+      type TLItem = { kind: 'asg'; data: Assignment; stepNum: number; done: boolean } | { kind: 'step'; data: JobStep; stepNum: number; done: boolean };
+      const timeline: TLItem[] = [];
+      driverAsgs.forEach(a => {
+        const js = currentJobSteps.find(s => s.assignment_id === a.id && s.node_type === 'order');
+        timeline.push({ kind: 'asg', data: a, stepNum: js ? js.step_number : a.sequence, done: js?.status === 'done' });
+      });
+      driverManualSteps.forEach(s => {
+        timeline.push({ kind: 'step', data: s, stepNum: s.step_number, done: s.status === 'done' });
+      });
+      timeline.sort((a, b) => a.stepNum - b.stepNum);
+
+      // 确定插入位置（在完整时间轴中）
+      let insertIdx = timeline.length;
+      if (overParsed && overParsed.kind === "assignment") {
+        const idx = timeline.findIndex(t => t.kind === 'asg' && t.data.id === overParsed.id);
+        if (idx >= 0) insertIdx = idx;
+      } else if (overIdStr.startsWith('step:')) {
+        const idx = timeline.findIndex(t => t.kind === 'step' && t.data.id === overIdStr.slice(5));
+        if (idx >= 0) insertIdx = idx;
+      }
+      // 确保新任务插在所有已完成任务之后
+      const lastDoneIdx = timeline.reduce((max, t, i) => t.done ? i : max, -1);
+      insertIdx = Math.max(insertIdx, lastDoneIdx + 1);
+
+      // 插入新 assignment 到时间轴
+      const newItem: TLItem = { kind: 'asg', data: newAsg, stepNum: 0, done: false };
+      timeline.splice(insertIdx, 0, newItem);
+
+      // 重新编号所有 step_number / sequence
+      const updatedAssignments = [...newAssignments];
+      const updatedSteps = [...currentJobSteps];
+      timeline.forEach((item, i) => {
+        const num = i + 1;
+        if (item.kind === 'asg') {
+          const aIdx = updatedAssignments.findIndex(a => a.id === item.data.id);
+          if (aIdx >= 0) {
+            updatedAssignments[aIdx] = { ...updatedAssignments[aIdx], sequence: num };
+          }
+          const sIdx = updatedSteps.findIndex(s => s.assignment_id === item.data.id && s.node_type === 'order');
+          if (sIdx >= 0) updatedSteps[sIdx] = { ...updatedSteps[sIdx], step_number: num };
+        } else {
+          const sIdx = updatedSteps.findIndex(s => s.id === item.data.id);
+          if (sIdx >= 0) updatedSteps[sIdx] = { ...updatedSteps[sIdx], step_number: num };
+        }
+      });
+      // 添加新 assignment（还没在 updatedAssignments 中）
+      newAsg.sequence = insertIdx + 1;
+      updatedAssignments.push(newAsg);
+
+      setLocalAssignments(updatedAssignments);
+      setLocalJobSteps(updatedSteps);
       return;
     }
 
