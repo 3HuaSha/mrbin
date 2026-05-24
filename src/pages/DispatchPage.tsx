@@ -251,7 +251,7 @@ export function DispatchPage() {
       return data as Bin[];
     },
   });
-  const { data: orders = [] } = useQuery({
+  const { data: ordersData } = useQuery({
     queryKey: ["dispatch-orders", date, businessType],
     queryFn: async () => {
       const { data, error } = await supabase.from("orders").select("*")
@@ -262,12 +262,22 @@ export function DispatchPage() {
       // 排班侧隐藏换桶自动生成的 pickup 子单:
       // 有 linked_order_id 的 pickup 属于某条 swap 订单,不单独出现
       const mainIds = new Set((data ?? []).filter((o: any) => o.type === "swap").map((o: any) => o.id));
-      return (data ?? []).filter((o: any) => {
+      // 建立 swap → pickup 映射: 换桶订单的倒垃圾应关联其子收桶单
+      const swapToPickup: Record<string, string> = {};
+      (data ?? []).forEach((o: any) => {
+        if (o.type === "pickup" && o.linked_order_id && mainIds.has(o.linked_order_id)) {
+          swapToPickup[o.linked_order_id] = o.id;
+        }
+      });
+      const filtered = (data ?? []).filter((o: any) => {
         if (o.type === "pickup" && o.linked_order_id && mainIds.has(o.linked_order_id)) return false;
         return true;
       }) as Order[];
+      return { orders: filtered, swapToPickup };
     },
   });
+  const orders = ordersData?.orders ?? [];
+  const swapToPickup = ordersData?.swapToPickup ?? {};
   const { data: assignments = [] } = useQuery({
     queryKey: ["dispatch-assignments", date, businessType],
     queryFn: async () => {
@@ -1027,6 +1037,7 @@ export function DispatchPage() {
                     jobSteps={driverSteps}
                     commonLocations={commonLocations}
                     bins={bins}
+                    swapToPickup={swapToPickup}
                     onCancel={(id) => {
                       const newAssignments = [...currentAssignments];
                       const idx = newAssignments.findIndex(x => x.id === id);
@@ -1389,7 +1400,7 @@ function InsertStepButton({
       {/* 自动关联提示 */}
       {stepType === 'dump_waste' && adjacentOrderId && (adjacentOrderType === 'pickup' || adjacentOrderType === 'swap') && (
         <div className="text-[9px] text-amber-700 bg-amber-50 rounded px-1.5 py-1">
-          🔗 将自动关联相邻的{adjacentOrderType === 'pickup' ? '收桶' : '换桶'}订单
+          🔗 将自动关联相邻的收桶订单
         </div>
       )}
       
@@ -1573,7 +1584,7 @@ function BacklogColumn({ orders, completedOrders }: { orders: Order[], completed
 
 // ============ Driver Column ============
 function DriverColumn({
-  driver, vehicle, vehicles, onChangeVehicle, assignments, allAssignments, jobSteps, commonLocations, bins, onCancel, hasChanges, onSave, isSaving, onInsertStep, onDeleteStep, onOpenLinkDialog, insertStepAt, setInsertStepAt, onViewStep
+  driver, vehicle, vehicles, onChangeVehicle, assignments, allAssignments, jobSteps, commonLocations, bins, swapToPickup, onCancel, hasChanges, onSave, isSaving, onInsertStep, onDeleteStep, onOpenLinkDialog, insertStepAt, setInsertStepAt, onViewStep
 }: {
   driver: Profile;
   vehicle: Vehicle | undefined;
@@ -1584,6 +1595,7 @@ function DriverColumn({
   jobSteps: JobStep[];
   commonLocations: CommonLocation[];
   bins: Bin[];
+  swapToPickup: Record<string, string>;
   onCancel: (id: string) => void;
   hasChanges?: boolean;
   onSave?: () => void;
@@ -1787,8 +1799,12 @@ function DriverColumn({
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-20">
                     <button
                       onClick={(e) => {
-                        const orderId = node.type === 'order' ? (node.data as Assignment).order_id : undefined;
+                        let orderId = node.type === 'order' ? (node.data as Assignment).order_id : undefined;
                         const orderType = node.type === 'order' ? (node.data as Assignment).orders?.type : undefined;
+                        // 换桶订单: 倒垃圾应关联其子收桶单，而非换桶单本身；没有子收桶单则不绑定
+                        if (orderType === 'swap' && orderId) {
+                          orderId = swapToPickup[orderId] || undefined;
+                        }
                         handleButtonClick(node.stepNumber + 1, e, orderId, orderType);
                       }}
                       className="w-8 h-8 rounded-full border-2 border-dashed border-primary/50 hover:border-primary hover:bg-primary/10 transition-all flex items-center justify-center text-primary bg-card shadow-md"
