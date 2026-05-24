@@ -329,11 +329,8 @@ export function DispatchPage() {
   const completedOrders = useMemo(() => orders.filter(o => o.status === "done"), [orders]);
   const activeOrders = useMemo(() => orders.filter(o => o.status !== "done"), [orders]);
 
-  // 过滤出未完成的 assignments (用于司机列)
-  const activeAssignments = useMemo(
-    () => currentAssignments.filter(a => a.orders.status !== "done"),
-    [currentAssignments]
-  );
+  // 所有 assignments 都在司机列显示（已完成的会有绿色标记）
+  const activeAssignments = currentAssignments;
 
   const assignedOrderIds = useMemo(
     () => new Set(activeAssignments.map((a) => a.order_id)),

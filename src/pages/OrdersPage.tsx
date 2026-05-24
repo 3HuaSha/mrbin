@@ -577,6 +577,21 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
   // 时间轴用: "linkedOrder" 代表对方状态, 取第一个外部关联的 delivery/swap
   const timelineLinkedOrder = externalLinkedOrders.find(o => o.type === "delivery" || o.type === "swap") ?? null;
 
+  // 查询通过 order_id 直接关联的手动步骤（如 dump_waste），这些步骤没有 assignment_id
+  const allRelatedIds = [...chainIds, ...externalLinkedIds];
+  const { data: orphanSteps = [] } = useQuery({
+    queryKey: ["orphan-steps", allRelatedIds.join(",")],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("job_steps")
+        .select("*")
+        .in("order_id", allRelatedIds)
+        .is("assignment_id", null);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
   return (
     <tr className="bg-accent/20 border-t">
       <td colSpan={12} className="px-6 py-4">
@@ -585,6 +600,7 @@ function OrderDetailRow({ orderId, order }: { orderId: string; order: Order }) {
           linkedOrder={timelineLinkedOrder}
           selfAssignments={assignments}
           linkedAssignments={externalAssignments}
+          orphanSteps={orphanSteps}
         />
         {(primary.type === "pickup" || primary.type === "swap") && !primary.linked_order_id && (
           <LinkPickerPanel order={primary} assignments={assignments} />
@@ -802,11 +818,12 @@ function EditOrderDialog({ order, onClose }: { order: Order; onClose: () => void
   );
 }
 
-function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignments }: {
+function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignments, orphanSteps = [] }: {
   order: Order;
   linkedOrder: { id: string; type: string; status: string; service_date: string } | null;
   selfAssignments: any[];
   linkedAssignments: any[];
+  orphanSteps?: any[];
 }) {
   // 收集所有相关 job_steps
   const allSteps: any[] = [];
@@ -814,9 +831,15 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
   const linkedSteps: any[] = [];
   selfAssignments.forEach(a => (a.job_steps || []).forEach((s: any) => { const step = { ...s, _assignment: a }; allSteps.push(step); selfSteps.push(step); }));
   linkedAssignments.forEach(a => (a.job_steps || []).forEach((s: any) => { const step = { ...s, _assignment: a }; allSteps.push(step); linkedSteps.push(step); }));
+  // 包含通过 order_id 直接关联的手动步骤（如 dump_waste）
+  orphanSteps.forEach((s: any) => { allSteps.push(s); });
 
   // 提取关键节点
-  const deliveredStep = allSteps.find(s =>
+  // 优先从自身步骤中找送达证据，避免 swap 显示节点的照片覆盖原始送桶照片
+  const deliveredStep = selfSteps.find(s =>
+    (s.step_type === "delivery" || s.step_type === "customer_delivery") &&
+    s.status === "done"
+  ) || allSteps.find(s =>
     (s.step_type === "delivery" || s.step_type === "customer_delivery" || s.step_type === "swap") &&
     s.status === "done"
   );
@@ -833,7 +856,7 @@ function LifecycleTimeline({ order, linkedOrder, selfAssignments, linkedAssignme
     s.status === "done" &&
     (s.pickup_photo_url || s.old_bin_number_reported)
   );
-  const dumpStep = allSteps.find(s => s.step_type === "dump_site" && s.status === "done");
+  const dumpStep = allSteps.find(s => (s.step_type === "dump_site" || s.step_type === "dump_waste") && s.status === "done");
 
   const deliveredAt = deliveredStep?.completed_at;
   const pickedUpAt = pickedUpStep?.completed_at ?? swapPickupEvidence?.completed_at;
