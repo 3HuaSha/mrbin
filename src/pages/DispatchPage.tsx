@@ -82,6 +82,40 @@ export function DispatchPage() {
 
   const [localAssignments, setLocalAssignments] = useState<Assignment[] | null>(null);
   const [localJobSteps, setLocalJobSteps] = useState<JobStep[] | null>(null);
+
+  // 实时订阅: 当司机完成任务时, 管理端自动刷新
+  useEffect(() => {
+    const channel = supabase
+      .channel(`dispatch-realtime-${date}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'job_steps',
+          filter: `scheduled_date=eq.${date}`,
+        },
+        () => {
+          qc.invalidateQueries({ queryKey: ["job-steps", date] });
+          qc.invalidateQueries({ queryKey: ["dispatch-orders", date] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'dispatch_assignments',
+          filter: `scheduled_date=eq.${date}`,
+        },
+        () => {
+          qc.invalidateQueries({ queryKey: ["dispatch-assignments", date] });
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [date, qc]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [insertStepAt, setInsertStepAt] = useState<{ driverId: string; position: number; adjacentOrderId?: string; adjacentOrderType?: string } | null>(null);
   const [viewingStep, setViewingStep] = useState<JobStep | null>(null);
@@ -399,45 +433,45 @@ export function DispatchPage() {
         
         if (activeDriverId !== overDriverId) {
           if (!activeDriverId || !overDriverId) return;
-          const newAssignments = [...currentAssignments];
-          const newSteps = [...currentJobSteps];
           
           if (activeAssignment) {
-            const aIdx = newAssignments.findIndex(x => x.id === activeAssignment!.id);
-            if (aIdx >= 0) {
-              newAssignments.splice(aIdx, 1);
-              const oldDriverAsgs = newAssignments.filter(x => x.driver_id === activeDriverId).sort((a, b) => a.sequence - b.sequence);
-              oldDriverAsgs.forEach((x, i) => { x.sequence = i + 1; });
-              
-              activeAssignment.driver_id = overDriverId;
-              activeAssignment.vehicle_id = getDriverVehicle(overDriverId);
-              
-              const targetAsgs = newAssignments.filter(x => x.driver_id === overDriverId).sort((a, b) => a.sequence - b.sequence);
-              let insertIdx = targetAsgs.length;
-              if (overAssignment) {
-                insertIdx = targetAsgs.findIndex(x => x.id === overAssignment!.id);
-                if (insertIdx < 0) insertIdx = targetAsgs.length;
-              }
-              // 确保插在已完成任务之后
-              const doneCountCross = targetAsgs.filter(x => {
-                const s = currentJobSteps.find(s => s.assignment_id === x.id && s.node_type === 'order');
-                return s?.status === 'done';
-              }).length;
-              insertIdx = Math.max(insertIdx, doneCountCross);
-              targetAsgs.splice(insertIdx, 0, activeAssignment);
-              targetAsgs.forEach((x, i) => { x.sequence = i + 1; });
-              
-              const finalAssignments = newAssignments.filter(x => x.driver_id !== overDriverId).concat(targetAsgs);
-              setLocalAssignments(finalAssignments);
-              const updatedSteps = newSteps.map(s => s.assignment_id === activeAssignment!.id ? { ...s, driver_id: overDriverId } : s);
-              setLocalJobSteps(updatedSteps);
+            // 使用不可变更新，避免直接修改服务器数据对象
+            const movedAssignment = { ...activeAssignment, driver_id: overDriverId, vehicle_id: getDriverVehicle(overDriverId) };
+            
+            // 源司机: 移除该 assignment，重新编号
+            const sourceAsgs = currentAssignments
+              .filter(x => x.driver_id === activeDriverId && x.id !== activeAssignment!.id)
+              .sort((a, b) => a.sequence - b.sequence)
+              .map((x, i) => ({ ...x, sequence: i + 1 }));
+            
+            // 目标司机: 插入该 assignment，重新编号
+            const targetAsgs = currentAssignments
+              .filter(x => x.driver_id === overDriverId)
+              .sort((a, b) => a.sequence - b.sequence);
+            let insertIdx = targetAsgs.length;
+            if (overAssignment) {
+              insertIdx = targetAsgs.findIndex(x => x.id === overAssignment!.id);
+              if (insertIdx < 0) insertIdx = targetAsgs.length;
             }
+            // 确保插在已完成任务之后
+            const doneCountCross = targetAsgs.filter(x => {
+              const s = currentJobSteps.find(s => s.assignment_id === x.id && s.node_type === 'order');
+              return s?.status === 'done';
+            }).length;
+            insertIdx = Math.max(insertIdx, doneCountCross);
+            targetAsgs.splice(insertIdx, 0, movedAssignment);
+            const renumberedTarget = targetAsgs.map((x, i) => ({ ...x, sequence: i + 1 }));
+            
+            // 其他司机保持不变
+            const otherAsgs = currentAssignments.filter(x => x.driver_id !== activeDriverId && x.driver_id !== overDriverId);
+            const finalAssignments = [...otherAsgs, ...sourceAsgs, ...renumberedTarget];
+            setLocalAssignments(finalAssignments);
+            
+            const updatedSteps = currentJobSteps.map(s => s.assignment_id === activeAssignment!.id ? { ...s, driver_id: overDriverId } : s);
+            setLocalJobSteps(updatedSteps);
           } else if (activeStep && activeStep.node_type === 'step') {
-            const sIdx = newSteps.findIndex(s => s.id === activeStep!.id);
-            if (sIdx >= 0) {
-              newSteps[sIdx] = { ...newSteps[sIdx], driver_id: overDriverId };
-              setLocalJobSteps(newSteps);
-            }
+            const updatedSteps = currentJobSteps.map(s => s.id === activeStep!.id ? { ...s, driver_id: overDriverId } : s);
+            setLocalJobSteps(updatedSteps);
           }
           return;
         }
