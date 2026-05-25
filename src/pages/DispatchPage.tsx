@@ -85,8 +85,9 @@ export function DispatchPage() {
 
   // 实时订阅: 当司机完成任务时, 管理端自动刷新
   useEffect(() => {
+    const chName = `dispatch-rt-${date}-${Math.random().toString(36).slice(2)}`;
     const channel = supabase
-      .channel(`dispatch-realtime-${date}`)
+      .channel(chName)
       .on(
         'postgres_changes',
         {
