@@ -162,19 +162,34 @@ export function OrdersPage() {
   const cancelOrder = useMutation({
     mutationFn: async (id: string) => {
       const order = orders.find(o => o.id === id);
+      const idsToDelete = [id];
 
-      // 只删除选中的订单，不删除关联订单
-      // 先清关联表
-      await supabase.from("job_steps").delete().eq("order_id", id);
-      await supabase.from("dispatch_assignments").delete().eq("order_id", id);
+      // 如果删除的是换桶订单，同时删除关联的 pickup 子单
+      if (order?.type === "swap" && order.linked_order_id) {
+        const linked = orders.find(o => o.id === order.linked_order_id);
+        if (linked?.type === "pickup") {
+          idsToDelete.push(linked.id);
+        }
+      }
 
-      // 解除其他订单对这个订单的 linked_order_id 引用
-      await supabase.from("orders").update({ linked_order_id: null }).eq("linked_order_id", id);
+      // 如果删除的是 pickup 子单，同时检查是否有关联的 swap 主单需要解绑
+      // （pickup 被删后 swap 主单的 linked_order_id 会在下面的清除逻辑中处理）
+
+      for (const delId of idsToDelete) {
+        // 先清关联表
+        await supabase.from("job_steps").delete().eq("order_id", delId);
+        await supabase.from("dispatch_assignments").delete().eq("order_id", delId);
+      }
+
+      // 解除其他订单对这些被删订单的 linked_order_id 引用（让关联订单回到未关联状态）
+      for (const delId of idsToDelete) {
+        await supabase.from("orders").update({ linked_order_id: null }).eq("linked_order_id", delId);
+      }
 
       // 删除订单本体
-      const { error } = await supabase.from("orders").delete().eq("id", id);
+      const { error } = await supabase.from("orders").delete().in("id", idsToDelete);
       if (error) throw error;
-      return 1;
+      return idsToDelete.length;
     },
     onSuccess: () => {
       toast.success("已删除订单");
