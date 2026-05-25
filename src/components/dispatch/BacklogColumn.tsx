@@ -42,7 +42,7 @@ export function BacklogColumn({
 
   // 按类型分列: 送+换 vs 收
   const deliverySwapOrders = useMemo(() => 
-    filteredOrders.filter(o => o.type === 'delivery' || o.type === 'swap'), 
+    filteredOrders.filter(o => o.type === 'delivery' || o.type === 'swap' || o.type === 'material'), 
     [filteredOrders]
   );
   const pickupOrders = useMemo(() => 
@@ -101,7 +101,7 @@ export function BacklogColumn({
           {/* 左列: 送+换 */}
           <div className="flex-1 border-r p-1 space-y-1 overflow-y-auto">
             <div className="sticky top-0 bg-muted/80 backdrop-blur-sm rounded px-2 py-1 text-[10px] font-bold text-muted-foreground flex items-center justify-between z-10">
-              <span>📦 送桶 / 换桶</span>
+              <span>📦 送桶 / 换桶 / 砂石料</span>
               <Badge variant="outline" className="text-[9px] h-4 px-1">{deliverySwapOrders.length}</Badge>
             </div>
             <SortableContext
