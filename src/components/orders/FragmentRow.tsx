@@ -82,8 +82,8 @@ export function FragmentRow({
           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </td>
         <td className="px-3 py-2 font-mono text-xs">
-          {order.order_number}
-          {(order.type === "pickup" || order.type === "swap") && !order.linked_order_id && (
+          {order.order_number || (order.type === "pickup" ? <span className="text-muted-foreground italic">待关联</span> : "—")}
+          {order.type === "swap" && !order.linked_order_id && (
             <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-amber-100 text-amber-700 text-[9px] px-1 py-0.5 font-normal">
               未关联
             </span>

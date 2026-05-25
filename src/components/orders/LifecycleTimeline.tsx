@@ -103,8 +103,13 @@ export function LifecycleTimeline({
               label="装料"
               time={loadStep?.completed_at}
               fmtTime={fmtTime}
-              detail={loadStep?._assignment?.profiles?.name ? (
-                <div>司机: {loadStep._assignment.profiles.name}</div>
+              detail={(loadStep?._assignment?.profiles?.name || loadStep?.photo_url) ? (
+                <div className="space-y-0.5">
+                  {loadStep?._assignment?.profiles?.name && <div>司机: {loadStep._assignment.profiles.name}</div>}
+                  {loadStep?.photo_url && (
+                    <a href={loadStep.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">照片</a>
+                  )}
+                </div>
               ) : undefined}
             />
             <Stage

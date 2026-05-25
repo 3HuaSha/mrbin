@@ -99,6 +99,13 @@ export function OrderDetailRow({ order, orderId }: OrderDetailRowProps) {
     },
   });
 
+  // 检查链中是否有未关联的 pickup/swap 订单
+  // pickup: 没有订单号表示待关联送桶单
+  // swap: 没有 linked_order_id 表示待关联
+  const unlinkedPickupOrSwap = chain.find(o => 
+    (o.type === "pickup" && !o.order_number) || (o.type === "swap" && !o.linked_order_id)
+  ) ?? ((primary.type === "pickup" && !primary.order_number) || (primary.type === "swap" && !primary.linked_order_id) ? primary : null);
+
   return (
     <tr className="bg-accent/20 border-t">
       <td colSpan={12} className="px-6 py-4">
@@ -109,8 +116,8 @@ export function OrderDetailRow({ order, orderId }: OrderDetailRowProps) {
           linkedAssignments={externalAssignments}
           orphanSteps={orphanSteps}
         />
-        {(primary.type === "pickup" || primary.type === "swap") && !primary.linked_order_id && (
-          <LinkPickerPanel order={primary} assignments={assignments} />
+        {unlinkedPickupOrSwap && (
+          <LinkPickerPanel order={unlinkedPickupOrSwap} assignments={assignments} />
         )}
       </td>
     </tr>

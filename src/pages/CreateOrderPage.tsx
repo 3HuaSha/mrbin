@@ -200,17 +200,22 @@ export function CreateOrderPage() {
         return newSwap;
       }
 
-      // 收桶订单: 如果 staff 选了对应送桶单, 双向互相关联; 没选也可以直接提交
+      // 收桶订单: 如果选了对应送桶单, 直接把送桶订单改为收桶类型 + 更新日期; 没选则创建无订单号的收桶
       if (payload.type === "pickup" && swapLinkedOrderId) {
-        const { data: newPickup, error: pErr } = await supabase
+        const { data: updated, error: uErr } = await supabase
           .from("orders")
-          .insert({ ...insertPayload, linked_order_id: swapLinkedOrderId })
+          .update({
+            type: "pickup",
+            service_date: payload.service_date,
+            time_window: timeWindow,
+            time_window_custom: timeWindowCustom,
+            customer_notes: payload.customer_notes.trim() || undefined,
+          })
+          .eq("id", swapLinkedOrderId)
           .select("id, order_number, type, address, customer_name")
           .single();
-        if (pErr) throw pErr;
-        // 老 delivery 反向指过来, 表示已进入回收流程
-        await supabase.from("orders").update({ linked_order_id: newPickup.id }).eq("id", swapLinkedOrderId);
-        return newPickup;
+        if (uErr) throw uErr;
+        return updated;
       }
 
       const { data, error } = await supabase.from("orders").insert(insertPayload).select("id,order_number,type,address,customer_name").single();
@@ -295,8 +300,8 @@ export function CreateOrderPage() {
               ))}
             </div>
 
-            {/* 订单号：默认自动生成，可切换为手动输入 */}
-            <div className="mt-4 pt-3 border-t-2 border-dashed border-gray-200">
+            {/* 订单号：收桶不需要订单号，其他类型默认自动生成 */}
+            {form.type !== "pickup" && <div className="mt-4 pt-3 border-t-2 border-dashed border-gray-200">
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-sm font-bold text-gray-700">
                   订单号
@@ -334,7 +339,7 @@ export function CreateOrderPage() {
                   将自动生成订单号：KD-{form.service_date.replace(/-/g, "")}-XXX
                 </div>
               )}
-            </div>
+            </div>}
           </div>
 
           {/* 第二行：两列布局 - 左边桶信息，右边日期时间 */}

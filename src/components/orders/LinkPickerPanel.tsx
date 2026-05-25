@@ -24,7 +24,7 @@ export function LinkPickerPanel({ order, assignments = [] }: LinkPickerPanelProp
   // 按地址 + 尺寸搜索同地址未回收的 delivery 候选
   const { data: candidates = [] } = useQuery({
     queryKey: ["link-candidates", order.address, order.bin_size, order.id],
-    enabled: !order.linked_order_id && !!order.bin_size && order.address.length >= 3,
+    enabled: (order.type === "pickup" ? !order.order_number : !order.linked_order_id) && !!order.bin_size && order.address.length >= 3,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("orders")
@@ -42,14 +42,15 @@ export function LinkPickerPanel({ order, assignments = [] }: LinkPickerPanelProp
 
   const bind = useMutation({
     mutationFn: async (deliveryId: string) => {
-      // 双向关联: 当前订单 -> delivery, delivery -> 当前订单
-      const { error: e1 } = await supabase.from("orders").update({ linked_order_id: deliveryId }).eq("id", order.id);
-      if (e1) throw e1;
-      const { error: e2 } = await supabase.from("orders").update({ linked_order_id: order.id }).eq("id", deliveryId);
-      if (e2) throw e2;
+      // 把送桶订单改为收桶类型，沿用原订单号
+      const { error } = await supabase.from("orders").update({ type: "pickup" }).eq("id", deliveryId);
+      if (error) throw error;
+      // 删除当前未关联的 pickup 订单（已不需要了）
+      const { error: delErr } = await supabase.from("orders").delete().eq("id", order.id);
+      if (delErr) throw delErr;
     },
     onSuccess: () => {
-      toast.success("已关联");
+      toast.success("已关联：送桶订单已改为收桶");
       qc.invalidateQueries({ queryKey: ["orders"] });
       qc.invalidateQueries({ queryKey: ["order-chain"] });
       qc.invalidateQueries({ queryKey: ["link-candidates"] });
