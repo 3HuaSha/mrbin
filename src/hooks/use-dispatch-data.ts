@@ -86,7 +86,7 @@ export function useDispatchData(date: string, businessType: BusinessType) {
     queryFn: async () => {
       const { data, error } = await supabase.from("orders").select("*")
         .eq("service_date", date)
-        .eq("business_type", businessType)
+        .in("business_type", businessType === 'garbage' ? ['garbage', 'material'] : [businessType])
         .neq("status", "cancelled").order("created_at");
       if (error) throw error;
       
@@ -113,9 +113,10 @@ export function useDispatchData(date: string, businessType: BusinessType) {
         .eq("scheduled_date", date).order("sequence");
       if (error) throw error;
       
-      const filtered = (data ?? []).filter((a: any) => 
-        (a.orders as any)?.business_type === businessType
-      );
+      const filtered = (data ?? []).filter((a: any) => {
+        const bt = (a.orders as any)?.business_type;
+        return businessType === 'garbage' ? (bt === 'garbage' || bt === 'material') : bt === businessType;
+      });
       
       return filtered as unknown as Assignment[];
     },

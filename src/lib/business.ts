@@ -4,9 +4,8 @@
 export type BusinessType = 'garbage' | 'brick' | 'material';
 
 export const BUSINESS_TYPES = [
-  { value: "garbage" as const, label: "垃圾桶业务", emoji: "🗑️", icon: "Trash2" },
+  { value: "garbage" as const, label: "垃圾桶+砂石料", emoji: "🗑️", icon: "Trash2" },
   { value: "brick" as const, label: "砖块业务", emoji: "🧱", icon: "Package" },
-  { value: "material" as const, label: "砂石料业务", emoji: "🟡", icon: "Truck" },
 ] as const;
 
 // 砖块订单类型

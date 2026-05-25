@@ -37,7 +37,7 @@ export function OrdersPage() {
         .select("*, linked_order_id, bin_number")
         .gte("service_date", from)
         .lte("service_date", to)
-        .eq("business_type", businessType)
+        .in("business_type", businessType === 'garbage' ? ['garbage', 'material'] : [businessType])
         .order("service_date", { ascending: true })
         .order("created_at", { ascending: false });
       if (statusFilter !== "all") q = q.eq("status", statusFilter as any);
@@ -264,7 +264,7 @@ export function OrdersPage() {
               {businessType === 'garbage' && (
                 <>
                   <th className="px-3 py-2">类型</th>
-                  <th className="px-3 py-2">桶类型</th>
+                  <th className="px-3 py-2">桶类型/物料</th>
                   <th className="px-3 py-2">尺寸</th>
                   <th className="px-3 py-2">桶号</th>
                 </>
@@ -274,12 +274,6 @@ export function OrdersPage() {
                   <th className="px-3 py-2">订单类型</th>
                   <th className="px-3 py-2">起点</th>
                   <th className="px-3 py-2">终点</th>
-                </>
-              )}
-              {businessType === 'material' && (
-                <>
-                  <th className="px-3 py-2">类型</th>
-                  <th className="px-3 py-2">物料</th>
                 </>
               )}
               <th className="px-3 py-2">日期</th>
