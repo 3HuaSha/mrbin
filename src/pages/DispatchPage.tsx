@@ -162,47 +162,19 @@ export function DispatchPage() {
         
         const order = i.orders;
         
-        if (order.type === "material") {
-          // 砂石料订单：创建两个步骤 - 装料 + 送料
-          const loadStep = {
-            assignment_id: newAssignment.id,
-            driver_id: i.driver_id,
-            scheduled_date: i.scheduled_date,
-            order_id: order.id,
-            node_type: 'order' as const,
-            step_number: i.sequence,
-            step_type: 'load_material' as any,
-            location: '',
-            status: 'pending',
-          };
-          const unloadStep = {
-            assignment_id: newAssignment.id,
-            driver_id: i.driver_id,
-            scheduled_date: i.scheduled_date,
-            order_id: order.id,
-            node_type: 'order' as const,
-            step_number: i.sequence + 1,
-            step_type: 'unload_material' as any,
-            location: order.address,
-            status: 'pending',
-          };
-          const { error: stepsError } = await supabase.from("job_steps").insert([loadStep, unloadStep]);
-          if (stepsError) throw stepsError;
-        } else {
-          const displayStep = {
-            assignment_id: newAssignment.id,
-            driver_id: i.driver_id,
-            scheduled_date: i.scheduled_date,
-            order_id: order.id,
-            node_type: 'order' as const,
-            step_number: i.sequence,
-            step_type: (order.type === "delivery" ? "delivery" : order.type === "pickup" ? "pickup" : "swap") as any,
-            location: order.address,
-            status: 'pending',
-          };
-          const { error: stepsError } = await supabase.from("job_steps").insert(displayStep);
-          if (stepsError) throw stepsError;
-        }
+        const displayStep = {
+          assignment_id: newAssignment.id,
+          driver_id: i.driver_id,
+          scheduled_date: i.scheduled_date,
+          order_id: order.id,
+          node_type: 'order' as const,
+          step_number: i.sequence,
+          step_type: (order.type === "delivery" ? "delivery" : order.type === "pickup" ? "pickup" : order.type === "swap" ? "swap" : order.type === "material" ? "unload_material" : order.type) as any,
+          location: order.address,
+          status: 'pending',
+        };
+        const { error: stepsError } = await supabase.from("job_steps").insert(displayStep);
+        if (stepsError) throw stepsError;
       }
       
       for (const u of updates) {
@@ -217,18 +189,9 @@ export function DispatchPage() {
           await supabase.from("job_steps").update({
             driver_id: u.driver_id,
           }).eq("assignment_id", u.id);
-          // 砂石料订单有两个 order 步骤，需要分别更新 step_number
-          const orderSteps = jobSteps.filter((s: any) => s.assignment_id === u.id && s.node_type === 'order');
-          if (orderSteps.length > 1 && orderSteps.some((s: any) => s.step_type === 'load_material' || s.step_type === 'unload_material')) {
-            const loadStep = orderSteps.find((s: any) => s.step_type === 'load_material');
-            const unloadStep = orderSteps.find((s: any) => s.step_type === 'unload_material');
-            if (loadStep) await supabase.from("job_steps").update({ step_number: u.sequence }).eq("id", loadStep.id);
-            if (unloadStep) await supabase.from("job_steps").update({ step_number: u.sequence + 1 }).eq("id", unloadStep.id);
-          } else {
-            await supabase.from("job_steps").update({
-              step_number: u.sequence,
-            }).eq("assignment_id", u.id).eq("node_type", "order");
-          }
+          await supabase.from("job_steps").update({
+            step_number: u.sequence,
+          }).eq("assignment_id", u.id).eq("node_type", "order");
         }
       }
       

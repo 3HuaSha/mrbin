@@ -783,7 +783,7 @@ export function FleetMapPage() {
         delivery: "customer_delivery",
         pickup: "customer_pickup",
         swap: "customer_delivery",
-        material: "customer_delivery",
+        material: "unload_material",
       };
       for (const ins of toInsert) {
         const order = orderById.get(ins.orderId);

@@ -61,6 +61,11 @@ export function InsertStepButton({
         { value: "maple waste", label: "Maple Transfer" },
         { value: "york1 whitby", label: "YORK1 Whitby" }
       ];
+    } else if (stepType === "load_material") {
+      return [
+        { value: "3445", label: "3445 Kennedy" },
+        { value: "12441", label: "12441 Woodbine" }
+      ];
     }
     return [];
   };
@@ -70,22 +75,27 @@ export function InsertStepButton({
       toast.error("请选择动作");
       return;
     }
-    if (!location) {
+    if (stepType !== "load_material" && !location) {
       toast.error("请选择地点");
       return;
     }
-    if (stepType !== "dump_waste" && !binSize) {
+    if (stepType !== "dump_waste" && stepType !== "load_material" && !binSize) {
       toast.error("请选择桶大小");
       return;
     }
     
-    const finalNotes = stepType === "dump_waste"
+    const finalNotes = stepType === "dump_waste" || stepType === "load_material"
       ? notes
       : (notes ? `${binSize}yd - ${notes}` : `${binSize}yd`);
     
-    const linkedOrderId = (stepType === "dump_waste" && adjacentOrderId && (adjacentOrderType === 'pickup' || adjacentOrderType === 'swap'))
-      ? adjacentOrderId
-      : undefined;
+    // 装料步骤: 如果相邻的是砂石料订单，自动关联
+    // 倒垃圾步骤: 如果相邻的是收桶/换桶订单，自动关联
+    let linkedOrderId: string | undefined;
+    if (stepType === "load_material" && adjacentOrderId && adjacentOrderType === 'material') {
+      linkedOrderId = adjacentOrderId;
+    } else if (stepType === "dump_waste" && adjacentOrderId && (adjacentOrderType === 'pickup' || adjacentOrderType === 'swap')) {
+      linkedOrderId = adjacentOrderId;
+    }
     
     onInsert({ driverId, position, location, stepType, notes: finalNotes || undefined, orderId: linkedOrderId });
     
@@ -123,6 +133,7 @@ export function InsertStepButton({
             <SelectItem value="drop_bin" className="text-[10px]">放下桶</SelectItem>
             <SelectItem value="pickup_bin" className="text-[10px]">取走桶</SelectItem>
             <SelectItem value="dump_waste" className="text-[10px]">倒垃圾</SelectItem>
+            <SelectItem value="load_material" className="text-[10px]">装料</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -130,6 +141,11 @@ export function InsertStepButton({
       {stepType === 'dump_waste' && adjacentOrderId && (adjacentOrderType === 'pickup' || adjacentOrderType === 'swap') && (
         <div className="text-[9px] text-amber-700 bg-amber-50 rounded px-1.5 py-1">
           🔗 将自动关联相邻的收桶订单
+        </div>
+      )}
+      {stepType === 'load_material' && adjacentOrderId && adjacentOrderType === 'material' && (
+        <div className="text-[9px] text-amber-700 bg-amber-50 rounded px-1.5 py-1">
+          🔗 将自动关联相邻的送料订单
         </div>
       )}
       
@@ -151,7 +167,7 @@ export function InsertStepButton({
         </div>
       )}
       
-      {stepType !== "dump_waste" && (
+      {stepType !== "dump_waste" && stepType !== "load_material" && (
         <div>
           <Label className="text-[10px] font-medium">桶大小</Label>
           <Select value={binSize} onValueChange={setBinSize}>

@@ -39,7 +39,6 @@ import { OrderNodeDisplay } from "./OrderNodeDisplay";
 import { StepNodeDisplay } from "./StepNodeDisplay";
 import { SortableOrderCard } from "./SortableOrderCard";
 import { InsertStepButton } from "./InsertStepButton";
-import { MaterialStepDisplay } from "./MaterialStepDisplay";
 
 interface DriverColumnProps {
   driver: Profile;
@@ -123,26 +122,17 @@ export function DriverColumn({
   };
 
   // 合并 assignments 和手动步骤 (jobSteps with node_type='step')，并按 sequence/step_number 排序
-  // 砂石料订单有两个 order 步骤 (load_material + unload_material)，分别显示为独立卡片
   const timelineItems = useMemo(() => {
     type TimelineItem = 
       | { type: 'assignment'; data: Assignment; stepNumber: number }
-      | { type: 'step'; data: JobStep; stepNumber: number }
-      | { type: 'material_step'; data: JobStep; assignment: Assignment; stepNumber: number };
+      | { type: 'step'; data: JobStep; stepNumber: number };
 
     const items: TimelineItem[] = [];
 
     assignments.forEach(a => {
       const assignmentSteps = jobSteps.filter(s => s.assignment_id === a.id && s.node_type === 'order');
-      if (a.orders.type === 'material' && assignmentSteps.length > 1) {
-        // 砂石料：每个步骤单独显示
-        assignmentSteps.forEach(s => {
-          items.push({ type: 'material_step', data: s, assignment: a, stepNumber: s.step_number });
-        });
-      } else {
-        const stepNumber = assignmentSteps.length > 0 ? assignmentSteps[0].step_number : a.sequence;
-        items.push({ type: 'assignment', data: a, stepNumber });
-      }
+      const stepNumber = assignmentSteps.length > 0 ? assignmentSteps[0].step_number : a.sequence;
+      items.push({ type: 'assignment', data: a, stepNumber });
     });
 
     jobSteps.filter(s => s.node_type === 'step').forEach(s => {
@@ -156,14 +146,12 @@ export function DriverColumn({
   const doneItems = useMemo(() => 
     timelineItems.filter(item => {
       if (item.type === 'assignment') return jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')?.status === 'done';
-      if (item.type === 'material_step') return item.data.status === 'done';
       return item.data.status === 'done';
     }), [timelineItems, jobSteps]);
 
   const activeItems = useMemo(() => 
     timelineItems.filter(item => {
       if (item.type === 'assignment') return jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')?.status !== 'done';
-      if (item.type === 'material_step') return item.data.status !== 'done';
       return item.data.status !== 'done';
     }), [timelineItems, jobSteps]);
 
@@ -259,7 +247,7 @@ export function DriverColumn({
             ) : (
               <div className="flex items-center gap-1.5">
                 {doneItems.map((item) => {
-                  const doneKey = item.type === 'assignment' ? `done-a:${item.data.id}` : item.type === 'material_step' ? `done-ms:${item.data.id}` : `done-step:${item.data.id}`;
+                  const doneKey = item.type === 'assignment' ? `done-a:${item.data.id}` : `done-step:${item.data.id}`;
                   return (
                   <div key={doneKey} className="shrink-0 opacity-40">
                     {item.type === 'assignment' ? (
@@ -269,15 +257,6 @@ export function DriverColumn({
                         onCancel={onCancel}
                         jobStep={jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')}
                         onClick={() => onViewStep(jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')!)}
-                      />
-                    ) : item.type === 'material_step' ? (
-                      <MaterialStepDisplay
-                        step={item.data}
-                        assignment={item.assignment}
-                        vehicle={vehicle}
-                        onCancel={onCancel}
-                        onClick={() => onViewStep(item.data)}
-                        onDateChange={onDateChange}
                       />
                     ) : (
                       <StepNodeDisplay 
@@ -306,13 +285,13 @@ export function DriverColumn({
         {/* 未完成区域: 可拖拽 */}
         <div className="flex-1 flex items-center gap-2 overflow-x-auto custom-scrollbar scroll-smooth">
           <SortableContext
-            items={activeItems.map(item => item.type === 'assignment' ? `a:${item.data.id}` : item.type === 'material_step' ? `ms:${item.data.id}` : `step:${item.data.id}`)}
+            items={activeItems.map(item => item.type === 'assignment' ? `a:${item.data.id}` : `step:${item.data.id}`)}
             strategy={horizontalListSortingStrategy}
           >
             {activeItems.map((item, index) => {
               const prevItem = activeItems[index - 1];
               const nextItem = activeItems[index + 1];
-              const itemKey = item.type === 'assignment' ? `a:${item.data.id}` : item.type === 'material_step' ? `ms:${item.data.id}` : `step:${item.data.id}`;
+              const itemKey = item.type === 'assignment' ? `a:${item.data.id}` : `step:${item.data.id}`;
               
               return (
                 <div key={itemKey} className="relative shrink-0 group/card">
@@ -324,15 +303,6 @@ export function DriverColumn({
                         onCancel={onCancel}
                         jobStep={jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')}
                         onClick={() => onViewStep(jobSteps.find(s => s.assignment_id === item.data.id && s.node_type === 'order')!)}
-                      />
-                    ) : item.type === 'material_step' ? (
-                      <MaterialStepDisplay
-                        step={item.data}
-                        assignment={item.assignment}
-                        vehicle={vehicle}
-                        onCancel={onCancel}
-                        onClick={() => onViewStep(item.data)}
-                        onDateChange={onDateChange}
                       />
                     ) : (
                       <StepNodeDisplay 

@@ -35,6 +35,7 @@ export function StepNodeDisplay({
   const stepLabel = stepTypeLabels[step.step_type] || step.step_type;
   const isDone = step.status === "done";
   const isDumpWaste = (step.step_type as string) === 'dump_waste';
+  const isLoadMaterial = (step.step_type as string) === 'load_material';
 
   return (
     <div 
@@ -44,16 +45,18 @@ export function StepNodeDisplay({
           ? "border-l-green-600 bg-green-100" 
           : isDumpWaste
             ? "border-l-amber-500 bg-amber-50"
-            : "border-l-gray-400 bg-card/80",
+            : isLoadMaterial
+              ? "border-l-blue-500 bg-blue-50"
+              : "border-l-gray-400 bg-card/80",
         onClick && "cursor-pointer"
       )}
       onClick={onClick}
     >
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
-          <Badge variant="outline" className={cn("text-[8px] w-fit", isDumpWaste && "border-amber-400 text-amber-700")}>
-            {isDumpWaste ? '🗑️ 倒垃圾' : '手动步骤'}
-          </Badge>
+          {isDumpWaste && <Badge variant="outline" className={cn("text-[8px] w-fit", isDumpWaste && "border-amber-400 text-amber-700")}>🗑️ 倒垃圾</Badge>}
+        {isLoadMaterial && <Badge variant="outline" className="text-[8px] w-fit border-blue-400 text-blue-700">⛏️ 装料</Badge>}
+        {!isDumpWaste && !isLoadMaterial && <Badge variant="outline" className="text-[8px] w-fit">手动步骤</Badge>}
           {isDone && <CheckCircle2 className="h-3 w-3 text-green-600" />}
         </div>
         <div className="text-[11px] font-semibold">
@@ -63,12 +66,12 @@ export function StepNodeDisplay({
           <MapPin className="h-2 w-2 inline mr-0.5" />
           {step.location}
         </div>
-        {isDumpWaste && linkedOrderLabel && (
+        {(isDumpWaste || isLoadMaterial) && linkedOrderLabel && (
           <div className="text-[8px] text-amber-700 bg-amber-100 rounded px-1 py-0.5 truncate" title={linkedOrderLabel}>
             🔗 {linkedOrderLabel}
           </div>
         )}
-        {isDumpWaste && !linkedOrderLabel && (
+        {(isDumpWaste || isLoadMaterial) && !linkedOrderLabel && (
           <div className="text-[8px] text-muted-foreground/60 italic">
             未关联订单
           </div>
@@ -97,7 +100,7 @@ export function StepNodeDisplay({
               查看详情
             </DropdownMenuItem>
           )}
-          {isDumpWaste && onOpenLinkDialog && (
+          {(isDumpWaste || isLoadMaterial) && onOpenLinkDialog && (
             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenLinkDialog(step.id); }}>
               🔗 关联订单…
             </DropdownMenuItem>
