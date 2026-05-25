@@ -61,9 +61,74 @@ export function LifecycleTimeline({
     linkedSteps.push(step); 
   }));
   
-  // 包含通过 order_id 直接关联的手动步骤（如 dump_waste）
+  // 包含通过 order_id 直接关联的手动步骤（如 dump_waste, load_material）
   orphanSteps.forEach((s: any) => { allSteps.push(s); });
 
+  const fmtTime = (iso: string | null | undefined) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  // 砂石料订单: 装料 → 送料
+  if (order.type === "material") {
+    const loadStep = allSteps.find(s =>
+      s.step_type === "load_material" && s.status === "done"
+    );
+    const unloadStep = allSteps.find(s =>
+      s.step_type === "unload_material" && s.status === "done"
+    );
+    const selfIsDone = order.status === "done";
+
+    const loadDone = !!loadStep;
+    const unloadDone = !!unloadStep || selfIsDone;
+
+    return (
+      <div className="bg-white border rounded-lg p-4 mb-3">
+        <div className="text-sm font-semibold mb-3">🔄 订单生命周期</div>
+        <div className="flex items-start gap-1 relative">
+          <div className="absolute top-4 left-8 right-8 h-0.5 bg-gray-200" style={{ zIndex: 0 }} />
+          <div
+            className="absolute top-4 left-8 h-0.5 bg-green-500 transition-all"
+            style={{
+              zIndex: 0,
+              width: `${(loadDone ? 50 : 0) + (unloadDone ? 50 : 0)}%`,
+              maxWidth: "calc(100% - 64px)"
+            }}
+          />
+          <div className="relative flex w-full gap-1" style={{ zIndex: 1 }}>
+            <Stage
+              active={false}
+              done={loadDone}
+              label="装料"
+              time={loadStep?.completed_at}
+              fmtTime={fmtTime}
+              detail={loadStep?._assignment?.profiles?.name ? (
+                <div>司机: {loadStep._assignment.profiles.name}</div>
+              ) : undefined}
+            />
+            <Stage
+              active={false}
+              done={unloadDone}
+              label="送料"
+              time={unloadStep?.completed_at}
+              fmtTime={fmtTime}
+              detail={(unloadStep?._assignment?.profiles?.name || unloadStep?.photo_url) ? (
+                <div className="space-y-0.5">
+                  {unloadStep?._assignment?.profiles?.name && <div>司机: {unloadStep._assignment.profiles.name}</div>}
+                  {unloadStep?.photo_url && (
+                    <a href={unloadStep.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">照片</a>
+                  )}
+                </div>
+              ) : undefined}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 桶订单: 送达 → 回收 → 称重
   // 提取关键节点
   const deliveredStep = selfSteps.find(s =>
     (s.step_type === "delivery" || s.step_type === "customer_delivery") &&
@@ -104,12 +169,6 @@ export function LifecycleTimeline({
   const stage4Done = !!dumpedAt;
 
   const showDelivered = order.type !== "pickup" || linkedIsDoneDelivery;
-
-  const fmtTime = (iso: string | null | undefined) => {
-    if (!iso) return null;
-    const d = new Date(iso);
-    return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  };
 
   return (
     <div className="bg-white border rounded-lg p-4 mb-3">

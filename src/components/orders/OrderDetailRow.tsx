@@ -27,7 +27,7 @@ export function OrderDetailRow({ order, orderId }: OrderDetailRowProps) {
   // 决定"展示主视角": 同号链里优先 delivery, 其次 swap, 最后 pickup
   const primary: Order = (() => {
     if (chain.length === 0) return order;
-    const byPriority = ["delivery", "swap", "pickup"] as const;
+    const byPriority = ["delivery", "swap", "pickup", "material"] as const;
     for (const t of byPriority) {
       const found = chain.find(o => o.type === t);
       if (found) return found;
