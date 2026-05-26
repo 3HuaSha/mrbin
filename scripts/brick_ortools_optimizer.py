@@ -208,7 +208,8 @@ def main() -> None:
         routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(manager.NodeToIndex(delivery_node)))
 
     # ---- Pickup & Delivery pairs ----
-    solver = routing.solver()
+    # Use routing.AddPickupAndDelivery() — PATH_CHEAPEST_ARC respects this
+    # (solver.Add constraints are ignored by the first-solution heuristic)
 
     # Delivery order pairs: yard pickup → customer delivery
     for oi in range(num_deliveries):
@@ -216,6 +217,8 @@ def main() -> None:
         delivery_node = 2 * oi + 2
         pickup_idx = manager.NodeToIndex(pickup_node)
         delivery_idx = manager.NodeToIndex(delivery_node)
+        routing.AddPickupAndDelivery(pickup_idx, delivery_idx)
+        solver = routing.solver()
         solver.Add(routing.VehicleVar(pickup_idx) == routing.VehicleVar(delivery_idx))
         solver.Add(time_dim.CumulVar(pickup_idx) <= time_dim.CumulVar(delivery_idx))
 
@@ -225,6 +228,8 @@ def main() -> None:
         delivery_node = 2 * num_deliveries + 2 * pi + 2
         pickup_idx = manager.NodeToIndex(pickup_node)
         delivery_idx = manager.NodeToIndex(delivery_node)
+        routing.AddPickupAndDelivery(pickup_idx, delivery_idx)
+        solver = routing.solver()
         solver.Add(routing.VehicleVar(pickup_idx) == routing.VehicleVar(delivery_idx))
         solver.Add(time_dim.CumulVar(pickup_idx) <= time_dim.CumulVar(delivery_idx))
 
