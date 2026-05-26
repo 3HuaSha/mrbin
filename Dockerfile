@@ -43,10 +43,16 @@ ENV VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
 ENV VITE_GOOGLE_MAPS_API_KEY=$VITE_GOOGLE_MAPS_API_KEY
 ENV VITE_SAMSARA_TOKEN=$VITE_SAMSARA_TOKEN
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 python3-pip \
+  && python3 -m pip install --break-system-packages --no-cache-dir ortools \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
 RUN npm install --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/scripts ./scripts
 COPY server.mjs ./server.mjs
 
 EXPOSE 3000

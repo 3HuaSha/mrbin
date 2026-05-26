@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, PackageCheck, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { Assignment, Order, Profile, Vehicle } from "@/types/dispatch";
+import { optimizeBrickSchedule } from "@/actions/brick-optimizer";
 
 interface BrickScheduleAssistantProps {
   drivers: Profile[];
@@ -149,6 +151,30 @@ export function BrickScheduleAssistant({
     planning.missingPallets.length +
     planning.unplanned.length;
 
+  const optimizerInput = useMemo(() => ({
+    vehicles: flatDrivers.map(({ driver, vehicle }) => ({
+      driverId: driver.id,
+      driverName: driver.name,
+      vehicleName: vehicle?.name || "",
+      capacity: capacityOf(vehicle),
+      currentLoad: driverLoads.get(driver.id) || 0,
+    })),
+    orders: unassigned
+      .filter((order) => (order.pallet_count || 0) > 0)
+      .map((order) => ({
+        id: order.id,
+        label: orderLabel(order),
+        pallets: order.pallet_count || 0,
+        priority: order.priority || "P3",
+        canSplit: order.can_split !== false,
+      })),
+    timeLimitSeconds: 5,
+  }), [flatDrivers, driverLoads, unassigned]);
+
+  const optimize = useMutation({
+    mutationFn: async () => optimizeBrickSchedule({ data: optimizerInput }),
+  });
+
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -215,6 +241,61 @@ export function BrickScheduleAssistant({
               <PackageCheck className="h-4 w-4 text-primary" />
               <h3 className="text-sm font-semibold">未排订单建议</h3>
             </div>
+
+            <Button
+              className="mb-3 w-full gap-2"
+              onClick={() => optimize.mutate()}
+              disabled={optimize.isPending || optimizerInput.vehicles.length === 0 || optimizerInput.orders.length === 0}
+            >
+              <Wand2 className="h-4 w-4" />
+              {optimize.isPending ? "OR-Tools 计算中..." : "用 OR-Tools 优化装车"}
+            </Button>
+
+            {optimize.data && (
+              <div className="mb-3 space-y-2 rounded-md border bg-muted/20 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold">OR-Tools 结果</div>
+                  {optimize.data.status && <Badge variant="secondary">{optimize.data.status}</Badge>}
+                </div>
+                {!optimize.data.success && (
+                  <div className="text-sm text-destructive">{optimize.data.error || "优化失败"}</div>
+                )}
+                {optimize.data.success && optimize.data.loads?.map((load) => (
+                  <div key={load.driverId} className="rounded border bg-background p-2">
+                    <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold">
+                      <span className="truncate">{load.driverName} · {load.vehicleName}</span>
+                      <span>{load.finalLoad}/{load.capacity} PLT</span>
+                    </div>
+                    <div className="space-y-1">
+                      {optimize.data.assignments
+                        ?.filter((assignment) => assignment.driverId === load.driverId)
+                        .map((assignment) => (
+                          <div key={`${assignment.orderId}-${assignment.pallets}`} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="truncate">
+                              {assignment.orderLabel} · {assignment.priority}
+                              {assignment.split ? " · 拆单" : ""}
+                            </span>
+                            <span className="shrink-0">{assignment.pallets} PLT</span>
+                          </div>
+                        ))}
+                      {optimize.data.assignments?.filter((assignment) => assignment.driverId === load.driverId).length === 0 && (
+                        <div className="text-xs text-muted-foreground">没有新增建议</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {optimize.data.success && (optimize.data.unplanned?.length || 0) > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-destructive">未安排</div>
+                    {optimize.data.unplanned?.map((order) => (
+                      <div key={order.id} className="text-xs text-destructive">
+                        {order.label} · {order.pallets} PLT · {order.reason || "未安排"}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2">
               {flatDrivers.map(({ driver, vehicle }) => {
