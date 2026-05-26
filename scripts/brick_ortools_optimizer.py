@@ -263,7 +263,6 @@ def main() -> None:
         routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     )
     search_params.time_limit.seconds = int(time_limit)
-    search_params.num_search_workers = 8
 
     solution = routing.SolveWithParameters(search_params)
 
