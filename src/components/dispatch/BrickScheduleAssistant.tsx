@@ -15,6 +15,11 @@ import {
 import { cn } from "@/lib/utils";
 import { Assignment, Order, Profile, Vehicle } from "@/types/dispatch";
 import { optimizeBrickSchedule } from "@/actions/brick-optimizer";
+import { calculateSamsaraRouteForVehicle } from "@/actions/samsara";
+
+const DEFAULT_BRICK_YARD_ADDRESS = "12441 Woodbine Ave, Gormley, ON L4A 2K4";
+const ROUTE_START_HOUR = 8;
+const STOP_MINUTES = 15;
 
 interface BrickScheduleAssistantProps {
   drivers: Profile[];
@@ -26,6 +31,21 @@ interface BrickScheduleAssistantProps {
 type PlannedOrder = {
   order: Order;
   loadAfter: number;
+};
+
+type WholeRouteResult = {
+  driverId: string;
+  driverName: string;
+  vehicleName: string;
+  load: number;
+  capacity: number;
+  orderIds: string[];
+  orderLabels: string[];
+  totalMinutes: number;
+  totalDistanceKm: number;
+  lateMinutes: number;
+  score: number;
+  etas: Array<{ orderId: string; label: string; eta: string; lateMinutes: number }>;
 };
 
 const priorityRank: Record<string, number> = {
@@ -175,6 +195,49 @@ export function BrickScheduleAssistant({
     mutationFn: async () => optimizeBrickSchedule({ data: optimizerInput }),
   });
 
+  const wholeRoute = useMutation({
+    mutationFn: async () => {
+      const optimized = await optimizeBrickSchedule({ data: optimizerInput });
+      if (!optimized.success) return { success: false as const, error: optimized.error || "OR-Tools 优化失败" };
+
+      const routes: WholeRouteResult[] = [];
+      for (const load of optimized.loads || []) {
+        const assigned = (optimized.assignments || [])
+          .filter((assignment) => assignment.driverId === load.driverId)
+          .map((assignment) => unassigned.find((order) => order.id === assignment.orderId))
+          .filter(Boolean) as Order[];
+
+        if (assigned.length === 0) {
+          routes.push({
+            driverId: load.driverId,
+            driverName: load.driverName,
+            vehicleName: load.vehicleName,
+            load: load.finalLoad,
+            capacity: load.capacity,
+            orderIds: [],
+            orderLabels: [],
+            totalMinutes: 0,
+            totalDistanceKm: 0,
+            lateMinutes: 0,
+            score: 0,
+            etas: [],
+          });
+          continue;
+        }
+
+        const best = await pickBestRoute(load, assigned);
+        routes.push(best);
+      }
+
+      return {
+        success: true as const,
+        status: optimized.status,
+        routes,
+        unplanned: optimized.unplanned || [],
+      };
+    },
+  });
+
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -250,6 +313,67 @@ export function BrickScheduleAssistant({
               <Wand2 className="h-4 w-4" />
               {optimize.isPending ? "OR-Tools 计算中..." : "用 OR-Tools 优化装车"}
             </Button>
+
+            <Button
+              variant="secondary"
+              className="mb-3 w-full gap-2"
+              onClick={() => wholeRoute.mutate()}
+              disabled={wholeRoute.isPending || optimizerInput.vehicles.length === 0 || optimizerInput.orders.length === 0}
+            >
+              <Wand2 className="h-4 w-4" />
+              {wholeRoute.isPending ? "整体排班计算中..." : "整体自动排班"}
+            </Button>
+
+            {wholeRoute.data && (
+              <div className="mb-3 space-y-2 rounded-md border bg-primary/5 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold">整体自动排班结果</div>
+                  {wholeRoute.data.success && wholeRoute.data.status && <Badge variant="secondary">{wholeRoute.data.status}</Badge>}
+                </div>
+                {!wholeRoute.data.success && (
+                  <div className="text-sm text-destructive">{wholeRoute.data.error}</div>
+                )}
+                {wholeRoute.data.success && wholeRoute.data.routes.map((route) => (
+                  <div key={route.driverId} className="rounded border bg-background p-2">
+                    <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold">
+                      <span className="truncate">{route.driverName} · {route.vehicleName}</span>
+                      <span>{route.load}/{route.capacity} PLT</span>
+                    </div>
+                    {route.orderLabels.length > 0 ? (
+                      <>
+                        <div className="mb-1 text-xs text-muted-foreground">
+                          {route.orderLabels.join(" -> ")}
+                        </div>
+                        <div className="mb-1 text-xs">
+                          总行程约 {route.totalMinutes} 分钟 · {route.totalDistanceKm.toFixed(1)} km
+                          {route.lateMinutes > 0 && <span className="text-destructive"> · 晚到 {route.lateMinutes} 分钟</span>}
+                        </div>
+                        <div className="space-y-0.5">
+                          {route.etas.map((eta) => (
+                            <div key={eta.orderId} className="flex justify-between gap-2 text-xs">
+                              <span className="truncate">{eta.label}</span>
+                              <span className={eta.lateMinutes > 0 ? "text-destructive" : "text-muted-foreground"}>
+                                {eta.eta}{eta.lateMinutes > 0 ? ` +${eta.lateMinutes}m` : ""}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-xs text-muted-foreground">没有新增路线</div>
+                    )}
+                  </div>
+                ))}
+                {wholeRoute.data.success && wholeRoute.data.unplanned.length > 0 && (
+                  <div className="space-y-1 text-xs text-destructive">
+                    <div className="font-semibold">未安排</div>
+                    {wholeRoute.data.unplanned.map((order) => (
+                      <div key={order.id}>{order.label} · {order.pallets} PLT · {order.reason || "未安排"}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {optimize.data && (
               <div className="mb-3 space-y-2 rounded-md border bg-muted/20 p-3">
@@ -381,4 +505,225 @@ function IssueLine({ text }: { text: string }) {
       {text}
     </div>
   );
+}
+
+async function pickBestRoute(
+  load: {
+    driverId: string;
+    driverName: string;
+    vehicleName: string;
+    finalLoad: number;
+    capacity: number;
+  },
+  orders: Order[],
+): Promise<WholeRouteResult> {
+  const candidates = buildRouteCandidates(orders);
+  const scored: WholeRouteResult[] = [];
+
+  for (const candidate of candidates) {
+    const scoredRoute = await scoreRoute(load, candidate);
+    scored.push(scoredRoute);
+  }
+
+  return scored.sort((a, b) => a.score - b.score)[0];
+}
+
+function buildRouteCandidates(orders: Order[]) {
+  const candidates: Order[][] = [];
+  const seen = new Set<string>();
+  const add = (route: Order[]) => {
+    const key = route.map((order) => order.id).join("|");
+    if (!seen.has(key)) {
+      seen.add(key);
+      candidates.push(route);
+    }
+  };
+
+  add([...orders].sort(compareByPriorityAndWindow));
+  add([...orders].sort((a, b) => (b.pallet_count || 0) - (a.pallet_count || 0)));
+  add([...orders].sort((a, b) => a.address.localeCompare(b.address)));
+
+  if (orders.length <= 6) {
+    add(nearestNeighborRoute(orders));
+  }
+
+  if (orders.length <= 5) {
+    permutations(orders).slice(0, 12).forEach(add);
+  }
+
+  return candidates;
+}
+
+function compareByPriorityAndWindow(a: Order, b: Order) {
+  const pa = priorityRank[a.priority || "P3"] || 3;
+  const pb = priorityRank[b.priority || "P3"] || 3;
+  if (pa !== pb) return pa - pb;
+  return parseTimeWindow(a).endMinutes - parseTimeWindow(b).endMinutes;
+}
+
+function nearestNeighborRoute(orders: Order[]) {
+  const remaining = [...orders].sort(compareByPriorityAndWindow);
+  const route: Order[] = [];
+  let current = DEFAULT_BRICK_YARD_ADDRESS;
+
+  while (remaining.length > 0) {
+    const next = remaining
+      .map((order) => ({ order, distance: roughDistance(current, order.address) }))
+      .sort((a, b) => a.distance - b.distance || compareByPriorityAndWindow(a.order, b.order))[0].order;
+    route.push(next);
+    current = next.address;
+    remaining.splice(remaining.findIndex((order) => order.id === next.id), 1);
+  }
+
+  return route;
+}
+
+function permutations<T>(items: T[]) {
+  if (items.length <= 1) return [items];
+  const result: T[][] = [];
+  items.forEach((item, index) => {
+    const rest = [...items.slice(0, index), ...items.slice(index + 1)];
+    permutations(rest).forEach((perm) => result.push([item, ...perm]));
+  });
+  return result;
+}
+
+async function scoreRoute(
+  load: {
+    driverId: string;
+    driverName: string;
+    vehicleName: string;
+    finalLoad: number;
+    capacity: number;
+  },
+  route: Order[],
+): Promise<WholeRouteResult> {
+  const destinations = [
+    { address: DEFAULT_BRICK_YARD_ADDRESS, name: "12441" },
+    ...route.map((order) => ({ address: order.address, name: orderLabel(order) })),
+    { address: DEFAULT_BRICK_YARD_ADDRESS, name: "12441" },
+  ];
+
+  const routeData = await calculateSamsaraRouteForVehicle({
+    data: {
+      vehicleId: "brick-whole-route",
+      destinations,
+    },
+  });
+
+  const legs = routeData.success ? (routeData.legs || []) : [];
+  let elapsedMinutes = 0;
+  let lateMinutes = 0;
+  const etas: WholeRouteResult["etas"] = [];
+
+  route.forEach((order, index) => {
+    const driveMinutes = Math.round(((legs[index]?.duration || fallbackDuration(index, route)) / 60));
+    elapsedMinutes += driveMinutes;
+
+    const arrivalMinutes = ROUTE_START_HOUR * 60 + elapsedMinutes;
+    const window = parseTimeWindow(order);
+    const late = Math.max(0, arrivalMinutes - window.endMinutes);
+    const priorityPenalty = priorityRank[order.priority || "P3"] || 3;
+    lateMinutes += late * (5 - Math.min(priorityPenalty, 4));
+
+    etas.push({
+      orderId: order.id,
+      label: orderLabel(order),
+      eta: formatClock(arrivalMinutes),
+      lateMinutes: late,
+    });
+
+    elapsedMinutes += STOP_MINUTES;
+  });
+
+  const returnLeg = legs[route.length];
+  elapsedMinutes += Math.round(((returnLeg?.duration || 0) / 60));
+
+  const totalDistanceKm = routeData.success
+    ? (routeData.totalDistance || 0) / 1000
+    : route.reduce((sum, order) => sum + roughDistance(DEFAULT_BRICK_YARD_ADDRESS, order.address), 0);
+  const score = elapsedMinutes + totalDistanceKm * 0.5 + lateMinutes * 20;
+
+  return {
+    driverId: load.driverId,
+    driverName: load.driverName,
+    vehicleName: load.vehicleName,
+    load: load.finalLoad,
+    capacity: load.capacity,
+    orderIds: route.map((order) => order.id),
+    orderLabels: route.map(orderLabel),
+    totalMinutes: elapsedMinutes,
+    totalDistanceKm,
+    lateMinutes,
+    score,
+    etas,
+  };
+}
+
+function fallbackDuration(index: number, route: Order[]) {
+  const from = index === 0 ? DEFAULT_BRICK_YARD_ADDRESS : route[index - 1].address;
+  const to = route[index]?.address || DEFAULT_BRICK_YARD_ADDRESS;
+  return Math.max(15, roughDistance(from, to) * 1.3) * 60;
+}
+
+function parseTimeWindow(order: Order) {
+  const raw = `${order.time_window === "custom" ? order.time_window_custom || "" : order.time_window} ${order.customer_notes || ""}`.toLowerCase();
+  const priority = order.priority || "P3";
+  let startMinutes = 8 * 60;
+  let endMinutes = 17 * 60;
+
+  if (raw.includes("asap")) {
+    endMinutes = 10 * 60;
+  } else if (raw.includes("before 12") || raw.includes("noon")) {
+    endMinutes = 12 * 60;
+  } else if (raw.includes("am")) {
+    endMinutes = 12 * 60;
+  } else if (raw.includes("pm")) {
+    startMinutes = 12 * 60;
+    endMinutes = 17 * 60;
+  }
+
+  const range = raw.match(/(\d{1,2})(?::\d{2})?\s*(am|pm)?\s*[-~]\s*(\d{1,2})(?::\d{2})?\s*(am|pm)?/);
+  if (range) {
+    const startSuffix = range[2] || range[4] || "";
+    const endSuffix = range[4] || range[2] || "";
+    startMinutes = parseHour(range[1], startSuffix);
+    endMinutes = parseHour(range[3], endSuffix);
+    if (endMinutes <= startMinutes && !range[4] && !range[2]) {
+      endMinutes += 12 * 60;
+    }
+  }
+
+  const must = raw.includes("must") || priority === "P1";
+  return { startMinutes, endMinutes, must };
+}
+
+function parseHour(hourText: string, suffix: string) {
+  let hour = Number(hourText);
+  if (suffix === "pm" && hour < 12) hour += 12;
+  if (suffix === "am" && hour === 12) hour = 0;
+  if (!suffix && hour <= 6) hour += 12;
+  return hour * 60;
+}
+
+function formatClock(minutes: number) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function roughDistance(a: string, b: string) {
+  const text = `${a} ${b}`.toLowerCase();
+  const west = ["oakville", "milton", "brampton", "georgetown"];
+  const east = ["pickering", "scarborough"];
+  const north = ["vaughan", "thornhill", "markham"];
+  const aw = west.some((item) => a.toLowerCase().includes(item));
+  const bw = west.some((item) => b.toLowerCase().includes(item));
+  const ae = east.some((item) => a.toLowerCase().includes(item));
+  const be = east.some((item) => b.toLowerCase().includes(item));
+  const an = north.some((item) => a.toLowerCase().includes(item));
+  const bn = north.some((item) => b.toLowerCase().includes(item));
+  if ((aw && bw) || (ae && be) || (an && bn)) return 18;
+  if (text.includes("12441")) return 35;
+  return 55;
 }
