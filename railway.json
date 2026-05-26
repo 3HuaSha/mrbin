@@ -1,6 +1,7 @@
 {
   "build": {
-    "buildCommand": "npm run build"
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
   },
   "deploy": {
     "startCommand": "npm run start",
