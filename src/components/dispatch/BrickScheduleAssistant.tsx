@@ -18,8 +18,6 @@ import { optimizeBrickSchedule } from "@/actions/brick-optimizer";
 import { getCachedRouteMatrix, RouteMatrixEntry } from "@/actions/route-matrix";
 
 const DEFAULT_BRICK_YARD_ADDRESS = "12441 Woodbine Ave, Gormley, ON L4A 2K4";
-const ROUTE_START_HOUR = 8;
-const STOP_MINUTES = 15;
 
 interface BrickScheduleAssistantProps {
   drivers: Profile[];
@@ -39,7 +37,6 @@ type WholeRouteResult = {
   totalMinutes: number;
   totalDistanceKm: number;
   lateMinutes: number;
-  score: number;
   etas: Array<{ orderId: string; label: string; eta: string; lateMinutes: number }>;
 };
 
@@ -53,13 +50,6 @@ type WholeRouteResponse = {
   googleElements?: number;
   fallbackElements?: number;
   totalPairs?: number;
-};
-
-const priorityRank: Record<string, number> = {
-  P1: 1,
-  P2: 2,
-  P3: 3,
-  P4: 4,
 };
 
 function isFlatVehicle(vehicle: Vehicle | undefined) {
@@ -144,75 +134,88 @@ export function BrickScheduleAssistant({
           label: orderLabel(order),
           pallets: order.pallet_count || 0,
           priority: order.priority || "P3",
-          canSplit: order.can_split !== false,
           startMinutes: window.startMinutes,
           endMinutes: window.endMinutes,
           must: window.must,
         };
       }),
-    timeLimitSeconds: 5,
+    timeLimitSeconds: 30,
   }), [flatDrivers, driverLoads, unassigned]);
 
   const wholeRoute = useMutation({
     mutationFn: async (): Promise<WholeRouteResponse> => {
-      const matrixAddresses = [
+      const ordersWithAddress = optimizerInput.orders
+        .map((inputOrder) => ({
+          ...inputOrder,
+          address: unassigned.find((o) => o.id === inputOrder.id)?.address || "",
+        }))
+        .filter((o) => o.address);
+
+      if (ordersWithAddress.length === 0) {
+        return { success: false as const, error: "没有可排的订单地址" };
+      }
+
+      // Build address list: index 0 = depot, 1..N = orders
+      const addresses = [
         DEFAULT_BRICK_YARD_ADDRESS,
-        ...optimizerInput.orders
-          .map((inputOrder) => unassigned.find((order) => order.id === inputOrder.id)?.address)
-          .filter(Boolean) as string[],
+        ...ordersWithAddress.map((o) => o.address),
       ];
-      const matrix = await getCachedRouteMatrix({ data: { addresses: matrixAddresses } });
+
+      const matrix = await getCachedRouteMatrix({ data: { addresses } });
       const matrixMap = makeMatrixMap(matrix.entries);
-      const ordersById = new Map(unassigned.map((order) => [order.id, order]));
-      const enrichedInput = {
-        ...optimizerInput,
-        orders: optimizerInput.orders.map((inputOrder) => {
-          const order = ordersById.get(inputOrder.id);
-          const originLeg = order ? getMatrixLeg(matrixMap, DEFAULT_BRICK_YARD_ADDRESS, order.address) : null;
-          return {
-            ...inputOrder,
-            originMinutes: originLeg ? Math.round(originLeg.duration / 60) : 0,
-          };
-        }),
-        pairPenalties: buildPairPenalties(
-          optimizerInput.orders
-            .map((inputOrder) => ordersById.get(inputOrder.id))
-            .filter(Boolean) as Order[],
-          matrixMap,
-        ),
+
+      // Build 2D matrices: (1+orders) x (1+orders)
+      const n = addresses.length;
+      const durationMatrix: number[][] = [];
+      const distanceMatrix: number[][] = [];
+
+      for (let i = 0; i < n; i++) {
+        durationMatrix[i] = [];
+        distanceMatrix[i] = [];
+        for (let j = 0; j < n; j++) {
+          if (i === j) {
+            durationMatrix[i][j] = 0;
+            distanceMatrix[i][j] = 0;
+          } else {
+            const leg = getMatrixLeg(matrixMap, addresses[i], addresses[j]);
+            durationMatrix[i][j] = Math.round(leg.duration / 60); // minutes
+            distanceMatrix[i][j] = Math.round(leg.distance / 1000); // km
+          }
+        }
+      }
+
+      const vrpInput = {
+        vehicles: optimizerInput.vehicles,
+        orders: ordersWithAddress,
+        durationMatrix,
+        distanceMatrix,
+        serviceMinutes: 15,
+        routeStartHour: 8,
+        timeLimitSeconds: 30,
       };
 
-      const optimized = await optimizeBrickSchedule({ data: enrichedInput });
+      const optimized = await optimizeBrickSchedule({ data: vrpInput });
       if (!optimized.success) return { success: false as const, error: optimized.error || "OR-Tools 优化失败" };
 
-      const routes: WholeRouteResult[] = [];
-      for (const load of optimized.loads || []) {
-        const assigned = (optimized.assignments || [])
-          .filter((assignment) => assignment.driverId === load.driverId)
-          .map((assignment) => unassigned.find((order) => order.id === assignment.orderId))
-          .filter(Boolean) as Order[];
-
-        if (assigned.length === 0) {
-          routes.push({
-            driverId: load.driverId,
-            driverName: load.driverName,
-            vehicleName: load.vehicleName,
-            load: load.finalLoad,
-            capacity: load.capacity,
-            orderIds: [],
-            orderLabels: [],
-            totalMinutes: 0,
-            totalDistanceKm: 0,
-            lateMinutes: 0,
-            score: 0,
-            etas: [],
-          });
-          continue;
-        }
-
-        const best = pickBestRoute(load, assigned, matrixMap);
-        routes.push(best);
-      }
+      // Convert VRP routes directly (already have ordered stops)
+      const routes: WholeRouteResult[] = (optimized.routes || []).map((vrpRoute) => ({
+        driverId: vrpRoute.driverId,
+        driverName: vrpRoute.driverName,
+        vehicleName: vrpRoute.vehicleName,
+        load: vrpRoute.load,
+        capacity: vrpRoute.capacity,
+        orderIds: vrpRoute.stops.map((s) => s.orderId),
+        orderLabels: vrpRoute.stops.map((s) => s.label),
+        totalMinutes: vrpRoute.totalMinutes,
+        totalDistanceKm: vrpRoute.totalDistanceKm,
+        lateMinutes: vrpRoute.lateMinutes,
+        etas: vrpRoute.stops.map((s) => ({
+          orderId: s.orderId,
+          label: s.label,
+          eta: formatClock(s.etaMinutes),
+          lateMinutes: s.lateMinutes,
+        })),
+      }));
 
       return {
         success: true as const,
@@ -359,7 +362,7 @@ export function BrickScheduleAssistant({
             )}
 
             <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-              先由 OR-Tools 分配订单到 FLAT 车，再用路线矩阵缓存计算候选送货顺序。只有缺失路段会调用 Google Route Matrix。
+              OR-Tools VRP 求解器同时分配订单到车辆并优化送货路线，使用 Google 路线矩阵（缓存优先）计算实际距离和时间。
             </div>
           </section>
 
@@ -415,197 +418,6 @@ function IssueLine({ text }: { text: string }) {
   );
 }
 
-function pickBestRoute(
-  load: {
-    driverId: string;
-    driverName: string;
-    vehicleName: string;
-    finalLoad: number;
-    capacity: number;
-  },
-  orders: Order[],
-  matrix: Map<string, RouteMatrixEntry>,
-): WholeRouteResult {
-  const candidates = buildRouteCandidates(orders);
-  const scored: WholeRouteResult[] = [];
-
-  for (const candidate of candidates) {
-    const scoredRoute = scoreRoute(load, candidate, matrix);
-    scored.push(scoredRoute);
-  }
-
-  return scored.sort((a, b) => a.score - b.score)[0];
-}
-
-function buildRouteCandidates(orders: Order[]) {
-  const candidates: Order[][] = [];
-  const seen = new Set<string>();
-  const add = (route: Order[]) => {
-    const key = route.map((order) => order.id).join("|");
-    if (!seen.has(key)) {
-      seen.add(key);
-      candidates.push(route);
-    }
-  };
-
-  add([...orders].sort(compareByPriorityAndWindow));
-  add([...orders].sort((a, b) => (b.pallet_count || 0) - (a.pallet_count || 0)));
-  add([...orders].sort((a, b) => a.address.localeCompare(b.address)));
-
-  if (orders.length <= 6) {
-    add(nearestNeighborRoute(orders));
-  }
-
-  if (orders.length <= 5) {
-    permutations(orders).slice(0, 12).forEach(add);
-  }
-
-  return candidates;
-}
-
-function compareByPriorityAndWindow(a: Order, b: Order) {
-  const pa = priorityRank[a.priority || "P3"] || 3;
-  const pb = priorityRank[b.priority || "P3"] || 3;
-  if (pa !== pb) return pa - pb;
-  return parseTimeWindow(a).endMinutes - parseTimeWindow(b).endMinutes;
-}
-
-function nearestNeighborRoute(orders: Order[]) {
-  const remaining = [...orders].sort(compareByPriorityAndWindow);
-  const route: Order[] = [];
-  let current = DEFAULT_BRICK_YARD_ADDRESS;
-
-  while (remaining.length > 0) {
-    const next = remaining
-      .map((order) => ({ order, distance: roughDistance(current, order.address) }))
-      .sort((a, b) => a.distance - b.distance || compareByPriorityAndWindow(a.order, b.order))[0].order;
-    route.push(next);
-    current = next.address;
-    remaining.splice(remaining.findIndex((order) => order.id === next.id), 1);
-  }
-
-  return route;
-}
-
-function permutations<T>(items: T[]) {
-  if (items.length <= 1) return [items];
-  const result: T[][] = [];
-  items.forEach((item, index) => {
-    const rest = [...items.slice(0, index), ...items.slice(index + 1)];
-    permutations(rest).forEach((perm) => result.push([item, ...perm]));
-  });
-  return result;
-}
-
-function scoreRoute(
-  load: {
-    driverId: string;
-    driverName: string;
-    vehicleName: string;
-    finalLoad: number;
-    capacity: number;
-  },
-  route: Order[],
-  matrix: Map<string, RouteMatrixEntry>,
-): WholeRouteResult {
-  let elapsedMinutes = 0;
-  let lateMinutes = 0;
-  const etas: WholeRouteResult["etas"] = [];
-  let totalDistanceMeters = 0;
-
-  route.forEach((order, index) => {
-    const from = index === 0 ? DEFAULT_BRICK_YARD_ADDRESS : route[index - 1].address;
-    const leg = getMatrixLeg(matrix, from, order.address);
-    const driveMinutes = Math.round(leg.duration / 60);
-    totalDistanceMeters += leg.distance;
-    elapsedMinutes += driveMinutes;
-
-    const arrivalMinutes = ROUTE_START_HOUR * 60 + elapsedMinutes;
-    const window = parseTimeWindow(order);
-    const late = Math.max(0, arrivalMinutes - window.endMinutes);
-    const priorityPenalty = priorityRank[order.priority || "P3"] || 3;
-    lateMinutes += late * (5 - Math.min(priorityPenalty, 4));
-
-    etas.push({
-      orderId: order.id,
-      label: orderLabel(order),
-      eta: formatClock(arrivalMinutes),
-      lateMinutes: late,
-    });
-
-    elapsedMinutes += STOP_MINUTES;
-  });
-
-  const lastAddress = route[route.length - 1]?.address || DEFAULT_BRICK_YARD_ADDRESS;
-  const returnLeg = getMatrixLeg(matrix, lastAddress, DEFAULT_BRICK_YARD_ADDRESS);
-  elapsedMinutes += Math.round(returnLeg.duration / 60);
-  totalDistanceMeters += returnLeg.distance;
-
-  const totalDistanceKm = totalDistanceMeters / 1000;
-  const score = elapsedMinutes + totalDistanceKm * 0.5 + lateMinutes * 20;
-
-  return {
-    driverId: load.driverId,
-    driverName: load.driverName,
-    vehicleName: load.vehicleName,
-    load: load.finalLoad,
-    capacity: load.capacity,
-    orderIds: route.map((order) => order.id),
-    orderLabels: route.map(orderLabel),
-    totalMinutes: elapsedMinutes,
-    totalDistanceKm,
-    lateMinutes,
-    score,
-    etas,
-  };
-}
-
-function buildPairPenalties(
-  orders: Order[],
-  matrix: Map<string, RouteMatrixEntry>,
-) {
-  const penalties: Array<{ orderA: string; orderB: string; penaltyMinutes: number }> = [];
-
-  for (let i = 0; i < orders.length; i++) {
-    for (let j = i + 1; j < orders.length; j++) {
-      const first = orders[i];
-      const second = orders[j];
-      const bestLate = Math.min(
-        estimatePairLateMinutes(first, second, matrix),
-        estimatePairLateMinutes(second, first, matrix),
-      );
-
-      if (bestLate > 0) {
-        penalties.push({
-          orderA: first.id,
-          orderB: second.id,
-          penaltyMinutes: bestLate,
-        });
-      }
-    }
-  }
-
-  return penalties;
-}
-
-function estimatePairLateMinutes(
-  first: Order,
-  second: Order,
-  matrix: Map<string, RouteMatrixEntry>,
-) {
-  let elapsedMinutes = Math.round(getMatrixLeg(matrix, DEFAULT_BRICK_YARD_ADDRESS, first.address).duration / 60);
-  const firstArrival = ROUTE_START_HOUR * 60 + elapsedMinutes;
-  const firstWindow = parseTimeWindow(first);
-  let late = Math.max(0, firstArrival - firstWindow.endMinutes);
-
-  elapsedMinutes += STOP_MINUTES;
-  elapsedMinutes += Math.round(getMatrixLeg(matrix, first.address, second.address).duration / 60);
-  const secondArrival = ROUTE_START_HOUR * 60 + elapsedMinutes;
-  const secondWindow = parseTimeWindow(second);
-  late += Math.max(0, secondArrival - secondWindow.endMinutes);
-
-  return late;
-}
 
 function parseTimeWindow(order: Order) {
   const raw = `${order.time_window === "custom" ? order.time_window_custom || "" : order.time_window} ${order.customer_notes || ""}`.toLowerCase();

@@ -15,22 +15,40 @@ export type BrickOptimizerOrder = {
   label: string;
   pallets: number;
   priority: string;
-  canSplit: boolean;
   startMinutes?: number;
   endMinutes?: number;
   must?: boolean;
-  originMinutes?: number;
 };
 
 export type BrickOptimizerInput = {
   vehicles: BrickOptimizerVehicle[];
   orders: BrickOptimizerOrder[];
-  pairPenalties?: Array<{
-    orderA: string;
-    orderB: string;
-    penaltyMinutes: number;
-  }>;
+  durationMatrix: number[][];   // (1+orders) x (1+orders), in minutes, index 0 = depot
+  distanceMatrix: number[][];   // (1+orders) x (1+orders), in km
+  serviceMinutes?: number;
+  routeStartHour?: number;
   timeLimitSeconds?: number;
+};
+
+export type BrickOptimizerStop = {
+  orderId: string;
+  label: string;
+  pallets: number;
+  priority: string;
+  etaMinutes: number;
+  lateMinutes: number;
+};
+
+export type BrickOptimizerRoute = {
+  driverId: string;
+  driverName: string;
+  vehicleName: string;
+  load: number;
+  capacity: number;
+  stops: BrickOptimizerStop[];
+  totalMinutes: number;
+  totalDistanceKm: number;
+  lateMinutes: number;
 };
 
 type OptimizerResult = {
@@ -38,27 +56,8 @@ type OptimizerResult = {
   error?: string;
   status?: string;
   message?: string;
-  assignments?: Array<{
-    orderId: string;
-    orderLabel: string;
-    driverId: string;
-    driverName: string;
-    vehicleName: string;
-    pallets: number;
-    orderPallets: number;
-    priority: string;
-    split: boolean;
-  }>;
-  loads?: Array<{
-    driverId: string;
-    driverName: string;
-    vehicleName: string;
-    currentLoad: number;
-    addedLoad: number;
-    finalLoad: number;
-    capacity: number;
-  }>;
-  unplanned?: Array<BrickOptimizerOrder & { reason?: string }>;
+  routes?: BrickOptimizerRoute[];
+  unplanned?: Array<{ id: string; label: string; pallets: number; reason?: string }>;
 };
 
 export const optimizeBrickSchedule = createServerFn({ method: "POST" })

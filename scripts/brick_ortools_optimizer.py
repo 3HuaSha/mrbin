@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
-"""OR-Tools helper for brick dispatch load assignment.
+"""OR-Tools VRP solver for brick dispatch scheduling.
+
+Uses the Vehicle Routing Problem solver to simultaneously assign orders
+to vehicles AND determine optimal delivery routes, using real distance/
+duration matrices.
 
 Input JSON is read from stdin:
 {
   "vehicles": [{"driverId": "...", "driverName": "...", "vehicleName": "...", "capacity": 28, "currentLoad": 0}],
-  "orders": [{"id": "...", "label": "...", "pallets": 9, "priority": "P2", "canSplit": true, "endMinutes": 720}],
-  "pairPenalties": [{"orderA": "...", "orderB": "...", "penaltyMinutes": 30}]
+  "orders": [{"id": "...", "label": "...", "pallets": 9, "priority": "P2", "startMinutes": 480, "endMinutes": 720, "must": false}],
+  "durationMatrix": [[0, 35, ...], [30, 0, ...], ...],   // (1+orders) x (1+orders), in minutes
+  "distanceMatrix": [[0, 35.2, ...], [30.5, 0, ...], ...], // (1+orders) x (1+orders), in km
+  "serviceMinutes": 15,
+  "routeStartHour": 8,
+  "timeLimitSeconds": 30
 }
 
+Index 0 = depot (brick yard), indices 1..N = orders.
 Output JSON is written to stdout.
 """
 
@@ -15,153 +24,243 @@ import json
 import sys
 
 try:
-    from ortools.sat.python import cp_model
-except Exception as exc:  # pragma: no cover - returned to caller
+    from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+except Exception as exc:
     print(json.dumps({"success": False, "error": f"OR-Tools import failed: {exc}"}))
     sys.exit(0)
 
-
-PRIORITY_WEIGHT = {
-    "P1": 10000,
-    "P2": 4000,
-    "P3": 1200,
-    "P4": 300,
+# Drop penalty by priority — higher = more costly to skip
+PRIORITY_PENALTY = {
+    "P1": 500000,
+    "P2": 200000,
+    "P3": 80000,
+    "P4": 20000,
 }
+MUST_PENALTY = 10000000
 
 
 def main() -> None:
     payload = json.load(sys.stdin)
     vehicles = payload.get("vehicles", [])
     orders = payload.get("orders", [])
-    pair_penalties = payload.get("pairPenalties", [])
+    duration_matrix = payload.get("durationMatrix", [])
+    distance_matrix = payload.get("distanceMatrix", [])
+    service_minutes = int(payload.get("serviceMinutes", 15))
+    route_start_hour = int(payload.get("routeStartHour", 8))
+    time_limit = float(payload.get("timeLimitSeconds", 30))
 
+    # Filter vehicles with remaining capacity and orders with pallets
     vehicles = [v for v in vehicles if int(v.get("capacity", 28)) > int(v.get("currentLoad", 0))]
     orders = [o for o in orders if int(o.get("pallets") or 0) > 0]
 
     if not vehicles:
-        print(json.dumps({"success": True, "assignments": [], "unplanned": orders, "message": "No available FLAT capacity"}))
+        print(json.dumps({"success": True, "routes": [], "unplanned": orders, "message": "No available FLAT capacity"}))
+        return
+    if not orders:
+        print(json.dumps({"success": True, "routes": [], "unplanned": []}))
+        return
+    if not duration_matrix or len(duration_matrix) < 2:
+        print(json.dumps({"success": False, "error": "Duration matrix is missing or too small"}))
         return
 
-    model = cp_model.CpModel()
-    vehicle_remaining = [
-        int(v.get("capacity", 28)) - int(v.get("currentLoad", 0))
-        for v in vehicles
-    ]
+    num_orders = len(orders)
+    num_nodes = 1 + num_orders  # depot (0) + orders (1..N)
+    num_vehicles = len(vehicles)
 
-    alloc = {}
-    served = {}
-    used_vehicle = {}
+    # Validate matrix dimensions
+    if len(duration_matrix) < num_nodes or any(len(row) < num_nodes for row in duration_matrix[:num_nodes]):
+        print(json.dumps({"success": False, "error": f"Duration matrix size mismatch: expected {num_nodes}x{num_nodes}"}))
+        return
 
+    # ---- Build routing model ----
+    manager = pywrapcp.RoutingIndexManager(num_nodes, num_vehicles, 0)
+    routing = pywrapcp.RoutingModel(manager)
+
+    # Transit callback: service time at from_node + travel to to_node
+    # CumVar(to_node) = CumVar(from_node) + service(from_node) + travel(from, to)
+    # This means CumVar represents arrival time at each node.
+    def transit_callback(from_index, to_index):
+        from_node = manager.IndexToNode(from_index)
+        to_node = manager.IndexToNode(to_index)
+        if from_node == to_node:
+            return 0
+        travel = int(duration_matrix[from_node][to_node])
+        # Add service time at from_node (time spent there before departing)
+        if from_node > 0:
+            return service_minutes + travel
+        return travel
+
+    transit_callback_index = routing.RegisterTransitCallback(transit_callback)
+    routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+
+    # ---- Capacity constraint (pallets) ----
+    def demand_callback(from_index):
+        from_node = manager.IndexToNode(from_index)
+        if from_node == 0:
+            return 0
+        return int(orders[from_node - 1].get("pallets", 0))
+
+    demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
+    remaining = [int(v.get("capacity", 28)) - int(v.get("currentLoad", 0)) for v in vehicles]
+    routing.AddDimensionWithVehicleCapacity(
+        demand_callback_index,
+        0,  # no slack
+        remaining,
+        True,  # start cumul at zero
+        "Capacity",
+    )
+
+    # ---- Time dimension ----
+    routing.AddDimension(
+        transit_callback_index,
+        30,  # max wait time before time window opens
+        24 * 60,  # max route duration
+        False,  # don't force start cumul to zero
+        "Time",
+    )
+    time_dimension = routing.GetDimensionOrDie("Time")
+
+    route_start = route_start_hour * 60  # e.g. 480 for 8:00 AM
+
+    # Depot time windows for all vehicles
+    for v_id in range(num_vehicles):
+        time_dimension.CumulVar(routing.Start(v_id)).SetRange(route_start, route_start + 60)
+        time_dimension.CumulVar(routing.End(v_id)).SetRange(route_start, 22 * 60)
+
+    # Order time windows (soft: allow up to 90 min late with minimization)
     for oi, order in enumerate(orders):
-        pallets = int(order["pallets"])
-        can_split = bool(order.get("canSplit", True))
-        served[oi] = model.NewBoolVar(f"served_{oi}")
+        node = oi + 1
+        index = manager.NodeToIndex(node)
+        start_min = int(order.get("startMinutes") or route_start)
+        end_min = int(order.get("endMinutes") or 17 * 60)
+        if start_min < route_start:
+            start_min = route_start
+        # Hard upper bound with slack for soft time windows
+        hard_end = end_min + 90
+        time_dimension.CumulVar(index).SetRange(start_min, hard_end)
 
-        for vi, remaining in enumerate(vehicle_remaining):
-            alloc[(oi, vi)] = model.NewIntVar(0, min(pallets, remaining), f"alloc_{oi}_{vi}")
-            used_vehicle[(oi, vi)] = model.NewBoolVar(f"used_{oi}_{vi}")
-            model.Add(alloc[(oi, vi)] > 0).OnlyEnforceIf(used_vehicle[(oi, vi)])
-            model.Add(alloc[(oi, vi)] == 0).OnlyEnforceIf(used_vehicle[(oi, vi)].Not())
+    # Minimize arrival times at each order (reduces lateness naturally)
+    for oi in range(num_orders):
+        node = oi + 1
+        index = manager.NodeToIndex(node)
+        for v_id in range(num_vehicles):
+            routing.AddVariableMinimizedByFinalizer(
+                time_dimension.CumulVar(index)
+            )
 
-        model.Add(sum(alloc[(oi, vi)] for vi in range(len(vehicles))) == pallets).OnlyEnforceIf(served[oi])
-        model.Add(sum(alloc[(oi, vi)] for vi in range(len(vehicles))) == 0).OnlyEnforceIf(served[oi].Not())
-
-        if not can_split:
-            model.Add(sum(used_vehicle[(oi, vi)] for vi in range(len(vehicles))) <= 1)
-
-    for vi, remaining in enumerate(vehicle_remaining):
-        model.Add(sum(alloc[(oi, vi)] for oi in range(len(orders))) <= remaining)
-
-    objective_terms = []
+    # ---- Drop penalties (disjunctions for optional orders) ----
     for oi, order in enumerate(orders):
-        priority = order.get("priority") or "P3"
-        weight = PRIORITY_WEIGHT.get(priority, PRIORITY_WEIGHT["P3"])
-        pallets = int(order["pallets"])
-        origin_minutes = int(order.get("originMinutes") or 0)
-        end_minutes = int(order.get("endMinutes") or 17 * 60)
-        earliest_late = max(0, (8 * 60) + origin_minutes - end_minutes)
-        time_weight = max(1, 5 - min({"P1": 1, "P2": 2, "P3": 3, "P4": 4}.get(priority, 3), 4))
-        objective_terms.append(served[oi] * (weight + pallets * 10))
-        if earliest_late:
-            objective_terms.append(served[oi] * -(earliest_late * time_weight * 40))
+        node = oi + 1
+        if order.get("must"):
+            penalty = MUST_PENALTY
         else:
-            urgency_bonus = max(0, (17 * 60) - end_minutes)
-            objective_terms.append(served[oi] * (urgency_bonus * time_weight))
-        objective_terms.append(sum(used_vehicle[(oi, vi)] for vi in range(len(vehicles))) * -25)
+            priority = order.get("priority") or "P3"
+            penalty = PRIORITY_PENALTY.get(priority, 80000)
+        routing.AddDisjunction([manager.NodeToIndex(node)], penalty)
 
-    order_index_by_id = {order["id"]: oi for oi, order in enumerate(orders)}
-    for pi, penalty in enumerate(pair_penalties):
-        oi = order_index_by_id.get(penalty.get("orderA"))
-        oj = order_index_by_id.get(penalty.get("orderB"))
-        penalty_minutes = int(penalty.get("penaltyMinutes") or 0)
-        if oi is None or oj is None or oi == oj or penalty_minutes <= 0:
-            continue
-        priority_a = orders[oi].get("priority") or "P3"
-        priority_b = orders[oj].get("priority") or "P3"
-        pair_weight = max(
-            1,
-            5 - min(
-                {"P1": 1, "P2": 2, "P3": 3, "P4": 4}.get(priority_a, 3),
-                {"P1": 1, "P2": 2, "P3": 3, "P4": 4}.get(priority_b, 3),
-                4,
-            ),
-        )
-        for vi in range(len(vehicles)):
-            both = model.NewBoolVar(f"pair_{pi}_{vi}")
-            model.AddBoolAnd([used_vehicle[(oi, vi)], used_vehicle[(oj, vi)]]).OnlyEnforceIf(both)
-            model.AddBoolOr([used_vehicle[(oi, vi)].Not(), used_vehicle[(oj, vi)].Not()]).OnlyEnforceIf(both.Not())
-            objective_terms.append(both * -(penalty_minutes * pair_weight * 60))
+    # ---- Solve ----
+    search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+    search_parameters.first_solution_strategy = (
+        routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    )
+    search_parameters.local_search_metaheuristic = (
+        routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+    )
+    search_parameters.time_limit.seconds = int(time_limit)
+    search_parameters.num_search_workers = 8
 
-    model.Maximize(sum(objective_terms))
+    solution = routing.SolveWithParameters(search_parameters)
 
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = float(payload.get("timeLimitSeconds", 5))
-    solver.parameters.num_search_workers = 8
-    status = solver.Solve(model)
-
-    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        print(json.dumps({"success": False, "error": "No feasible solution"}))
+    if solution is None:
+        print(json.dumps({"success": False, "error": "No feasible solution found"}))
         return
 
-    assignments = []
-    unplanned = []
-    for oi, order in enumerate(orders):
-        if solver.Value(served[oi]) == 0:
-            unplanned.append({**order, "reason": "FLAT vehicles do not have enough remaining capacity"})
-            continue
-        for vi, vehicle in enumerate(vehicles):
-            amount = solver.Value(alloc[(oi, vi)])
-            if amount > 0:
-                assignments.append({
+    # ---- Extract results ----
+    routes = []
+    served_nodes = set()
+
+    for v_id in range(num_vehicles):
+        vehicle = vehicles[v_id]
+        index = routing.Start(v_id)
+        stops = []
+        total_distance_km = 0.0
+        total_late_minutes = 0
+        current_load = int(vehicle.get("currentLoad", 0))
+        prev_node = None
+
+        while not routing.IsEnd(index):
+            node = manager.IndexToNode(index)
+
+            # Accumulate distance for this leg
+            if prev_node is not None and distance_matrix:
+                if prev_node < num_nodes and node < num_nodes:
+                    total_distance_km += float(distance_matrix[prev_node][node])
+
+            if node > 0:  # not depot
+                order = orders[node - 1]
+                served_nodes.add(node)
+
+                # Read arrival time from time dimension
+                arrival = solution.Value(time_dimension.CumulVar(index))
+                end_min = int(order.get("endMinutes") or 17 * 60)
+                late = max(0, arrival - end_min)
+                total_late_minutes += late
+
+                pallets = int(order.get("pallets", 0))
+                current_load += pallets
+
+                stops.append({
                     "orderId": order["id"],
-                    "orderLabel": order.get("label") or order["id"],
-                    "driverId": vehicle["driverId"],
-                    "driverName": vehicle.get("driverName") or "",
-                    "vehicleName": vehicle.get("vehicleName") or "",
-                    "pallets": amount,
-                    "orderPallets": int(order["pallets"]),
+                    "label": order.get("label") or order["id"],
+                    "pallets": pallets,
                     "priority": order.get("priority") or "P3",
-                    "split": amount != int(order["pallets"]),
+                    "etaMinutes": arrival,
+                    "lateMinutes": late,
                 })
 
-    loads = []
-    for vi, vehicle in enumerate(vehicles):
-        added = sum(solver.Value(alloc[(oi, vi)]) for oi in range(len(orders)))
-        loads.append({
+            prev_node = node
+            index = solution.Value(routing.NextVar(index))
+
+        # Return-to-depot distance
+        end_node = manager.IndexToNode(index)  # should be 0 (depot)
+        if prev_node is not None and distance_matrix:
+            if prev_node < num_nodes and end_node < num_nodes:
+                total_distance_km += float(distance_matrix[prev_node][end_node])
+
+        # Total route time from time dimension
+        start_time = solution.Value(time_dimension.CumulVar(routing.Start(v_id)))
+        end_time = solution.Value(time_dimension.CumulVar(routing.End(v_id)))
+        total_minutes = end_time - start_time
+
+        capacity = int(vehicle.get("capacity", 28))
+        routes.append({
             "driverId": vehicle["driverId"],
             "driverName": vehicle.get("driverName") or "",
             "vehicleName": vehicle.get("vehicleName") or "",
-            "currentLoad": int(vehicle.get("currentLoad", 0)),
-            "addedLoad": added,
-            "finalLoad": int(vehicle.get("currentLoad", 0)) + added,
-            "capacity": int(vehicle.get("capacity", 28)),
+            "load": current_load,
+            "capacity": capacity,
+            "stops": stops,
+            "totalMinutes": total_minutes,
+            "totalDistanceKm": round(total_distance_km, 1),
+            "lateMinutes": total_late_minutes,
         })
+
+    # Unplanned orders (dropped by solver)
+    unplanned = []
+    for oi, order in enumerate(orders):
+        node = oi + 1
+        if node not in served_nodes:
+            unplanned.append({
+                "id": order["id"],
+                "label": order.get("label") or order["id"],
+                "pallets": int(order.get("pallets", 0)),
+                "reason": "Could not fit in any vehicle route",
+            })
 
     print(json.dumps({
         "success": True,
-        "status": "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE",
-        "assignments": assignments,
-        "loads": loads,
+        "status": "OPTIMAL",
+        "routes": routes,
         "unplanned": unplanned,
     }))
 

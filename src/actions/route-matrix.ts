@@ -125,46 +125,44 @@ async function fetchGoogleMatrixForPairs(pairs: Array<{ from: string; to: string
   const key = process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
   if (!key || pairs.length === 0) return [];
 
-  const byOrigin = new Map<string, string[]>();
+  // Collect all unique addresses from the pairs
+  const addressSet = new Set<string>();
   pairs.forEach((pair) => {
-    byOrigin.set(pair.from, [...(byOrigin.get(pair.from) || []), pair.to]);
+    addressSet.add(pair.from);
+    addressSet.add(pair.to);
+  });
+  const allAddresses = [...addressSet];
+
+  // Single API call: all addresses as both origins and destinations
+  const response = await fetch("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": key,
+      "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status",
+    },
+    body: JSON.stringify({
+      origins: allAddresses.map((address) => ({ waypoint: { address } })),
+      destinations: allAddresses.map((address) => ({ waypoint: { address } })),
+      travelMode: "DRIVE",
+      routingPreference: "TRAFFIC_UNAWARE",
+    }),
   });
 
-  const entries: RouteMatrixEntry[] = [];
+  if (!response.ok) return [];
+  const data = await response.json();
+  const rows = Array.isArray(data) ? data : [];
 
-  for (const [origin, destinations] of byOrigin.entries()) {
-    const uniqueDestinations = [...new Set(destinations)];
-    const response = await fetch("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": key,
-        "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status",
-      },
-      body: JSON.stringify({
-        origins: [{ waypoint: { address: origin } }],
-        destinations: uniqueDestinations.map((address) => ({ waypoint: { address } })),
-        travelMode: "DRIVE",
-        routingPreference: "TRAFFIC_UNAWARE",
-      }),
-    });
-
-    if (!response.ok) continue;
-    const data = await response.json();
-    const rows = Array.isArray(data) ? data : [];
-
-    rows
-      .filter((row) => row.status?.code !== 3)
-      .map((row) => ({
-        from: origin,
-        to: uniqueDestinations[row.destinationIndex],
-        duration: parseDuration(row.duration),
-        distance: row.distanceMeters || 0,
-        source: "google" as const,
-      }))
-      .filter((entry) => entry.duration > 0)
-      .forEach((entry) => entries.push(entry));
-  }
+  const entries: RouteMatrixEntry[] = rows
+    .filter((row) => row.status?.code !== 3)
+    .map((row) => ({
+      from: allAddresses[row.originIndex],
+      to: allAddresses[row.destinationIndex],
+      duration: parseDuration(row.duration),
+      distance: row.distanceMeters || 0,
+      source: "google" as const,
+    }))
+    .filter((entry) => entry.duration > 0 && entry.from !== entry.to);
 
   return entries;
 }
