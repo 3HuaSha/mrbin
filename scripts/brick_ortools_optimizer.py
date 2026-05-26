@@ -55,7 +55,11 @@ PICKUP_ORDER_PENALTY = 60000
 
 
 def main() -> None:
-    payload = json.load(sys.stdin)
+    try:
+        payload = json.load(sys.stdin)
+    except Exception as exc:
+        print(json.dumps({"success": False, "error": f"JSON parse error: {exc}"}))
+        return
     vehicles = payload.get("vehicles", [])
     delivery_orders = payload.get("deliveryOrders", [])
     pickup_orders = payload.get("pickupOrders", [])
@@ -234,7 +238,8 @@ def main() -> None:
         solver.Add(time_dim.CumulVar(pickup_idx) <= time_dim.CumulVar(delivery_idx))
 
     # ---- Drop penalties ----
-    # Delivery orders: drop both nodes together
+    # For P&D pairs, each node must be in its OWN disjunction with the same penalty.
+    # OR-Tools will drop both together when they're P&D constrained.
     for oi, order in enumerate(delivery_orders):
         pickup_node = 2 * oi + 1
         delivery_node = 2 * oi + 2
@@ -243,21 +248,16 @@ def main() -> None:
         else:
             priority = order.get("priority") or "P3"
             penalty = PRIORITY_PENALTY.get(priority, 80000)
-        routing.AddDisjunction(
-            [manager.NodeToIndex(pickup_node), manager.NodeToIndex(delivery_node)],
-            penalty,
-        )
+        routing.AddDisjunction([manager.NodeToIndex(pickup_node)], penalty)
+        routing.AddDisjunction([manager.NodeToIndex(delivery_node)], penalty)
 
-    # Pickup orders: drop both nodes together
     for pi, porder in enumerate(pickup_orders):
         pickup_node = 2 * num_deliveries + 2 * pi + 1
         delivery_node = 2 * num_deliveries + 2 * pi + 2
         priority = porder.get("priority") or "P3"
         penalty = PRIORITY_PENALTY.get(priority, PICKUP_ORDER_PENALTY)
-        routing.AddDisjunction(
-            [manager.NodeToIndex(pickup_node), manager.NodeToIndex(delivery_node)],
-            penalty,
-        )
+        routing.AddDisjunction([manager.NodeToIndex(pickup_node)], penalty)
+        routing.AddDisjunction([manager.NodeToIndex(delivery_node)], penalty)
 
     # ---- Solve ----
     search_params = pywrapcp.DefaultRoutingSearchParameters()
@@ -421,4 +421,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(json.dumps({"success": False, "error": f"Unhandled exception: {exc}"}))
