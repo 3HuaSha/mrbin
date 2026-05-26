@@ -137,21 +137,24 @@ export function BrickScheduleAssistant({
     })),
     orders: unassigned
       .filter((order) => (order.pallet_count || 0) > 0)
-      .map((order) => ({
-        id: order.id,
-        label: orderLabel(order),
-        pallets: order.pallet_count || 0,
-        priority: order.priority || "P3",
-        canSplit: order.can_split !== false,
-      })),
+      .map((order) => {
+        const window = parseTimeWindow(order);
+        return {
+          id: order.id,
+          label: orderLabel(order),
+          pallets: order.pallet_count || 0,
+          priority: order.priority || "P3",
+          canSplit: order.can_split !== false,
+          startMinutes: window.startMinutes,
+          endMinutes: window.endMinutes,
+          must: window.must,
+        };
+      }),
     timeLimitSeconds: 5,
   }), [flatDrivers, driverLoads, unassigned]);
 
   const wholeRoute = useMutation({
     mutationFn: async (): Promise<WholeRouteResponse> => {
-      const optimized = await optimizeBrickSchedule({ data: optimizerInput });
-      if (!optimized.success) return { success: false as const, error: optimized.error || "OR-Tools 优化失败" };
-
       const matrixAddresses = [
         DEFAULT_BRICK_YARD_ADDRESS,
         ...optimizerInput.orders
@@ -160,6 +163,27 @@ export function BrickScheduleAssistant({
       ];
       const matrix = await getCachedRouteMatrix({ data: { addresses: matrixAddresses } });
       const matrixMap = makeMatrixMap(matrix.entries);
+      const ordersById = new Map(unassigned.map((order) => [order.id, order]));
+      const enrichedInput = {
+        ...optimizerInput,
+        orders: optimizerInput.orders.map((inputOrder) => {
+          const order = ordersById.get(inputOrder.id);
+          const originLeg = order ? getMatrixLeg(matrixMap, DEFAULT_BRICK_YARD_ADDRESS, order.address) : null;
+          return {
+            ...inputOrder,
+            originMinutes: originLeg ? Math.round(originLeg.duration / 60) : 0,
+          };
+        }),
+        pairPenalties: buildPairPenalties(
+          optimizerInput.orders
+            .map((inputOrder) => ordersById.get(inputOrder.id))
+            .filter(Boolean) as Order[],
+          matrixMap,
+        ),
+      };
+
+      const optimized = await optimizeBrickSchedule({ data: enrichedInput });
+      if (!optimized.success) return { success: false as const, error: optimized.error || "OR-Tools 优化失败" };
 
       const routes: WholeRouteResult[] = [];
       for (const load of optimized.loads || []) {
@@ -534,6 +558,53 @@ function scoreRoute(
     score,
     etas,
   };
+}
+
+function buildPairPenalties(
+  orders: Order[],
+  matrix: Map<string, RouteMatrixEntry>,
+) {
+  const penalties: Array<{ orderA: string; orderB: string; penaltyMinutes: number }> = [];
+
+  for (let i = 0; i < orders.length; i++) {
+    for (let j = i + 1; j < orders.length; j++) {
+      const first = orders[i];
+      const second = orders[j];
+      const bestLate = Math.min(
+        estimatePairLateMinutes(first, second, matrix),
+        estimatePairLateMinutes(second, first, matrix),
+      );
+
+      if (bestLate > 0) {
+        penalties.push({
+          orderA: first.id,
+          orderB: second.id,
+          penaltyMinutes: bestLate,
+        });
+      }
+    }
+  }
+
+  return penalties;
+}
+
+function estimatePairLateMinutes(
+  first: Order,
+  second: Order,
+  matrix: Map<string, RouteMatrixEntry>,
+) {
+  let elapsedMinutes = Math.round(getMatrixLeg(matrix, DEFAULT_BRICK_YARD_ADDRESS, first.address).duration / 60);
+  const firstArrival = ROUTE_START_HOUR * 60 + elapsedMinutes;
+  const firstWindow = parseTimeWindow(first);
+  let late = Math.max(0, firstArrival - firstWindow.endMinutes);
+
+  elapsedMinutes += STOP_MINUTES;
+  elapsedMinutes += Math.round(getMatrixLeg(matrix, first.address, second.address).duration / 60);
+  const secondArrival = ROUTE_START_HOUR * 60 + elapsedMinutes;
+  const secondWindow = parseTimeWindow(second);
+  late += Math.max(0, secondArrival - secondWindow.endMinutes);
+
+  return late;
 }
 
 function parseTimeWindow(order: Order) {

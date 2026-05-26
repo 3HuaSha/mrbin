@@ -16,11 +16,20 @@ export type BrickOptimizerOrder = {
   pallets: number;
   priority: string;
   canSplit: boolean;
+  startMinutes?: number;
+  endMinutes?: number;
+  must?: boolean;
+  originMinutes?: number;
 };
 
 export type BrickOptimizerInput = {
   vehicles: BrickOptimizerVehicle[];
   orders: BrickOptimizerOrder[];
+  pairPenalties?: Array<{
+    orderA: string;
+    orderB: string;
+    penaltyMinutes: number;
+  }>;
   timeLimitSeconds?: number;
 };
 

@@ -4,7 +4,8 @@
 Input JSON is read from stdin:
 {
   "vehicles": [{"driverId": "...", "driverName": "...", "vehicleName": "...", "capacity": 28, "currentLoad": 0}],
-  "orders": [{"id": "...", "label": "...", "pallets": 9, "priority": "P2", "canSplit": true}]
+  "orders": [{"id": "...", "label": "...", "pallets": 9, "priority": "P2", "canSplit": true, "endMinutes": 720}],
+  "pairPenalties": [{"orderA": "...", "orderB": "...", "penaltyMinutes": 30}]
 }
 
 Output JSON is written to stdout.
@@ -32,6 +33,7 @@ def main() -> None:
     payload = json.load(sys.stdin)
     vehicles = payload.get("vehicles", [])
     orders = payload.get("orders", [])
+    pair_penalties = payload.get("pairPenalties", [])
 
     vehicles = [v for v in vehicles if int(v.get("capacity", 28)) > int(v.get("currentLoad", 0))]
     orders = [o for o in orders if int(o.get("pallets") or 0) > 0]
@@ -75,8 +77,40 @@ def main() -> None:
         priority = order.get("priority") or "P3"
         weight = PRIORITY_WEIGHT.get(priority, PRIORITY_WEIGHT["P3"])
         pallets = int(order["pallets"])
+        origin_minutes = int(order.get("originMinutes") or 0)
+        end_minutes = int(order.get("endMinutes") or 17 * 60)
+        earliest_late = max(0, (8 * 60) + origin_minutes - end_minutes)
+        time_weight = max(1, 5 - min({"P1": 1, "P2": 2, "P3": 3, "P4": 4}.get(priority, 3), 4))
         objective_terms.append(served[oi] * (weight + pallets * 10))
+        if earliest_late:
+            objective_terms.append(served[oi] * -(earliest_late * time_weight * 40))
+        else:
+            urgency_bonus = max(0, (17 * 60) - end_minutes)
+            objective_terms.append(served[oi] * (urgency_bonus * time_weight))
         objective_terms.append(sum(used_vehicle[(oi, vi)] for vi in range(len(vehicles))) * -25)
+
+    order_index_by_id = {order["id"]: oi for oi, order in enumerate(orders)}
+    for pi, penalty in enumerate(pair_penalties):
+        oi = order_index_by_id.get(penalty.get("orderA"))
+        oj = order_index_by_id.get(penalty.get("orderB"))
+        penalty_minutes = int(penalty.get("penaltyMinutes") or 0)
+        if oi is None or oj is None or oi == oj or penalty_minutes <= 0:
+            continue
+        priority_a = orders[oi].get("priority") or "P3"
+        priority_b = orders[oj].get("priority") or "P3"
+        pair_weight = max(
+            1,
+            5 - min(
+                {"P1": 1, "P2": 2, "P3": 3, "P4": 4}.get(priority_a, 3),
+                {"P1": 1, "P2": 2, "P3": 3, "P4": 4}.get(priority_b, 3),
+                4,
+            ),
+        )
+        for vi in range(len(vehicles)):
+            both = model.NewBoolVar(f"pair_{pi}_{vi}")
+            model.AddBoolAnd([used_vehicle[(oi, vi)], used_vehicle[(oj, vi)]]).OnlyEnforceIf(both)
+            model.AddBoolOr([used_vehicle[(oi, vi)].Not(), used_vehicle[(oj, vi)].Not()]).OnlyEnforceIf(both.Not())
+            objective_terms.append(both * -(penalty_minutes * pair_weight * 60))
 
     model.Maximize(sum(objective_terms))
 
