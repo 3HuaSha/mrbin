@@ -63,9 +63,11 @@ export function FragmentRow({
   // 砖块订单类型标签
   const brickOrderTypeLabels: Record<string, string> = {
     'pickup_from_factory': '🏭 从砖厂取砖',
-    'delivery_to_customer': '🚚 送砖给客户'
+    'delivery_to_customer': '🚚 送砖给客户',
+    'factory_to_customer': '🏭 砖厂直送客户'
   };
   const brickOrderTypeLabel = order.brick_order_type ? brickOrderTypeLabels[order.brick_order_type] || order.brick_order_type : '—';
+  const startsAtFactory = order.brick_order_type === 'pickup_from_factory' || order.brick_order_type === 'factory_to_customer';
 
   const rowBgClass = order.status === "done"
     ? "bg-green-100 hover:bg-green-200 text-green-900"
@@ -83,6 +85,16 @@ export function FragmentRow({
         </td>
         <td className="px-3 py-2 font-mono text-xs">
           {order.order_number || (order.type === "pickup" ? <span className="text-muted-foreground italic">待关联</span> : "—")}
+          {order.pallet_count && (
+            <span className="ml-1 inline-flex rounded bg-orange-100 px-1 py-0.5 text-[9px] font-semibold text-orange-800">
+              {order.pallet_count} PLT
+            </span>
+          )}
+          {order.priority && (
+            <span className="ml-1 inline-flex rounded bg-blue-100 px-1 py-0.5 text-[9px] font-semibold text-blue-800">
+              {order.priority}
+            </span>
+          )}
           {order.type === "swap" && !order.linked_order_id && (
             <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-amber-100 text-amber-700 text-[9px] px-1 py-0.5 font-normal">
               未关联
@@ -111,7 +123,7 @@ export function FragmentRow({
               <Badge className="text-xs">{brickOrderTypeLabel}</Badge>
             </td>
             <td className="px-3 py-2 text-xs text-muted-foreground">
-              {order.brick_order_type === 'pickup_from_factory' ? '砖厂' : '场地'}
+              {startsAtFactory ? '砖厂' : '场地'}
             </td>
             <td className="px-3 py-2 text-xs text-muted-foreground">
               {order.brick_order_type === 'pickup_from_factory' ? '场地' : '客户'}

@@ -38,6 +38,16 @@ export function OrderCardDisplay({ order, binNumber, ghost }: OrderCardDisplayPr
               {order.bin_size}yd
             </span>
           )}
+          {order.pallet_count && (
+            <span className="text-[10px] bg-orange-100 text-orange-800 px-1 rounded font-semibold">
+              {order.pallet_count} PLT
+            </span>
+          )}
+          {order.priority && (
+            <span className="text-[10px] bg-blue-100 text-blue-800 px-1 rounded font-semibold">
+              {order.priority}
+            </span>
+          )}
           <span className="text-[10px] text-muted-foreground">{binTypeName}</span>
         </div>
 

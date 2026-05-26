@@ -9,11 +9,12 @@ export const BUSINESS_TYPES = [
 ] as const;
 
 // 砖块订单类型
-export type BrickOrderType = 'pickup_from_factory' | 'delivery_to_customer';
+export type BrickOrderType = 'pickup_from_factory' | 'delivery_to_customer' | 'factory_to_customer';
 
 export const BRICK_ORDER_TYPES = [
   { value: "pickup_from_factory" as const, label: "从砖厂取砖", emoji: "🏭", description: "从砖厂取砖到公司场地" },
   { value: "delivery_to_customer" as const, label: "送砖给客户", emoji: "🚚", description: "从公司场地送砖给客户" },
+  { value: "factory_to_customer" as const, label: "砖厂直送客户", emoji: "🏭", description: "从砖厂取砖后直接送到客户" },
 ] as const;
 
 export const ORDER_TYPES = [

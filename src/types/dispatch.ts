@@ -6,17 +6,22 @@ export type Enums<T extends keyof Database["public"]["Enums"]> = Database["publi
 
 export type Order = Tables<"orders"> & {
   business_type?: BusinessType;
-  brick_order_type?: string;
-  origin_factory_id?: string;
-  origin_yard_id?: string;
-  destination_yard_id?: string;
+  brick_order_type?: string | null;
+  origin_factory_id?: string | null;
+  origin_yard_id?: string | null;
+  destination_yard_id?: string | null;
+  pallet_count?: number | null;
+  can_split?: boolean | null;
+  priority?: string | null;
   linked_order_id?: string | null;
   bin_type?: string | null;
 };
 
 export type Profile = Tables<"profiles">;
 
-export type Vehicle = Tables<"vehicles">;
+export type Vehicle = Tables<"vehicles"> & {
+  max_pallets?: number | null;
+};
 
 export type Bin = Tables<"bins">;
 

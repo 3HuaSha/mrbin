@@ -65,6 +65,19 @@ export function OrderNodeDisplay({
           {order.address}
         </div>
         <div className="text-[10px] text-primary font-medium">{timeLabel(order)}</div>
+        {(order.pallet_count || order.priority) && (
+          <div className="flex items-center gap-1 text-[9px] font-semibold">
+            {order.pallet_count && (
+              <span className="rounded bg-orange-100 px-1 text-orange-800">{order.pallet_count} PLT</span>
+            )}
+            {order.priority && (
+              <span className="rounded bg-blue-100 px-1 text-blue-800">{order.priority}</span>
+            )}
+            {order.can_split === false && (
+              <span className="rounded bg-red-100 px-1 text-red-700">No split</span>
+            )}
+          </div>
+        )}
         {jobStep?.bin_number_reported && (
           <div className="text-[9px] text-primary">桶号: {jobStep.bin_number_reported}</div>
         )}

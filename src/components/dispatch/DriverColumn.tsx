@@ -158,6 +158,12 @@ export function DriverColumn({
   const [doneExpanded, setDoneExpanded] = useState(false);
 
   const isInserting = insertStepAt?.driverId === driver.id;
+  const palletTotal = useMemo(
+    () => assignments.reduce((sum, a) => sum + (a.orders.pallet_count || 0), 0),
+    [assignments],
+  );
+  const palletCapacity = vehicle?.max_pallets || 28;
+  const isOverPalletCapacity = palletTotal > palletCapacity;
 
   return (
     <div 
@@ -186,7 +192,12 @@ export function DriverColumn({
             ))}
           </SelectContent>
         </Select>
-        <span className="text-[10px] text-muted-foreground ml-auto">{timelineItems.length}任务</span>
+        <span className={cn(
+          "text-[10px] ml-auto font-semibold",
+          isOverPalletCapacity ? "text-destructive" : "text-muted-foreground",
+        )}>
+          {palletTotal > 0 ? `${palletTotal}/${palletCapacity} PLT · ` : ""}{timelineItems.length}任务
+        </span>
         {hasChanges && (
           <Badge variant="outline" className="text-[9px] h-4 px-1 bg-amber-100 text-amber-700 border-amber-300 animate-pulse">
             未保存

@@ -42,6 +42,9 @@ export function EditOrderDialog({ order, onClose }: EditOrderDialogProps) {
     customer_name: order.customer_name,
     customer_phone: order.customer_phone,
     customer_notes: order.customer_notes || "",
+    pallet_count: order.pallet_count?.toString() || "",
+    can_split: order.can_split ?? true,
+    priority: order.priority || "P3",
     netsuite_order_id: order.netsuite_order_id || "",
     service_date: order.service_date,
     status: order.status,
@@ -92,6 +95,9 @@ export function EditOrderDialog({ order, onClose }: EditOrderDialogProps) {
           customer_name: form.customer_name,
           customer_phone: form.customer_phone,
           customer_notes: form.customer_notes || null,
+          pallet_count: form.pallet_count.trim() ? Number(form.pallet_count) : null,
+          can_split: form.can_split,
+          priority: form.priority,
           netsuite_order_id: form.netsuite_order_id || null,
           service_date: form.service_date,
           status: form.status as any,
@@ -142,6 +148,40 @@ export function EditOrderDialog({ order, onClose }: EditOrderDialogProps) {
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader><DialogTitle>编辑订单 {order.order_number}</DialogTitle></DialogHeader>
         <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label>板数 PLT</Label>
+              <Input
+                type="number"
+                min="1"
+                className="mt-1"
+                value={form.pallet_count}
+                onChange={(e) => setForm({ ...form, pallet_count: e.target.value })}
+                placeholder="9"
+              />
+            </div>
+            <div>
+              <Label>优先级</Label>
+              <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v })}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="P1">P1 急单</SelectItem>
+                  <SelectItem value="P2">P2 尽量准时</SelectItem>
+                  <SelectItem value="P3">P3 普通</SelectItem>
+                  <SelectItem value="P4">P4 顺路/可延后</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <label className="flex items-end gap-2 pb-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={form.can_split}
+                onChange={(e) => setForm({ ...form, can_split: e.target.checked })}
+                className="h-4 w-4"
+              />
+              可拆单
+            </label>
+          </div>
           {/* 类型 + 状态 */}
           <div className="grid grid-cols-2 gap-3">
             <div>

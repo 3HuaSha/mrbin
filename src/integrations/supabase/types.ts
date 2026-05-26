@@ -388,14 +388,23 @@ export type Database = {
           address: string
           bin_size: Database["public"]["Enums"]["bin_size"] | null
           bin_number: string | null
+          bin_type: string | null
+          brick_order_type: Database["public"]["Enums"]["brick_order_type"] | null
+          business_type: Database["public"]["Enums"]["business_type"]
+          can_split: boolean
           created_at: string | null
           created_by: string | null
           customer_name: string
           customer_notes: string | null
           customer_phone: string
+          destination_yard_id: string | null
           id: string
           netsuite_order_id: string | null
           order_number: string
+          origin_factory_id: string | null
+          origin_yard_id: string | null
+          pallet_count: number | null
+          priority: string
           service_date: string
           status: Database["public"]["Enums"]["order_status"] | null
           time_window: Database["public"]["Enums"]["time_window"]
@@ -407,14 +416,23 @@ export type Database = {
           address: string
           bin_size?: Database["public"]["Enums"]["bin_size"] | null
           bin_number?: string | null
+          bin_type?: string | null
+          brick_order_type?: Database["public"]["Enums"]["brick_order_type"] | null
+          business_type?: Database["public"]["Enums"]["business_type"]
+          can_split?: boolean
           created_at?: string | null
           created_by?: string | null
           customer_name: string
           customer_notes?: string | null
           customer_phone: string
+          destination_yard_id?: string | null
           id?: string
           netsuite_order_id?: string | null
           order_number: string
+          origin_factory_id?: string | null
+          origin_yard_id?: string | null
+          pallet_count?: number | null
+          priority?: string
           service_date: string
           status?: Database["public"]["Enums"]["order_status"] | null
           time_window: Database["public"]["Enums"]["time_window"]
@@ -426,14 +444,23 @@ export type Database = {
           address?: string
           bin_size?: Database["public"]["Enums"]["bin_size"] | null
           bin_number?: string | null
+          bin_type?: string | null
+          brick_order_type?: Database["public"]["Enums"]["brick_order_type"] | null
+          business_type?: Database["public"]["Enums"]["business_type"]
+          can_split?: boolean
           created_at?: string | null
           created_by?: string | null
           customer_name?: string
           customer_notes?: string | null
           customer_phone?: string
+          destination_yard_id?: string | null
           id?: string
           netsuite_order_id?: string | null
           order_number?: string
+          origin_factory_id?: string | null
+          origin_yard_id?: string | null
+          pallet_count?: number | null
+          priority?: string
           service_date?: string
           status?: Database["public"]["Enums"]["order_status"] | null
           time_window?: Database["public"]["Enums"]["time_window"]
@@ -506,6 +533,7 @@ export type Database = {
           id: string
           is_active: boolean | null
           max_bin_size: Database["public"]["Enums"]["bin_size"] | null
+          max_pallets: number
           name: string
           plate: string
           samsara_id: string | null
@@ -516,6 +544,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           max_bin_size?: Database["public"]["Enums"]["bin_size"] | null
+          max_pallets?: number
           name: string
           plate: string
           samsara_id?: string | null
@@ -526,6 +555,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           max_bin_size?: Database["public"]["Enums"]["bin_size"] | null
+          max_pallets?: number
           name?: string
           plate?: string
           samsara_id?: string | null
@@ -552,6 +582,11 @@ export type Database = {
       bin_event: "delivered" | "picked_up" | "swapped_out" | "swapped_in"
       bin_size: "14" | "20" | "40"
       bin_status: "depot" | "in_transit" | "on_site" | "full"
+      brick_order_type:
+        | "pickup_from_factory"
+        | "delivery_to_customer"
+        | "factory_to_customer"
+      business_type: "garbage" | "brick" | "material"
       order_status:
         | "pending"
         | "assigned"
@@ -699,6 +734,12 @@ export const Constants = {
       bin_event: ["delivered", "picked_up", "swapped_out", "swapped_in"],
       bin_size: ["14", "20", "40"],
       bin_status: ["depot", "in_transit", "on_site", "full"],
+      brick_order_type: [
+        "pickup_from_factory",
+        "delivery_to_customer",
+        "factory_to_customer",
+      ],
+      business_type: ["garbage", "brick", "material"],
       order_status: ["pending", "assigned", "in_progress", "done", "cancelled"],
       order_type: ["delivery", "pickup", "swap", "material"],
       step_status: ["locked", "pending", "in_progress", "done"],

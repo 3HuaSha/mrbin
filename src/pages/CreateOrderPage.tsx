@@ -37,6 +37,9 @@ const empty = (preserveType?: OrderType) => ({
   customer_contact: "", // 合并姓名和电话
   address: "",
   customer_notes: "",
+  pallet_count: "",
+  can_split: true,
+  priority: "P3" as "P1" | "P2" | "P3" | "P4",
   // 订单号：空字符串时由数据库触发器自动生成 KD-YYYYMMDD-XXX
   use_manual_order_number: false,
   manual_order_number: "",
@@ -138,6 +141,9 @@ export function CreateOrderPage() {
         customer_name: name || payload.customer_contact.trim(),
         customer_phone: phone,
         customer_notes: payload.customer_notes.trim() || null,
+        pallet_count: payload.pallet_count.trim() ? Number(payload.pallet_count) : null,
+        can_split: payload.can_split,
+        priority: payload.priority,
         netsuite_order_id: null,
         business_type: payload.type === "material" ? "material" : undefined,
         bin_type: payload.type === "material" ? (payload.material_description.trim() || null) : payload.bin_type,
@@ -247,6 +253,9 @@ export function CreateOrderPage() {
     const e2: Record<string, boolean> = {};
     if (!form.address.trim()) e2.address = true;
     if (!form.customer_contact.trim()) e2.customer_contact = true;
+    if (form.pallet_count.trim() && Number(form.pallet_count) <= 0) {
+      e2.pallet_count = true;
+    }
     if (form.use_manual_order_number && !form.manual_order_number.trim()) {
       e2.manual_order_number = true;
     }
@@ -666,6 +675,48 @@ export function CreateOrderPage() {
           {/* 第三行：客户信息 - 单行布局 */}
           <div className="bg-white rounded-xl shadow-md p-4">
             <h2 className="text-base font-bold mb-3 text-gray-800">客户信息</h2>
+            <div className="mb-4 rounded-lg border-2 border-orange-100 bg-orange-50/60 p-3">
+              <h3 className="text-sm font-bold text-gray-800 mb-2">送砖排班信息</h3>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div>
+                  <Label className="text-sm font-bold text-gray-700 mb-1 block">板数 PLT</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={form.pallet_count}
+                    onChange={(e) => setForm({ ...form, pallet_count: e.target.value })}
+                    placeholder="例如 9"
+                    className={cn("h-10 text-sm rounded-lg border-2", errors.pallet_count && "border-red-500")}
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm font-bold text-gray-700 mb-1 block">优先级</Label>
+                  <select
+                    value={form.priority}
+                    onChange={(e) => setForm({ ...form, priority: e.target.value as "P1" | "P2" | "P3" | "P4" })}
+                    className="h-10 w-full rounded-lg border-2 bg-white px-3 text-sm font-semibold"
+                  >
+                    <option value="P1">P1 急单</option>
+                    <option value="P2">P2 尽量准时</option>
+                    <option value="P3">P3 普通</option>
+                    <option value="P4">P4 顺路/可延后</option>
+                  </select>
+                </div>
+                <label className="flex h-10 items-center gap-2 rounded-lg border-2 bg-white px-3 text-sm font-bold text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={form.can_split}
+                    onChange={(e) => setForm({ ...form, can_split: e.target.checked })}
+                    className="h-4 w-4 accent-orange-500"
+                  />
+                  可拆单
+                </label>
+                <div className="text-xs text-gray-500">
+                  默认车容量按 28 PLT 计算，后面自动排班会用这里的板数。
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-3">
               {/* 地址单独一行 */}
               <div>
