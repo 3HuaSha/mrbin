@@ -42,6 +42,7 @@ import { DriverColumn } from "@/components/dispatch/DriverColumn";
 import { OrderCardDisplay } from "@/components/dispatch/OrderCardDisplay";
 import { StepDetailDialog } from "@/components/dispatch/StepDetailDialog";
 import { LinkOrderDialog } from "@/components/dispatch/LinkOrderDialog";
+import { BrickScheduleAssistant } from "@/components/dispatch/BrickScheduleAssistant";
 
 const BACKLOG_ID = "__backlog__";
 
@@ -682,6 +683,14 @@ export function DispatchPage() {
           <h1 className="text-2xl font-bold">排班看板</h1>
           <div className="flex items-center gap-3">
             <BusinessTypeSelector value={businessType} onChange={setBusinessType} />
+            {businessType === "brick" && (
+              <BrickScheduleAssistant
+                drivers={drivers}
+                assignments={currentAssignments}
+                unassigned={unassigned}
+                getVehicle={getVehicle}
+              />
+            )}
             <Button variant="outline" size="sm" onClick={() => {
               const d = new Date(date); d.setDate(d.getDate() - 1);
               setDate(d.toISOString().slice(0, 10));
