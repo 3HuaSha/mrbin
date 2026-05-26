@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,24 +88,6 @@ export function BrickScheduleAssistant({
   unassigned,
   getVehicle,
 }: BrickScheduleAssistantProps) {
-  // Query company_yards to map origin_yard_id (UUID) → name/address
-  const { data: companyYards } = useQuery({
-    queryKey: ["company-yards"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("company_yards")
-        .select("id,name,address")
-        .eq("is_active", true);
-      if (error) throw error;
-      return data as Array<{ id: string; name: string; address: string }>;
-    },
-  });
-  const yardMap = useMemo(() => {
-    const map = new Map<string, { name: string; address: string }>();
-    (companyYards || []).forEach((y) => map.set(y.id, { name: y.name, address: y.address }));
-    return map;
-  }, [companyYards]);
-
   const flatDrivers = useMemo(
     () => drivers
       .map((driver) => ({ driver, vehicle: getVehicle(driver.id) }))
@@ -165,11 +147,10 @@ export function BrickScheduleAssistant({
       .filter((order) => (order.pallet_count || 0) > 0)
       .map((order) => {
         const window = parseTimeWindow(order);
-        // Resolve origin_yard_id: could be UUID (from DB) or short code
         const yardId = order.origin_yard_id || "12441";
-        const yardInfo = yardMap.get(yardId);
-        const pickupAddress = yardInfo?.address || YARD_ADDRESSES[yardId] || getFullAddress(yardId) || DEPOT_ADDRESS;
-        const pickupLabel = yardInfo?.name || YARD_LABELS[yardId] || yardId;
+        // Yard resolution happens in mutationFn at click-time
+        const pickupAddress = YARD_ADDRESSES[yardId] || getFullAddress(yardId) || DEPOT_ADDRESS;
+        const pickupLabel = YARD_LABELS[yardId] || yardId;
         return {
           id: order.id,
           label: orderLabel(order),
@@ -185,11 +166,40 @@ export function BrickScheduleAssistant({
         };
       }),
     timeLimitSeconds: 30,
-  }), [flatDrivers, driverLoads, unassigned, yardMap]);
+  }), [flatDrivers, driverLoads, unassigned]);
 
   const wholeRoute = useMutation({
     mutationFn: async (): Promise<WholeRouteResponse> => {
-      const ordersWithAddress = optimizerInput.orders.filter((o) => o.deliveryAddress);
+      // Fetch company_yards at click-time to resolve UUID → name/address
+      const { data: yards } = await supabase
+        .from("company_yards")
+        .select("id,name,address");
+      const yardLookup = new Map<string, { name: string; address: string }>();
+      (yards || []).forEach((y: { id: string; name: string; address: string }) => yardLookup.set(y.id, { name: y.name, address: y.address }));
+
+      // Rebuild orders from unassigned + yardLookup (not from pre-computed optimizerInput)
+      const ordersWithAddress = unassigned
+        .filter((order) => (order.pallet_count || 0) > 0 && order.address)
+        .map((order) => {
+          const window = parseTimeWindow(order);
+          const yardId = order.origin_yard_id || "12441";
+          const yardInfo = yardLookup.get(yardId);
+          const pickupAddress = yardInfo?.address || YARD_ADDRESSES[yardId] || getFullAddress(yardId) || DEPOT_ADDRESS;
+          const pickupLabel = yardInfo?.name || YARD_LABELS[yardId] || yardId;
+          return {
+            id: order.id,
+            label: orderLabel(order),
+            pallets: order.pallet_count || 0,
+            pickupAddress,
+            deliveryAddress: order.address || "",
+            pickupLabel,
+            deliveryLabel: orderLabel(order),
+            priority: order.priority || "P3",
+            startMinutes: window.startMinutes,
+            endMinutes: window.endMinutes,
+            must: window.must,
+          };
+        });
 
       if (ordersWithAddress.length === 0) {
         return { success: false as const, error: "没有可排的订单地址" };
