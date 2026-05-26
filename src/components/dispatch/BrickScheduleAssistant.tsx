@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { Assignment, Order, Profile, Vehicle } from "@/types/dispatch";
 import { optimizeBrickSchedule } from "@/actions/brick-optimizer";
 import { getCachedRouteMatrix, RouteMatrixEntry } from "@/actions/route-matrix";
 import { getFullAddress } from "@/lib/manual-step-locations";
+import { supabase } from "@/integrations/supabase/client";
 
 const DEPOT_ADDRESS = "12441 Woodbine Ave, Gormley, ON L4A 2K4";
 
@@ -87,6 +88,24 @@ export function BrickScheduleAssistant({
   unassigned,
   getVehicle,
 }: BrickScheduleAssistantProps) {
+  // Query company_yards to map origin_yard_id (UUID) → name/address
+  const { data: companyYards } = useQuery({
+    queryKey: ["company-yards"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("company_yards")
+        .select("id,name,address")
+        .eq("is_active", true);
+      if (error) throw error;
+      return data as Array<{ id: string; name: string; address: string }>;
+    },
+  });
+  const yardMap = useMemo(() => {
+    const map = new Map<string, { name: string; address: string }>();
+    (companyYards || []).forEach((y) => map.set(y.id, { name: y.name, address: y.address }));
+    return map;
+  }, [companyYards]);
+
   const flatDrivers = useMemo(
     () => drivers
       .map((driver) => ({ driver, vehicle: getVehicle(driver.id) }))
@@ -146,10 +165,11 @@ export function BrickScheduleAssistant({
       .filter((order) => (order.pallet_count || 0) > 0)
       .map((order) => {
         const window = parseTimeWindow(order);
-        // Determine yard where goods are loaded
-        const yardCode = order.origin_yard_id || "12441";
-        const pickupAddress = YARD_ADDRESSES[yardCode] || getFullAddress(yardCode) || DEPOT_ADDRESS;
-        const pickupLabel = YARD_LABELS[yardCode] || yardCode;
+        // Resolve origin_yard_id: could be UUID (from DB) or short code
+        const yardId = order.origin_yard_id || "12441";
+        const yardInfo = yardMap.get(yardId);
+        const pickupAddress = yardInfo?.address || YARD_ADDRESSES[yardId] || getFullAddress(yardId) || DEPOT_ADDRESS;
+        const pickupLabel = yardInfo?.name || YARD_LABELS[yardId] || yardId;
         return {
           id: order.id,
           label: orderLabel(order),
@@ -165,7 +185,7 @@ export function BrickScheduleAssistant({
         };
       }),
     timeLimitSeconds: 30,
-  }), [flatDrivers, driverLoads, unassigned]);
+  }), [flatDrivers, driverLoads, unassigned, yardMap]);
 
   const wholeRoute = useMutation({
     mutationFn: async (): Promise<WholeRouteResponse> => {

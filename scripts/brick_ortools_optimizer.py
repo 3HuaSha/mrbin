@@ -287,6 +287,9 @@ def main() -> None:
         total_distance_km = 0.0
         total_late_minutes = 0
         prev_node = None
+        vehicle_delivery_oi = set()
+        vehicle_pickup_oi = set()
+        peak_load = 0
 
         while not routing.IsEnd(index):
             node = manager.IndexToNode(index)
@@ -294,6 +297,11 @@ def main() -> None:
             if prev_node is not None and distance_matrix:
                 if prev_node < num_nodes and node < num_nodes:
                     total_distance_km += float(distance_matrix[prev_node][node])
+
+            # Track peak load from capacity dimension
+            load_val = solution.Value(cap_dim.CumulVar(index))
+            if load_val > peak_load:
+                peak_load = load_val
 
             if node == 0:
                 pass  # depot, skip
@@ -314,6 +322,7 @@ def main() -> None:
                 oi = delivery_order_index(node)
                 order = delivery_orders[oi]
                 served_delivery_orders.add(oi)
+                vehicle_delivery_oi.add(oi)
                 arrival = solution.Value(time_dim.CumulVar(index))
                 end_min = int(order.get("endMinutes") or 17 * 60)
                 late = max(0, arrival - end_min)
@@ -344,6 +353,7 @@ def main() -> None:
                 oi = pickup_order_index(node)
                 porder = pickup_orders[oi]
                 served_pickup_orders.add(oi)
+                vehicle_pickup_oi.add(oi)
                 arrival = solution.Value(time_dim.CumulVar(index))
                 end_min = int(porder.get("endMinutes") or 20 * 60)
                 late = max(0, arrival - end_min)
@@ -371,20 +381,16 @@ def main() -> None:
         end_time = solution.Value(time_dim.CumulVar(routing.End(v_id)))
         total_minutes = end_time - start_time
 
-        delivery_plt = sum(
-            int(delivery_orders[oi].get("pallets", 0))
-            for oi in served_delivery_orders
-        )
         pickup_plt = sum(
             int(pickup_orders[oi].get("pallets", 0))
-            for oi in served_pickup_orders
+            for oi in vehicle_pickup_oi
         )
 
         routes.append({
             "driverId": vehicle["driverId"],
             "driverName": vehicle.get("driverName") or "",
             "vehicleName": vehicle.get("vehicleName") or "",
-            "load": int(vehicle.get("currentLoad", 0)) + delivery_plt,
+            "load": peak_load,
             "capacity": int(vehicle.get("capacity", 28)),
             "stops": stops,
             "totalMinutes": total_minutes,
