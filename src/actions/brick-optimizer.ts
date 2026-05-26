@@ -14,17 +14,34 @@ export type BrickOptimizerOrder = {
   id: string;
   label: string;
   pallets: number;
+  pickupAddress: string;   // yard address where goods are loaded
+  deliveryAddress: string; // customer address where goods are delivered
+  pickupLabel?: string;    // e.g. "2967场地"
+  deliveryLabel?: string;  // e.g. customer name
   priority: string;
   startMinutes?: number;
   endMinutes?: number;
   must?: boolean;
 };
 
+export type BrickPickupOrder = {
+  id: string;
+  label: string;
+  pallets: number;
+  pickupAddress: string;   // supplier address (e.g. UNILOCK Pickering)
+  deliveryAddress: string; // yard or customer address (e.g. 3445, 12441)
+  pickupLabel?: string;    // display label for pickup stop
+  deliveryLabel?: string;  // display label for delivery stop
+  priority?: string;
+  endMinutes?: number;     // latest arrival (e.g. 20*60=1200 for 8pm close)
+};
+
 export type BrickOptimizerInput = {
   vehicles: BrickOptimizerVehicle[];
-  orders: BrickOptimizerOrder[];
-  durationMatrix: number[][];   // (1+orders) x (1+orders), in minutes, index 0 = depot
-  distanceMatrix: number[][];   // (1+orders) x (1+orders), in km
+  deliveryOrders: BrickOptimizerOrder[];
+  pickupOrders?: BrickPickupOrder[];
+  durationMatrix: number[][];   // (1+2*D+2*P) x (1+2*D+2*P), in minutes, index 0 = depot
+  distanceMatrix: number[][];   // same dims, in km
   serviceMinutes?: number;
   routeStartHour?: number;
   timeLimitSeconds?: number;
@@ -37,6 +54,7 @@ export type BrickOptimizerStop = {
   priority: string;
   etaMinutes: number;
   lateMinutes: number;
+  type: "yard_pickup" | "delivery" | "pickup" | "pickup_delivery";
 };
 
 export type BrickOptimizerRoute = {
@@ -49,6 +67,7 @@ export type BrickOptimizerRoute = {
   totalMinutes: number;
   totalDistanceKm: number;
   lateMinutes: number;
+  pickupPallets: number;
 };
 
 type OptimizerResult = {

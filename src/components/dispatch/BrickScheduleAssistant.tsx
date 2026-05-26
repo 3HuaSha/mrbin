@@ -16,8 +16,24 @@ import { cn } from "@/lib/utils";
 import { Assignment, Order, Profile, Vehicle } from "@/types/dispatch";
 import { optimizeBrickSchedule } from "@/actions/brick-optimizer";
 import { getCachedRouteMatrix, RouteMatrixEntry } from "@/actions/route-matrix";
+import { getFullAddress } from "@/lib/manual-step-locations";
 
-const DEFAULT_BRICK_YARD_ADDRESS = "12441 Woodbine Ave, Gormley, ON L4A 2K4";
+const DEPOT_ADDRESS = "12441 Woodbine Ave, Gormley, ON L4A 2K4";
+
+// Yard code → full address mapping (for pickupAddress on delivery orders)
+const YARD_ADDRESSES: Record<string, string> = {
+  "3445": "3445 Kennedy Rd, Scarborough, ON M1V 4Y3",
+  "12441": "12441 Woodbine Ave, Gormley, ON L4A 2K4",
+  "2967": "2967 Kennedy Rd, Scarborough, ON M1V 1S9",
+  "150": "150 Clark Blvd, Brampton, ON L6T 4Y8",
+};
+
+const YARD_LABELS: Record<string, string> = {
+  "3445": "3445场地",
+  "12441": "12441场地",
+  "2967": "2967场地",
+  "150": "150场地",
+};
 
 interface BrickScheduleAssistantProps {
   drivers: Profile[];
@@ -37,7 +53,8 @@ type WholeRouteResult = {
   totalMinutes: number;
   totalDistanceKm: number;
   lateMinutes: number;
-  etas: Array<{ orderId: string; label: string; eta: string; lateMinutes: number }>;
+  pickupPallets: number;
+  etas: Array<{ orderId: string; label: string; eta: string; lateMinutes: number; type: "yard_pickup" | "delivery" | "pickup" | "pickup_delivery" }>;
 };
 
 type WholeRouteResponse = {
@@ -129,10 +146,18 @@ export function BrickScheduleAssistant({
       .filter((order) => (order.pallet_count || 0) > 0)
       .map((order) => {
         const window = parseTimeWindow(order);
+        // Determine yard where goods are loaded
+        const yardCode = order.origin_yard_id || "12441";
+        const pickupAddress = YARD_ADDRESSES[yardCode] || getFullAddress(yardCode) || DEPOT_ADDRESS;
+        const pickupLabel = YARD_LABELS[yardCode] || yardCode;
         return {
           id: order.id,
           label: orderLabel(order),
           pallets: order.pallet_count || 0,
+          pickupAddress,
+          deliveryAddress: order.address || "",
+          pickupLabel,
+          deliveryLabel: orderLabel(order),
           priority: order.priority || "P3",
           startMinutes: window.startMinutes,
           endMinutes: window.endMinutes,
@@ -144,27 +169,35 @@ export function BrickScheduleAssistant({
 
   const wholeRoute = useMutation({
     mutationFn: async (): Promise<WholeRouteResponse> => {
-      const ordersWithAddress = optimizerInput.orders
-        .map((inputOrder) => ({
-          ...inputOrder,
-          address: unassigned.find((o) => o.id === inputOrder.id)?.address || "",
-        }))
-        .filter((o) => o.address);
+      const ordersWithAddress = optimizerInput.orders.filter((o) => o.deliveryAddress);
 
       if (ordersWithAddress.length === 0) {
         return { success: false as const, error: "没有可排的订单地址" };
       }
 
-      // Build address list: index 0 = depot, 1..N = orders
+      // Pickup orders: supplier → yard/customer (hardcoded for now, will come from UI)
+      const pickupOrders: Array<{
+        id: string; label: string; pallets: number;
+        pickupAddress: string; deliveryAddress: string;
+        pickupLabel?: string; deliveryLabel?: string;
+        priority?: string; endMinutes?: number;
+      }> = [];
+
+      // Build address list for single-depot P&D matrix:
+      // index 0 = depot, 1,2 = delivery order 0 (pickup at yard, delivery at customer), ...
+      // 2*D+1, 2*D+2 = pickup order 0 (pickup at supplier, delivery at dest), ...
+      const deliveryAddresses = ordersWithAddress.flatMap((o) => [o.pickupAddress, o.deliveryAddress]);
+      const pickupAddresses = pickupOrders.flatMap((po) => [po.pickupAddress, po.deliveryAddress]);
       const addresses = [
-        DEFAULT_BRICK_YARD_ADDRESS,
-        ...ordersWithAddress.map((o) => o.address),
+        DEPOT_ADDRESS,
+        ...deliveryAddresses,
+        ...pickupAddresses,
       ];
 
       const matrix = await getCachedRouteMatrix({ data: { addresses } });
       const matrixMap = makeMatrixMap(matrix.entries);
 
-      // Build 2D matrices: (1+orders) x (1+orders)
+      // Build 2D matrices: (1+2*D+2*P) x (1+2*D+2*P)
       const n = addresses.length;
       const durationMatrix: number[][] = [];
       const distanceMatrix: number[][] = [];
@@ -186,7 +219,8 @@ export function BrickScheduleAssistant({
 
       const vrpInput = {
         vehicles: optimizerInput.vehicles,
-        orders: ordersWithAddress,
+        deliveryOrders: ordersWithAddress,
+        pickupOrders,
         durationMatrix,
         distanceMatrix,
         serviceMinutes: 15,
@@ -204,16 +238,18 @@ export function BrickScheduleAssistant({
         vehicleName: vrpRoute.vehicleName,
         load: vrpRoute.load,
         capacity: vrpRoute.capacity,
-        orderIds: vrpRoute.stops.map((s) => s.orderId),
-        orderLabels: vrpRoute.stops.map((s) => s.label),
+        orderIds: vrpRoute.stops.filter((s) => s.type === "delivery").map((s) => s.orderId),
+        orderLabels: vrpRoute.stops.filter((s) => s.type === "delivery").map((s) => s.label),
         totalMinutes: vrpRoute.totalMinutes,
         totalDistanceKm: vrpRoute.totalDistanceKm,
         lateMinutes: vrpRoute.lateMinutes,
+        pickupPallets: vrpRoute.pickupPallets || 0,
         etas: vrpRoute.stops.map((s) => ({
           orderId: s.orderId,
           label: s.label,
           eta: formatClock(s.etaMinutes),
           lateMinutes: s.lateMinutes,
+          type: s.type,
         })),
       }));
 
@@ -323,12 +359,17 @@ export function BrickScheduleAssistant({
                   <div key={route.driverId} className="rounded border bg-background p-2">
                     <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold">
                       <span className="truncate">{route.driverName} · {route.vehicleName}</span>
-                      <span>{route.load}/{route.capacity} PLT</span>
+                      <span>{route.load}/{route.capacity} PLT{route.pickupPallets > 0 ? ` (+${route.pickupPallets}取货)` : ""}</span>
                     </div>
-                    {route.orderLabels.length > 0 ? (
+                    {route.etas.length > 0 ? (
                       <>
                         <div className="mb-1 text-xs text-muted-foreground">
-                          {route.orderLabels.join(" -> ")}
+                          {route.etas.map((eta) => {
+                            if (eta.type === "yard_pickup") return `�${eta.label}`;
+                            if (eta.type === "pickup") return `�🏭${eta.label}`;
+                            if (eta.type === "pickup_delivery") return `📦${eta.label}`;
+                            return eta.label;
+                          }).join(" → ")}
                         </div>
                         <div className="mb-1 text-xs">
                           总行程约 {route.totalMinutes} 分钟 · {route.totalDistanceKm.toFixed(1)} km
@@ -336,8 +377,8 @@ export function BrickScheduleAssistant({
                         </div>
                         <div className="space-y-0.5">
                           {route.etas.map((eta) => (
-                            <div key={eta.orderId} className="flex justify-between gap-2 text-xs">
-                              <span className="truncate">{eta.label}</span>
+                            <div key={`${eta.orderId}-${eta.type}`} className={cn("flex justify-between gap-2 text-xs", eta.type === "yard_pickup" && "bg-amber-500/10 rounded px-1", eta.type === "pickup" && "bg-primary/10 rounded px-1", eta.type === "pickup_delivery" && "bg-blue-500/10 rounded px-1")}>
+                              <span className="truncate">{eta.type === "yard_pickup" ? "🏗" : eta.type === "pickup" ? "🏭" : eta.type === "pickup_delivery" ? "📦" : ""}{eta.label}</span>
                               <span className={eta.lateMinutes > 0 ? "text-destructive" : "text-muted-foreground"}>
                                 {eta.eta}{eta.lateMinutes > 0 ? ` +${eta.lateMinutes}m` : ""}
                               </span>
