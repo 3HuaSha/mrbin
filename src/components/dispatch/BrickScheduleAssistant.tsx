@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, PackageCheck, Wand2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Assignment, Order, Profile, Vehicle } from "@/types/dispatch";
 import { optimizeBrickSchedule } from "@/actions/brick-optimizer";
-import { calculateSamsaraRouteForVehicle } from "@/actions/samsara";
+import { getCachedRouteMatrix, RouteMatrixEntry } from "@/actions/route-matrix";
 
 const DEFAULT_BRICK_YARD_ADDRESS = "12441 Woodbine Ave, Gormley, ON L4A 2K4";
 const ROUTE_START_HOUR = 8;
@@ -27,11 +27,6 @@ interface BrickScheduleAssistantProps {
   unassigned: Order[];
   getVehicle: (driverId: string) => Vehicle | undefined;
 }
-
-type PlannedOrder = {
-  order: Order;
-  loadAfter: number;
-};
 
 type WholeRouteResult = {
   driverId: string;
@@ -46,6 +41,18 @@ type WholeRouteResult = {
   lateMinutes: number;
   score: number;
   etas: Array<{ orderId: string; label: string; eta: string; lateMinutes: number }>;
+};
+
+type WholeRouteResponse = {
+  success: boolean;
+  error?: string;
+  status?: string;
+  routes?: WholeRouteResult[];
+  unplanned?: Array<{ id: string; label: string; pallets: number; reason?: string }>;
+  cacheHits?: number;
+  googleElements?: number;
+  fallbackElements?: number;
+  totalPairs?: number;
 };
 
 const priorityRank: Record<string, number> = {
@@ -104,60 +111,10 @@ export function BrickScheduleAssistant({
     [drivers, assignments, getVehicle],
   );
 
-  const planning = useMemo(() => {
-    const loads = new Map<string, number>();
-    flatDrivers.forEach(({ driver }) => loads.set(driver.id, driverLoads.get(driver.id) || 0));
-
-    const planned = new Map<string, PlannedOrder[]>();
-    flatDrivers.forEach(({ driver }) => planned.set(driver.id, []));
-
-    const missingPallets: Order[] = [];
-    const unplanned: Array<{ order: Order; reason: string }> = [];
-
-    const candidates = [...unassigned].sort((a, b) => {
-      const pa = priorityRank[a.priority || "P3"] || 3;
-      const pb = priorityRank[b.priority || "P3"] || 3;
-      if (pa !== pb) return pa - pb;
-      return (b.pallet_count || 0) - (a.pallet_count || 0);
-    });
-
-    candidates.forEach((order) => {
-      const pallets = order.pallet_count || 0;
-      if (!pallets) {
-        missingPallets.push(order);
-        return;
-      }
-
-      const best = flatDrivers
-        .map(({ driver, vehicle }) => {
-          const current = loads.get(driver.id) || 0;
-          return {
-            driver,
-            vehicle,
-            current,
-            remaining: capacityOf(vehicle) - current,
-          };
-        })
-        .filter((candidate) => candidate.remaining >= pallets)
-        .sort((a, b) => a.remaining - b.remaining)[0];
-
-      if (!best) {
-        unplanned.push({
-          order,
-          reason: pallets > 28 && order.can_split === false
-            ? "超过 28 PLT 且不可拆单"
-            : "当前 FLAT 车辆剩余容量不足",
-        });
-        return;
-      }
-
-      const nextLoad = best.current + pallets;
-      loads.set(best.driver.id, nextLoad);
-      planned.get(best.driver.id)?.push({ order, loadAfter: nextLoad });
-    });
-
-    return { planned, missingPallets, unplanned };
-  }, [flatDrivers, driverLoads, unassigned]);
+  const missingPalletOrders = useMemo(
+    () => unassigned.filter((order) => !order.pallet_count),
+    [unassigned],
+  );
 
   const overloaded = flatDrivers.filter(({ driver, vehicle }) => {
     const load = driverLoads.get(driver.id) || 0;
@@ -168,8 +125,7 @@ export function BrickScheduleAssistant({
     overloaded.length +
     assignedWithoutPallets.length +
     nonFlatAssigned.length +
-    planning.missingPallets.length +
-    planning.unplanned.length;
+    missingPalletOrders.length;
 
   const optimizerInput = useMemo(() => ({
     vehicles: flatDrivers.map(({ driver, vehicle }) => ({
@@ -191,14 +147,19 @@ export function BrickScheduleAssistant({
     timeLimitSeconds: 5,
   }), [flatDrivers, driverLoads, unassigned]);
 
-  const optimize = useMutation({
-    mutationFn: async () => optimizeBrickSchedule({ data: optimizerInput }),
-  });
-
   const wholeRoute = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<WholeRouteResponse> => {
       const optimized = await optimizeBrickSchedule({ data: optimizerInput });
       if (!optimized.success) return { success: false as const, error: optimized.error || "OR-Tools 优化失败" };
+
+      const matrixAddresses = [
+        DEFAULT_BRICK_YARD_ADDRESS,
+        ...optimizerInput.orders
+          .map((inputOrder) => unassigned.find((order) => order.id === inputOrder.id)?.address)
+          .filter(Boolean) as string[],
+      ];
+      const matrix = await getCachedRouteMatrix({ data: { addresses: matrixAddresses } });
+      const matrixMap = makeMatrixMap(matrix.entries);
 
       const routes: WholeRouteResult[] = [];
       for (const load of optimized.loads || []) {
@@ -225,7 +186,7 @@ export function BrickScheduleAssistant({
           continue;
         }
 
-        const best = await pickBestRoute(load, assigned);
+        const best = pickBestRoute(load, assigned, matrixMap);
         routes.push(best);
       }
 
@@ -234,6 +195,10 @@ export function BrickScheduleAssistant({
         status: optimized.status,
         routes,
         unplanned: optimized.unplanned || [],
+        cacheHits: matrix.cacheHits,
+        googleElements: matrix.googleElements,
+        fallbackElements: matrix.fallbackElements,
+        totalPairs: matrix.entries.length,
       };
     },
   });
@@ -300,19 +265,7 @@ export function BrickScheduleAssistant({
           </section>
 
           <section>
-            <div className="mb-2 flex items-center gap-2">
-              <PackageCheck className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-semibold">未排订单建议</h3>
-            </div>
-
-            <Button
-              className="mb-3 w-full gap-2"
-              onClick={() => optimize.mutate()}
-              disabled={optimize.isPending || optimizerInput.vehicles.length === 0 || optimizerInput.orders.length === 0}
-            >
-              <Wand2 className="h-4 w-4" />
-              {optimize.isPending ? "OR-Tools 计算中..." : "用 OR-Tools 优化装车"}
-            </Button>
+            <h3 className="mb-2 text-sm font-semibold">整体自动排班</h3>
 
             <Button
               variant="secondary"
@@ -330,10 +283,16 @@ export function BrickScheduleAssistant({
                   <div className="text-sm font-semibold">整体自动排班结果</div>
                   {wholeRoute.data.success && wholeRoute.data.status && <Badge variant="secondary">{wholeRoute.data.status}</Badge>}
                 </div>
+                {wholeRoute.data.success && (
+                  <div className="rounded bg-background px-2 py-1 text-xs text-muted-foreground">
+                    路线矩阵：缓存 {wholeRoute.data.cacheHits || 0} 段 · Google 新算 {wholeRoute.data.googleElements || 0} 段
+                    {(wholeRoute.data.fallbackElements || 0) > 0 && ` · 粗略估算 ${wholeRoute.data.fallbackElements} 段`}
+                  </div>
+                )}
                 {!wholeRoute.data.success && (
                   <div className="text-sm text-destructive">{wholeRoute.data.error}</div>
                 )}
-                {wholeRoute.data.success && wholeRoute.data.routes.map((route) => (
+                {wholeRoute.data.success && wholeRoute.data.routes?.map((route) => (
                   <div key={route.driverId} className="rounded border bg-background p-2">
                     <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold">
                       <span className="truncate">{route.driverName} · {route.vehicleName}</span>
@@ -364,10 +323,10 @@ export function BrickScheduleAssistant({
                     )}
                   </div>
                 ))}
-                {wholeRoute.data.success && wholeRoute.data.unplanned.length > 0 && (
+                {wholeRoute.data.success && (wholeRoute.data.unplanned?.length || 0) > 0 && (
                   <div className="space-y-1 text-xs text-destructive">
                     <div className="font-semibold">未安排</div>
-                    {wholeRoute.data.unplanned.map((order) => (
+                    {wholeRoute.data.unplanned?.map((order) => (
                       <div key={order.id}>{order.label} · {order.pallets} PLT · {order.reason || "未安排"}</div>
                     ))}
                   </div>
@@ -375,80 +334,8 @@ export function BrickScheduleAssistant({
               </div>
             )}
 
-            {optimize.data && (
-              <div className="mb-3 space-y-2 rounded-md border bg-muted/20 p-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">OR-Tools 结果</div>
-                  {optimize.data.status && <Badge variant="secondary">{optimize.data.status}</Badge>}
-                </div>
-                {!optimize.data.success && (
-                  <div className="text-sm text-destructive">{optimize.data.error || "优化失败"}</div>
-                )}
-                {optimize.data.success && optimize.data.loads?.map((load) => (
-                  <div key={load.driverId} className="rounded border bg-background p-2">
-                    <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold">
-                      <span className="truncate">{load.driverName} · {load.vehicleName}</span>
-                      <span>{load.finalLoad}/{load.capacity} PLT</span>
-                    </div>
-                    <div className="space-y-1">
-                      {optimize.data.assignments
-                        ?.filter((assignment) => assignment.driverId === load.driverId)
-                        .map((assignment) => (
-                          <div key={`${assignment.orderId}-${assignment.pallets}`} className="flex items-center justify-between gap-2 text-xs">
-                            <span className="truncate">
-                              {assignment.orderLabel} · {assignment.priority}
-                              {assignment.split ? " · 拆单" : ""}
-                            </span>
-                            <span className="shrink-0">{assignment.pallets} PLT</span>
-                          </div>
-                        ))}
-                      {optimize.data.assignments?.filter((assignment) => assignment.driverId === load.driverId).length === 0 && (
-                        <div className="text-xs text-muted-foreground">没有新增建议</div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {optimize.data.success && (optimize.data.unplanned?.length || 0) > 0 && (
-                  <div className="space-y-1">
-                    <div className="text-xs font-semibold text-destructive">未安排</div>
-                    {optimize.data.unplanned?.map((order) => (
-                      <div key={order.id} className="text-xs text-destructive">
-                        {order.label} · {order.pallets} PLT · {order.reason || "未安排"}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-2">
-              {flatDrivers.map(({ driver, vehicle }) => {
-                const items = planning.planned.get(driver.id) || [];
-                if (items.length === 0) return null;
-                return (
-                  <div key={driver.id} className="rounded-md border p-3">
-                    <div className="mb-2 text-sm font-semibold">
-                      {driver.name} · {vehicle?.name}
-                    </div>
-                    <div className="space-y-1">
-                      {items.map(({ order, loadAfter }) => (
-                        <div key={order.id} className="flex items-center justify-between gap-2 text-xs">
-                          <span className="truncate">
-                            {orderLabel(order)} · {order.pallet_count} PLT · {order.priority || "P3"}
-                          </span>
-                          <span className="shrink-0 text-muted-foreground">到 {loadAfter} PLT</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {[...planning.planned.values()].every((items) => items.length === 0) && (
-                <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  当前没有可直接放入剩余容量的未排订单。
-                </div>
-              )}
+            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              先由 OR-Tools 分配订单到 FLAT 车，再用路线矩阵缓存计算候选送货顺序。只有缺失路段会调用 Google Route Matrix。
             </div>
           </section>
 
@@ -477,11 +364,8 @@ export function BrickScheduleAssistant({
                     text={`已排订单 ${orderLabel(assignment.orders)} 未填写板数`}
                   />
                 ))}
-                {planning.missingPallets.map((order) => (
+                {missingPalletOrders.map((order) => (
                   <IssueLine key={`missing-${order.id}`} text={`未排订单 ${orderLabel(order)} 未填写板数`} />
-                ))}
-                {planning.unplanned.map(({ order, reason }) => (
-                  <IssueLine key={`unplanned-${order.id}`} text={`${orderLabel(order)}：${reason}`} />
                 ))}
               </div>
             </section>
@@ -507,7 +391,7 @@ function IssueLine({ text }: { text: string }) {
   );
 }
 
-async function pickBestRoute(
+function pickBestRoute(
   load: {
     driverId: string;
     driverName: string;
@@ -516,12 +400,13 @@ async function pickBestRoute(
     capacity: number;
   },
   orders: Order[],
-): Promise<WholeRouteResult> {
+  matrix: Map<string, RouteMatrixEntry>,
+): WholeRouteResult {
   const candidates = buildRouteCandidates(orders);
   const scored: WholeRouteResult[] = [];
 
   for (const candidate of candidates) {
-    const scoredRoute = await scoreRoute(load, candidate);
+    const scoredRoute = scoreRoute(load, candidate, matrix);
     scored.push(scoredRoute);
   }
 
@@ -588,7 +473,7 @@ function permutations<T>(items: T[]) {
   return result;
 }
 
-async function scoreRoute(
+function scoreRoute(
   load: {
     driverId: string;
     driverName: string;
@@ -597,27 +482,18 @@ async function scoreRoute(
     capacity: number;
   },
   route: Order[],
-): Promise<WholeRouteResult> {
-  const destinations = [
-    { address: DEFAULT_BRICK_YARD_ADDRESS, name: "12441" },
-    ...route.map((order) => ({ address: order.address, name: orderLabel(order) })),
-    { address: DEFAULT_BRICK_YARD_ADDRESS, name: "12441" },
-  ];
-
-  const routeData = await calculateSamsaraRouteForVehicle({
-    data: {
-      vehicleId: "brick-whole-route",
-      destinations,
-    },
-  });
-
-  const legs = routeData.success ? (routeData.legs || []) : [];
+  matrix: Map<string, RouteMatrixEntry>,
+): WholeRouteResult {
   let elapsedMinutes = 0;
   let lateMinutes = 0;
   const etas: WholeRouteResult["etas"] = [];
+  let totalDistanceMeters = 0;
 
   route.forEach((order, index) => {
-    const driveMinutes = Math.round(((legs[index]?.duration || fallbackDuration(index, route)) / 60));
+    const from = index === 0 ? DEFAULT_BRICK_YARD_ADDRESS : route[index - 1].address;
+    const leg = getMatrixLeg(matrix, from, order.address);
+    const driveMinutes = Math.round(leg.duration / 60);
+    totalDistanceMeters += leg.distance;
     elapsedMinutes += driveMinutes;
 
     const arrivalMinutes = ROUTE_START_HOUR * 60 + elapsedMinutes;
@@ -636,12 +512,12 @@ async function scoreRoute(
     elapsedMinutes += STOP_MINUTES;
   });
 
-  const returnLeg = legs[route.length];
-  elapsedMinutes += Math.round(((returnLeg?.duration || 0) / 60));
+  const lastAddress = route[route.length - 1]?.address || DEFAULT_BRICK_YARD_ADDRESS;
+  const returnLeg = getMatrixLeg(matrix, lastAddress, DEFAULT_BRICK_YARD_ADDRESS);
+  elapsedMinutes += Math.round(returnLeg.duration / 60);
+  totalDistanceMeters += returnLeg.distance;
 
-  const totalDistanceKm = routeData.success
-    ? (routeData.totalDistance || 0) / 1000
-    : route.reduce((sum, order) => sum + roughDistance(DEFAULT_BRICK_YARD_ADDRESS, order.address), 0);
+  const totalDistanceKm = totalDistanceMeters / 1000;
   const score = elapsedMinutes + totalDistanceKm * 0.5 + lateMinutes * 20;
 
   return {
@@ -658,12 +534,6 @@ async function scoreRoute(
     score,
     etas,
   };
-}
-
-function fallbackDuration(index: number, route: Order[]) {
-  const from = index === 0 ? DEFAULT_BRICK_YARD_ADDRESS : route[index - 1].address;
-  const to = route[index]?.address || DEFAULT_BRICK_YARD_ADDRESS;
-  return Math.max(15, roughDistance(from, to) * 1.3) * 60;
 }
 
 function parseTimeWindow(order: Order) {
@@ -710,6 +580,28 @@ function formatClock(minutes: number) {
   const hour = Math.floor(minutes / 60);
   const minute = minutes % 60;
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function makeMatrixMap(entries: RouteMatrixEntry[]) {
+  const map = new Map<string, RouteMatrixEntry>();
+  entries.forEach((entry) => {
+    map.set(matrixKey(entry.from, entry.to), entry);
+  });
+  return map;
+}
+
+function getMatrixLeg(matrix: Map<string, RouteMatrixEntry>, from: string, to: string) {
+  return matrix.get(matrixKey(from, to)) || {
+    from,
+    to,
+    duration: Math.max(15, roughDistance(from, to) * 1.3) * 60,
+    distance: roughDistance(from, to) * 1000,
+    source: "fallback" as const,
+  };
+}
+
+function matrixKey(from: string, to: string) {
+  return `${from.trim().toLowerCase()}|||${to.trim().toLowerCase()}`;
 }
 
 function roughDistance(a: string, b: string) {
