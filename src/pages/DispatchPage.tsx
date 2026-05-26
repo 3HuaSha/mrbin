@@ -722,6 +722,7 @@ export function DispatchPage() {
               <BacklogColumn 
                 orders={unassigned} 
                 completedOrders={completedOrders} 
+                businessType={businessType}
                 cardId={cardId}
               />
             </div>

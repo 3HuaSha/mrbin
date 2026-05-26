@@ -3,6 +3,7 @@ import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { cn } from "@/lib/utils";
 import { Order } from "@/types/dispatch";
+import { BusinessType } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { OrderCardDisplay } from "./OrderCardDisplay";
@@ -15,6 +16,7 @@ const BACKLOG_ID = "__backlog__";
 interface BacklogColumnProps {
   orders: Order[];
   completedOrders: Order[];
+  businessType: BusinessType;
   cardId: {
     fromOrder: (id: string) => string;
   };
@@ -23,6 +25,7 @@ interface BacklogColumnProps {
 export function BacklogColumn({ 
   orders, 
   completedOrders, 
+  businessType,
   cardId
 }: BacklogColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: BACKLOG_ID });
@@ -50,13 +53,29 @@ export function BacklogColumn({
     [filteredOrders]
   );
 
+  const copy = businessType === 'brick'
+    ? {
+        title: "待排砖单",
+        subtitle: "未分配送砖 / 补货订单",
+        leftTitle: "送砖 / 砖厂直送 / 回场补货",
+        rightTitle: "取送 / 其他",
+        empty: "无",
+      }
+    : {
+        title: "待排班",
+        subtitle: "未分配订单",
+        leftTitle: "送桶 / 换桶 / 砂石料",
+        rightTitle: "收桶",
+        empty: "无",
+      };
+
   return (
     <div className="w-[340px] flex flex-col h-full bg-muted/30 rounded-lg">
       <div className="px-3 py-2 border-b bg-card rounded-t-lg">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <div className="font-semibold text-sm tracking-tight">📥 待排班</div>
-            <div className="text-[10px] text-muted-foreground">未分配订单</div>
+            <div className="font-semibold text-sm tracking-tight">{copy.title}</div>
+            <div className="text-[10px] text-muted-foreground">{copy.subtitle}</div>
           </div>
           <Badge variant="secondary" className="px-1.5">{filteredOrders.length}/{orders.length}</Badge>
         </div>
@@ -101,7 +120,7 @@ export function BacklogColumn({
           {/* 左列: 送+换 */}
           <div className="flex-1 border-r p-1 space-y-1 overflow-y-auto">
             <div className="sticky top-0 bg-muted/80 backdrop-blur-sm rounded px-2 py-1 text-[10px] font-bold text-muted-foreground flex items-center justify-between z-10">
-              <span>📦 送桶 / 换桶 / 砂石料</span>
+              <span>{copy.leftTitle}</span>
               <Badge variant="outline" className="text-[9px] h-4 px-1">{deliverySwapOrders.length}</Badge>
             </div>
             <SortableContext
@@ -115,14 +134,14 @@ export function BacklogColumn({
               ))}
             </SortableContext>
             {deliverySwapOrders.length === 0 && (
-              <div className="text-center text-muted-foreground text-[10px] py-4">无</div>
+              <div className="text-center text-muted-foreground text-[10px] py-4">{copy.empty}</div>
             )}
           </div>
 
           {/* 右列: 收 */}
           <div className="flex-1 p-1 space-y-1 overflow-y-auto">
             <div className="sticky top-0 bg-muted/80 backdrop-blur-sm rounded px-2 py-1 text-[10px] font-bold text-muted-foreground flex items-center justify-between z-10">
-              <span>📤 收桶</span>
+              <span>{copy.rightTitle}</span>
               <Badge variant="outline" className="text-[9px] h-4 px-1">{pickupOrders.length}</Badge>
             </div>
             <SortableContext
@@ -136,7 +155,7 @@ export function BacklogColumn({
               ))}
             </SortableContext>
             {pickupOrders.length === 0 && (
-              <div className="text-center text-muted-foreground text-[10px] py-4">无</div>
+              <div className="text-center text-muted-foreground text-[10px] py-4">{copy.empty}</div>
             )}
           </div>
         </div>
