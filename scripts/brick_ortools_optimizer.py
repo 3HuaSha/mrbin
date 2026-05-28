@@ -135,6 +135,12 @@ def main() -> None:
         priority = order.get("priority") or "P3"
         start_min = max(route_start, int(order.get("startMinutes") or route_start))
         end_min = int(order.get("endMinutes") or route_end)
+        if end_min < start_min:
+            print(json.dumps({
+                "success": False,
+                "error": f"Invalid time window for {order.get('label') or order.get('id')}: {start_min}-{end_min}",
+            }, ensure_ascii=False))
+            return
 
         if order.get("must") or priority == "P1":
             time_dim.CumulVar(delivery_idx).SetRange(start_min, end_min)

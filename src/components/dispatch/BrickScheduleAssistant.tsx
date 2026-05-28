@@ -660,17 +660,37 @@ function parseTimeWindow(order: Order) {
 
   const range = raw.match(/(\d{1,2})(?::\d{2})?\s*(am|pm)?\s*[-~]\s*(\d{1,2})(?::\d{2})?\s*(am|pm)?/);
   if (range) {
-    const startSuffix = range[2] || range[4] || "";
-    const endSuffix = range[4] || range[2] || "";
+    const inferred = inferRangeSuffixes(Number(range[1]), range[2] || "", Number(range[3]), range[4] || "");
+    const startSuffix = inferred.startSuffix;
+    const endSuffix = inferred.endSuffix;
     startMinutes = parseHour(range[1], startSuffix);
     endMinutes = parseHour(range[3], endSuffix);
-    if (endMinutes <= startMinutes && !range[4] && !range[2]) {
+    if (endMinutes <= startMinutes) {
       endMinutes += 12 * 60;
     }
   }
 
+  if (endMinutes <= startMinutes) {
+    startMinutes = ROUTE_START_MINUTES;
+    endMinutes = ROUTE_END_MINUTES;
+  }
+
   const must = raw.includes("must") || priority === "P1";
   return { startMinutes, endMinutes, must };
+}
+
+function inferRangeSuffixes(startHour: number, startSuffix: string, endHour: number, endSuffix: string) {
+  if (startSuffix || !endSuffix) {
+    return { startSuffix: startSuffix || endSuffix, endSuffix: endSuffix || startSuffix };
+  }
+
+  if (endSuffix === "pm") {
+    if (startHour === 12) return { startSuffix: "pm", endSuffix };
+    if (startHour > endHour) return { startSuffix: "am", endSuffix };
+    return { startSuffix: "pm", endSuffix };
+  }
+
+  return { startSuffix: endSuffix, endSuffix };
 }
 
 function parseHour(hourText: string, suffix: string) {
