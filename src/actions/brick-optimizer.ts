@@ -60,6 +60,9 @@ export type BrickOptimizerStop = {
   pallets: number;
   priority: string;
   etaMinutes: number;
+  departMinutes?: number;
+  serviceMinutes?: number;
+  loadAfter?: number;
   lateMinutes: number;
   type: "order_pickup" | "delivery" | "restock_pickup" | "restock_dropoff";
 };

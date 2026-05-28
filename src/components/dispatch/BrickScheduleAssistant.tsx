@@ -53,6 +53,10 @@ type RouteEta = {
   orderId: string;
   label: string;
   eta: string;
+  depart?: string;
+  serviceMinutes?: number;
+  loadAfter?: number;
+  pallets: number;
   lateMinutes: number;
   type: "order_pickup" | "delivery" | "restock_pickup" | "restock_dropoff";
 };
@@ -258,6 +262,10 @@ export function BrickScheduleAssistant({
           orderId: stop.orderId,
           label: stop.label,
           eta: formatClock(stop.etaMinutes),
+          depart: typeof stop.departMinutes === "number" ? formatClock(stop.departMinutes) : undefined,
+          serviceMinutes: stop.serviceMinutes,
+          loadAfter: stop.loadAfter,
+          pallets: stop.pallets,
           lateMinutes: stop.lateMinutes,
           type: stop.type,
         })),
@@ -369,30 +377,40 @@ export function BrickScheduleAssistant({
                   <div key={route.driverId} className="rounded border bg-background p-2">
                     <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold">
                       <span className="truncate">{route.driverName} · {route.vehicleName}</span>
-                      <span>{route.load}/{route.capacity} PLT{route.restockPallets > 0 ? ` (+${route.restockPallets} 补货)` : ""}</span>
+                      <span>峰值 {route.load}/{route.capacity} PLT{route.restockPallets > 0 ? ` (+${route.restockPallets} 补货)` : ""}</span>
                     </div>
                     {route.loadOrders.length > 0 && (
                       <div className="mb-1 rounded bg-muted/40 px-2 py-1 text-xs">
-                        <span className="font-medium">本车客户货：</span>
+                        <span className="font-medium">本车安排客户：</span>
                         {route.loadOrders.map((order) => `${order.label} ${order.pallets} PLT`).join("、")}
                       </div>
                     )}
                     {route.etas.length > 0 ? (
                       <>
-                        <div className="mb-1 text-xs text-muted-foreground">
-                          {route.etas.map(formatStopLabel).join(" -> ")}
-                        </div>
                         <div className="mb-1 text-xs">
                           总行程约 {route.totalMinutes} 分钟 · {route.totalDistanceKm.toFixed(1)} km
                           {route.lateMinutes > 0 && <span className="text-destructive"> · 晚到 {route.lateMinutes} 分钟</span>}
                         </div>
-                        <div className="space-y-0.5">
+                        <div className="space-y-2">
                           {route.etas.map((eta, index) => (
-                            <div key={`${eta.orderId}-${eta.type}-${index}`} className={cn("flex justify-between gap-2 text-xs", eta.type !== "delivery" && "rounded bg-blue-500/10 px-1")}>
-                              <span className="truncate">{formatStopLabel(eta)}</span>
-                              <span className={eta.lateMinutes > 0 ? "text-destructive" : "text-muted-foreground"}>
-                                {eta.eta}{eta.lateMinutes > 0 ? ` +${eta.lateMinutes}m` : ""}
-                              </span>
+                            <div key={`${eta.orderId}-${eta.type}-${index}`} className="grid grid-cols-[64px_1fr] gap-2 text-xs">
+                              <div className="pt-0.5 text-right text-muted-foreground">
+                                <div className="font-medium text-foreground">{eta.eta}</div>
+                                {eta.depart && eta.depart !== eta.eta && <div>离 {eta.depart}</div>}
+                              </div>
+                              <div className={cn("rounded border bg-background px-2 py-1.5", eta.type !== "delivery" && "bg-blue-500/10", eta.lateMinutes > 0 && "border-destructive/40 bg-destructive/5")}>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="min-w-0 truncate font-medium">{formatStopLabel(eta)}</span>
+                                  <Badge variant={eta.type === "delivery" ? "outline" : "secondary"} className="shrink-0 text-[10px]">
+                                    {eta.pallets} PLT
+                                  </Badge>
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                                  {typeof eta.serviceMinutes === "number" && <span>服务 {eta.serviceMinutes} 分钟</span>}
+                                  {typeof eta.loadAfter === "number" && <span>完成后车上 {eta.loadAfter} PLT</span>}
+                                  {eta.lateMinutes > 0 && <span className="text-destructive">晚到 {eta.lateMinutes} 分钟</span>}
+                                </div>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -508,7 +526,7 @@ function buildDeliveryOrder(order: Order, lookup: LocationLookup) {
     label: orderLabel(order),
     pallets: order.pallet_count || 0,
     pickups: pickupKeys.map((key, index) => {
-      const location = resolveLocation(key, lookup);
+      const location = resolveLocation(key, lookup, "12441");
       return {
         label: `${location.label} 取 ${orderLabel(order)}`,
         address: location.address,
@@ -572,13 +590,21 @@ function destinationCodeFromAddress(address: string | null) {
   return trimmed;
 }
 
-function resolveLocation(key: string, lookup: LocationLookup) {
+function resolveLocation(key: string, lookup: LocationLookup, fallbackKey?: string) {
   const normalized = normalizeLocationKey(key);
-  return lookup.get(normalized) || KNOWN_LOCATIONS[key.toUpperCase()] || { label: key || "未知地点", address: key };
+  const fallback = fallbackKey ? lookup.get(normalizeLocationKey(fallbackKey)) : undefined;
+  if (lookup.has(normalized)) return lookup.get(normalized)!;
+  if (KNOWN_LOCATIONS[key.toUpperCase()]) return KNOWN_LOCATIONS[key.toUpperCase()];
+  if (isUuidLike(key) && fallback) return fallback;
+  return fallback || { label: key || "未知地点", address: key };
 }
 
 function normalizeLocationKey(value: string) {
   return (value || "").trim().toUpperCase();
+}
+
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim());
 }
 
 function splitPalletCount(total: number, parts: number) {

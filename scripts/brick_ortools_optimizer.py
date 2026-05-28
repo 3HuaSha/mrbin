@@ -195,7 +195,8 @@ def main() -> None:
         total_late_minutes = 0
         restock_pallets = 0
         prev_node = None
-        peak_load = reserved_loads[vehicle_id]
+        current_route_load = reserved_loads[vehicle_id]
+        peak_load = current_route_load
 
         while not routing.IsEnd(index):
             node = manager.IndexToNode(index)
@@ -203,20 +204,25 @@ def main() -> None:
             if prev_node is not None and distance_matrix and prev_node < num_nodes and node < num_nodes:
                 total_distance_km += float(distance_matrix[prev_node][node])
 
-            peak_load = max(peak_load, reserved_loads[vehicle_id] + solution.Value(cap_dim.CumulVar(index)))
             info = nodes[node]
             arrival = solution.Value(time_dim.CumulVar(index))
+            service_minutes = int(service_minutes_by_node[node] or 0) if node < len(service_minutes_by_node) else 0
 
             if node == 0:
                 pass
             elif info["kind"] == "order_pickup":
                 order = delivery_orders[int(info["orderIndex"])]
+                current_route_load += int(info["pallets"])
+                peak_load = max(peak_load, current_route_load)
                 stops.append({
                     "orderId": order["id"],
                     "label": info["label"],
                     "pallets": int(info["pallets"]),
                     "priority": order.get("priority") or "P3",
                     "etaMinutes": arrival,
+                    "departMinutes": arrival + service_minutes,
+                    "serviceMinutes": service_minutes,
+                    "loadAfter": current_route_load,
                     "lateMinutes": 0,
                     "type": "order_pickup",
                 })
@@ -234,24 +240,33 @@ def main() -> None:
                 end_min = int(order.get("endMinutes") or route_end)
                 late = max(0, arrival - end_min)
                 total_late_minutes += late
+                current_route_load -= int(order.get("pallets", 0))
                 stops.append({
                     "orderId": order_id,
                     "label": order.get("deliveryLabel") or order.get("label") or order_id,
                     "pallets": int(order.get("pallets", 0)),
                     "priority": order.get("priority") or "P3",
                     "etaMinutes": arrival,
+                    "departMinutes": arrival + service_minutes,
+                    "serviceMinutes": service_minutes,
+                    "loadAfter": current_route_load,
                     "lateMinutes": late,
                     "type": "delivery",
                 })
             elif info["kind"] == "restock_pickup":
                 order = restock_orders[int(info["restockIndex"])]
                 restock_pallets += int(order.get("pallets", 0))
+                current_route_load += int(info["pallets"])
+                peak_load = max(peak_load, current_route_load)
                 stops.append({
                     "orderId": order["id"],
                     "label": info["label"],
                     "pallets": int(info["pallets"]),
                     "priority": order.get("priority") or "P4",
                     "etaMinutes": arrival,
+                    "departMinutes": arrival + service_minutes,
+                    "serviceMinutes": service_minutes,
+                    "loadAfter": current_route_load,
                     "lateMinutes": 0,
                     "type": "restock_pickup",
                 })
@@ -259,12 +274,16 @@ def main() -> None:
                 restock_index = int(info["restockIndex"])
                 order = restock_orders[restock_index]
                 served_restock_orders.add(restock_index)
+                current_route_load -= int(info["pallets"])
                 stops.append({
                     "orderId": order["id"],
                     "label": info["label"],
                     "pallets": int(info["pallets"]),
                     "priority": order.get("priority") or "P4",
                     "etaMinutes": arrival,
+                    "departMinutes": arrival + service_minutes,
+                    "serviceMinutes": service_minutes,
+                    "loadAfter": current_route_load,
                     "lateMinutes": 0,
                     "type": "restock_dropoff",
                 })
