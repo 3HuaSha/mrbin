@@ -1,43 +1,10 @@
 #!/usr/bin/env python3
-"""OR-Tools VRP solver for brick dispatch — single depot, all orders as P&D pairs.
+"""OR-Tools VRP solver for brick dispatch.
 
-Business logic:
-- All vehicles start and end at depot (12441 Woodbine Ave)
-- Delivery orders: vehicle goes to yard to load → delivers to customer
-  - Modeled as P&D pair: pickup at yard, delivery at customer
-  - For 12441 yard orders, pickup is at depot (0 travel)
-- Pickup orders: vehicle goes to supplier to load → delivers to yard/customer
-  - Also a P&D pair: pickup at supplier, delivery at destination
-- Capacity tracks load: +pallets at pickup, -pallets at delivery
-- Time windows on customer deliveries; relaxed on pickups
-
-Input JSON (stdin):
-{
-  "vehicles": [{"driverId", "driverName", "vehicleName", "capacity", "currentLoad"}],
-  "deliveryOrders": [{"id", "label", "pallets",
-                       "pickupAddress": "yard address", "deliveryAddress": "customer address",
-                       "pickupLabel", "deliveryLabel",
-                       "priority", "startMinutes", "endMinutes", "must"}, ...],
-  "pickupOrders": [{"id", "label", "pallets",
-                     "pickupAddress": "supplier address", "deliveryAddress": "destination address",
-                     "pickupLabel", "deliveryLabel",
-                     "priority", "endMinutes"}, ...],
-  "durationMatrix": [[...]],   // (1+2*D+2*P) x (1+2*D+2*P), in minutes
-  "distanceMatrix": [[...]],  // same dims, in km
-  "serviceMinutes": 15,
-  "routeStartHour": 8,
-  "timeLimitSeconds": 30
-}
-
-Node indices:
-  0 = depot (12441)
-  1,2 = delivery order 0 (pickup at yard, delivery at customer)
-  3,4 = delivery order 1 (pickup at yard, delivery at customer)
-  ...
-  2*D+1, 2*D+2 = pickup order 0 (pickup at supplier, delivery at dest)
-  ...
-
-Output JSON (stdout).
+Delivery orders are preloaded before the truck leaves. The solver still decides
+which truck carries which delivery orders, but those orders do not create yard
+pickup stops in the route. Factory pickup/restock orders remain pickup-delivery
+pairs because they can happen after customer deliveries free up space.
 """
 
 import json
@@ -49,7 +16,9 @@ except Exception as exc:
     print(json.dumps({"success": False, "error": f"OR-Tools import failed: {exc}"}))
     sys.exit(0)
 
+
 PRIORITY_PENALTY = {"P1": 500000, "P2": 200000, "P3": 80000, "P4": 20000}
+SOFT_LATE_PENALTY = {"P1": 20000, "P2": 8000, "P3": 2500, "P4": 600}
 MUST_PENALTY = 10000000
 PICKUP_ORDER_PENALTY = 60000
 
@@ -60,6 +29,7 @@ def main() -> None:
     except Exception as exc:
         print(json.dumps({"success": False, "error": f"JSON parse error: {exc}"}))
         return
+
     vehicles = payload.get("vehicles", [])
     delivery_orders = payload.get("deliveryOrders", [])
     pickup_orders = payload.get("pickupOrders", [])
@@ -79,49 +49,36 @@ def main() -> None:
     if not delivery_orders and not pickup_orders:
         print(json.dumps({"success": True, "routes": [], "unplanned": []}))
         return
-    if not duration_matrix or len(duration_matrix) < 2:
-        print(json.dumps({"success": False, "error": "Duration matrix is missing or too small"}))
-        return
 
     num_deliveries = len(delivery_orders)
     num_pickups = len(pickup_orders)
-    # Nodes: 0=depot, 1..2*D=delivery P&D pairs, 2*D+1..2*D+2*P=pickup P&D pairs
-    num_nodes = 1 + 2 * num_deliveries + 2 * num_pickups
+    num_nodes = 1 + num_deliveries + 2 * num_pickups
     num_vehicles = len(vehicles)
 
     if len(duration_matrix) < num_nodes or any(len(row) < num_nodes for row in duration_matrix[:num_nodes]):
         print(json.dumps({"success": False, "error": f"Duration matrix size mismatch: expected {num_nodes}x{num_nodes}"}))
         return
 
-    # ---- Node helpers ----
-    # Delivery order i: pickup=2*i+1, delivery=2*i+2
-    # Pickup order j: pickup=2*num_deliveries+2*j+1, delivery=2*num_deliveries+2*j+2
+    delivery_start = 1
+    pickup_start = 1 + num_deliveries
 
-    def is_delivery_pickup(node):
-        """Node is a yard pickup for a delivery order."""
-        return 1 <= node <= 2 * num_deliveries and node % 2 == 1
-
-    def is_delivery_drop(node):
-        """Node is a customer delivery for a delivery order."""
-        return 1 <= node <= 2 * num_deliveries and node % 2 == 0
+    def is_delivery_node(node):
+        return delivery_start <= node < pickup_start
 
     def is_pickup_pickup(node):
-        """Node is a supplier pickup for a pickup order."""
-        offset = node - 2 * num_deliveries
-        return offset >= 1 and offset % 2 == 1
+        offset = node - pickup_start
+        return offset >= 0 and offset % 2 == 0
 
     def is_pickup_drop(node):
-        """Node is a destination delivery for a pickup order."""
-        offset = node - 2 * num_deliveries
-        return offset >= 1 and offset % 2 == 0
+        offset = node - pickup_start
+        return offset >= 0 and offset % 2 == 1
 
     def delivery_order_index(node):
-        return (node - 1) // 2
+        return node - delivery_start
 
     def pickup_order_index(node):
-        return (node - 2 * num_deliveries - 1) // 2
+        return (node - pickup_start) // 2
 
-    # ---- Build routing model ----
     manager = pywrapcp.RoutingIndexManager(num_nodes, num_vehicles, 0)
     routing = pywrapcp.RoutingModel(manager)
 
@@ -131,7 +88,6 @@ def main() -> None:
         if from_node == to_node:
             return 0
         travel = int(duration_matrix[from_node][to_node])
-        # Add service time at non-depot nodes
         if from_node > 0:
             return service_minutes + travel
         return travel
@@ -139,17 +95,11 @@ def main() -> None:
     transit_cb_idx = routing.RegisterTransitCallback(transit_callback)
     routing.SetArcCostEvaluatorOfAllVehicles(transit_cb_idx)
 
-    # ---- Capacity: load-tracking ----
-    # Pickup nodes: +pallets (load goods)
-    # Delivery/drop nodes: -pallets (unload goods)
     def demand_callback(from_index):
         from_node = manager.IndexToNode(from_index)
         if from_node == 0:
             return 0
-        if is_delivery_pickup(from_node):
-            oi = delivery_order_index(from_node)
-            return int(delivery_orders[oi].get("pallets", 0))
-        if is_delivery_drop(from_node):
+        if is_delivery_node(from_node):
             oi = delivery_order_index(from_node)
             return -int(delivery_orders[oi].get("pallets", 0))
         if is_pickup_pickup(from_node):
@@ -161,22 +111,20 @@ def main() -> None:
         return 0
 
     demand_cb_idx = routing.RegisterUnaryTransitCallback(demand_callback)
-    capacities = [int(v.get("capacity", 28)) for v in vehicles]
-    routing.AddDimensionWithVehicleCapacity(
-        demand_cb_idx, 0, capacities, False, "Capacity",
-    )
+    physical_capacities = [int(v.get("capacity", 28)) for v in vehicles]
+    reserved_loads = [int(v.get("currentLoad", 0)) for v in vehicles]
+    capacities = [
+        max(0, physical_capacities[v_id] - reserved_loads[v_id])
+        for v_id in range(len(vehicles))
+    ]
+    routing.AddDimensionWithVehicleCapacity(demand_cb_idx, 0, capacities, False, "Capacity")
     cap_dim = routing.GetDimensionOrDie("Capacity")
 
-    for v_id in range(num_vehicles):
-        current = int(vehicles[v_id].get("currentLoad", 0))
-        cap = capacities[v_id]
-        cap_dim.CumulVar(routing.Start(v_id)).SetRange(current, cap)
-        cap_dim.CumulVar(routing.End(v_id)).SetRange(current, cap)
-
-    for v_id in range(num_vehicles):
+    for v_id in range(len(vehicles)):
+        cap_dim.CumulVar(routing.Start(v_id)).SetRange(0, capacities[v_id])
+        cap_dim.CumulVar(routing.End(v_id)).SetRange(0, capacities[v_id])
         routing.AddVariableMinimizedByFinalizer(cap_dim.CumulVar(routing.Start(v_id)))
 
-    # ---- Time dimension ----
     routing.AddDimension(transit_cb_idx, 30, 24 * 60, False, "Time")
     time_dim = routing.GetDimensionOrDie("Time")
 
@@ -185,40 +133,27 @@ def main() -> None:
         time_dim.CumulVar(routing.Start(v_id)).SetRange(route_start, route_start + 60)
         time_dim.CumulVar(routing.End(v_id)).SetRange(route_start, 22 * 60)
 
-    # Delivery order time windows: strict on delivery node, relaxed on pickup node
     for oi, order in enumerate(delivery_orders):
-        pickup_node = 2 * oi + 1
-        delivery_node = 2 * oi + 2
-        # Pickup at yard: can visit any time during the day
-        time_dim.CumulVar(manager.NodeToIndex(pickup_node)).SetRange(route_start, 20 * 60)
-        # Delivery at customer: strict time window
-        start_min = int(order.get("startMinutes") or route_start)
+        node = delivery_start + oi
+        index = manager.NodeToIndex(node)
+        start_min = max(route_start, int(order.get("startMinutes") or route_start))
         end_min = int(order.get("endMinutes") or 17 * 60)
-        if start_min < route_start:
-            start_min = route_start
-        time_dim.CumulVar(manager.NodeToIndex(delivery_node)).SetRange(start_min, end_min + 90)
+        priority = order.get("priority") or "P3"
+        if order.get("must") or priority == "P1":
+            time_dim.CumulVar(index).SetRange(start_min, end_min)
+        else:
+            grace = 30 if priority == "P2" else 90
+            time_dim.CumulVar(index).SetRange(start_min, end_min + grace)
+            time_dim.SetCumulVarSoftUpperBound(index, end_min, SOFT_LATE_PENALTY.get(priority, 2500))
+        routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(index))
 
-    # Pickup order time windows: relaxed on both nodes
     for pi, porder in enumerate(pickup_orders):
-        pickup_node = 2 * num_deliveries + 2 * pi + 1
-        delivery_node = 2 * num_deliveries + 2 * pi + 2
+        pickup_node = pickup_start + 2 * pi
+        delivery_node = pickup_start + 2 * pi + 1
         end_min = int(porder.get("endMinutes") or 20 * 60)
         time_dim.CumulVar(manager.NodeToIndex(pickup_node)).SetRange(route_start, end_min)
         time_dim.CumulVar(manager.NodeToIndex(delivery_node)).SetRange(route_start, end_min + 30)
 
-    # Minimize arrival times at delivery drop nodes (customer)
-    for oi in range(num_deliveries):
-        delivery_node = 2 * oi + 2
-        routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(manager.NodeToIndex(delivery_node)))
-
-    # ---- Pickup & Delivery pairs ----
-    # Use routing.AddPickupAndDelivery() — PATH_CHEAPEST_ARC respects this
-    # (solver.Add constraints are ignored by the first-solution heuristic)
-
-    # Delivery order pairs: yard pickup → customer delivery
-    for oi in range(num_deliveries):
-        pickup_node = 2 * oi + 1
-        delivery_node = 2 * oi + 2
         pickup_idx = manager.NodeToIndex(pickup_node)
         delivery_idx = manager.NodeToIndex(delivery_node)
         routing.AddPickupAndDelivery(pickup_idx, delivery_idx)
@@ -226,47 +161,23 @@ def main() -> None:
         solver.Add(routing.VehicleVar(pickup_idx) == routing.VehicleVar(delivery_idx))
         solver.Add(time_dim.CumulVar(pickup_idx) <= time_dim.CumulVar(delivery_idx))
 
-    # Pickup order pairs: supplier pickup → destination delivery
-    for pi in range(num_pickups):
-        pickup_node = 2 * num_deliveries + 2 * pi + 1
-        delivery_node = 2 * num_deliveries + 2 * pi + 2
-        pickup_idx = manager.NodeToIndex(pickup_node)
-        delivery_idx = manager.NodeToIndex(delivery_node)
-        routing.AddPickupAndDelivery(pickup_idx, delivery_idx)
-        solver = routing.solver()
-        solver.Add(routing.VehicleVar(pickup_idx) == routing.VehicleVar(delivery_idx))
-        solver.Add(time_dim.CumulVar(pickup_idx) <= time_dim.CumulVar(delivery_idx))
-
-    # ---- Drop penalties ----
-    # For P&D pairs, each node must be in its OWN disjunction with the same penalty.
-    # OR-Tools will drop both together when they're P&D constrained.
     for oi, order in enumerate(delivery_orders):
-        pickup_node = 2 * oi + 1
-        delivery_node = 2 * oi + 2
-        if order.get("must"):
-            penalty = MUST_PENALTY
-        else:
-            priority = order.get("priority") or "P3"
-            penalty = PRIORITY_PENALTY.get(priority, 80000)
-        routing.AddDisjunction([manager.NodeToIndex(pickup_node)], penalty)
-        routing.AddDisjunction([manager.NodeToIndex(delivery_node)], penalty)
+        node = delivery_start + oi
+        priority = order.get("priority") or "P3"
+        penalty = MUST_PENALTY if order.get("must") else PRIORITY_PENALTY.get(priority, 80000)
+        routing.AddDisjunction([manager.NodeToIndex(node)], penalty)
 
     for pi, porder in enumerate(pickup_orders):
-        pickup_node = 2 * num_deliveries + 2 * pi + 1
-        delivery_node = 2 * num_deliveries + 2 * pi + 2
+        pickup_node = pickup_start + 2 * pi
+        delivery_node = pickup_start + 2 * pi + 1
         priority = porder.get("priority") or "P3"
         penalty = PRIORITY_PENALTY.get(priority, PICKUP_ORDER_PENALTY)
         routing.AddDisjunction([manager.NodeToIndex(pickup_node)], penalty)
         routing.AddDisjunction([manager.NodeToIndex(delivery_node)], penalty)
 
-    # ---- Solve ----
     search_params = pywrapcp.DefaultRoutingSearchParameters()
-    search_params.first_solution_strategy = (
-        routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
-    )
-    search_params.local_search_metaheuristic = (
-        routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-    )
+    search_params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    search_params.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     search_params.time_limit.seconds = int(time_limit)
 
     solution = routing.SolveWithParameters(search_params)
@@ -275,50 +186,33 @@ def main() -> None:
         print(json.dumps({"success": False, "error": "No feasible solution found"}))
         return
 
-    # ---- Extract results ----
     routes = []
     served_delivery_orders = set()
     served_pickup_orders = set()
 
-    for v_id in range(num_vehicles):
-        vehicle = vehicles[v_id]
+    for v_id, vehicle in enumerate(vehicles):
         index = routing.Start(v_id)
         stops = []
+        preload_orders = []
+        vehicle_delivery_oi = set()
+        vehicle_pickup_oi = set()
         total_distance_km = 0.0
         total_late_minutes = 0
         prev_node = None
-        vehicle_delivery_oi = set()
-        vehicle_pickup_oi = set()
-        peak_load = 0
+        reserved_load = reserved_loads[v_id]
+        peak_load = reserved_load + solution.Value(cap_dim.CumulVar(index))
 
         while not routing.IsEnd(index):
             node = manager.IndexToNode(index)
 
-            if prev_node is not None and distance_matrix:
-                if prev_node < num_nodes and node < num_nodes:
-                    total_distance_km += float(distance_matrix[prev_node][node])
+            if prev_node is not None and distance_matrix and prev_node < num_nodes and node < num_nodes:
+                total_distance_km += float(distance_matrix[prev_node][node])
 
-            # Track peak load from capacity dimension
-            load_val = solution.Value(cap_dim.CumulVar(index))
-            if load_val > peak_load:
-                peak_load = load_val
+            peak_load = max(peak_load, reserved_load + solution.Value(cap_dim.CumulVar(index)))
 
             if node == 0:
-                pass  # depot, skip
-            elif is_delivery_pickup(node):
-                oi = delivery_order_index(node)
-                order = delivery_orders[oi]
-                arrival = solution.Value(time_dim.CumulVar(index))
-                stops.append({
-                    "orderId": order["id"],
-                    "label": f"🏗上 {order.get('pickupLabel') or order.get('label') or order['id']}",
-                    "pallets": int(order.get("pallets", 0)),
-                    "priority": order.get("priority") or "P3",
-                    "etaMinutes": arrival,
-                    "lateMinutes": 0,
-                    "type": "yard_pickup",
-                })
-            elif is_delivery_drop(node):
+                pass
+            elif is_delivery_node(node):
                 oi = delivery_order_index(node)
                 order = delivery_orders[oi]
                 served_delivery_orders.add(oi)
@@ -342,7 +236,7 @@ def main() -> None:
                 arrival = solution.Value(time_dim.CumulVar(index))
                 stops.append({
                     "orderId": porder["id"],
-                    "label": f"🏭取 {porder.get('pickupLabel') or porder.get('label') or porder['id']}",
+                    "label": f"取 {porder.get('pickupLabel') or porder.get('label') or porder['id']}",
                     "pallets": int(porder.get("pallets", 0)),
                     "priority": porder.get("priority") or "P3",
                     "etaMinutes": arrival,
@@ -360,7 +254,7 @@ def main() -> None:
                 total_late_minutes += late
                 stops.append({
                     "orderId": porder["id"],
-                    "label": f"📦送 {porder.get('deliveryLabel') or porder.get('label') or porder['id']}",
+                    "label": f"送 {porder.get('deliveryLabel') or porder.get('label') or porder['id']}",
                     "pallets": int(porder.get("pallets", 0)),
                     "priority": porder.get("priority") or "P3",
                     "etaMinutes": arrival,
@@ -371,35 +265,37 @@ def main() -> None:
             prev_node = node
             index = solution.Value(routing.NextVar(index))
 
-        # Return-to-depot distance
         end_node = manager.IndexToNode(index)
-        if prev_node is not None and distance_matrix:
-            if prev_node < num_nodes and end_node < num_nodes:
-                total_distance_km += float(distance_matrix[prev_node][end_node])
+        if prev_node is not None and distance_matrix and prev_node < num_nodes and end_node < num_nodes:
+            total_distance_km += float(distance_matrix[prev_node][end_node])
 
+        for oi in sorted(vehicle_delivery_oi):
+            order = delivery_orders[oi]
+            preload_orders.append({
+                "orderId": order["id"],
+                "label": order.get("label") or order["id"],
+                "pallets": int(order.get("pallets", 0)),
+                "priority": order.get("priority") or "P3",
+            })
+
+        pickup_plt = sum(int(pickup_orders[oi].get("pallets", 0)) for oi in vehicle_pickup_oi)
         start_time = solution.Value(time_dim.CumulVar(routing.Start(v_id)))
         end_time = solution.Value(time_dim.CumulVar(routing.End(v_id)))
-        total_minutes = end_time - start_time
-
-        pickup_plt = sum(
-            int(pickup_orders[oi].get("pallets", 0))
-            for oi in vehicle_pickup_oi
-        )
 
         routes.append({
             "driverId": vehicle["driverId"],
             "driverName": vehicle.get("driverName") or "",
             "vehicleName": vehicle.get("vehicleName") or "",
-            "load": peak_load,
-            "capacity": int(vehicle.get("capacity", 28)),
+            "load": reserved_load + solution.Value(cap_dim.CumulVar(routing.Start(v_id))),
+            "capacity": physical_capacities[v_id],
+            "preloadOrders": preload_orders,
             "stops": stops,
-            "totalMinutes": total_minutes,
+            "totalMinutes": end_time - start_time,
             "totalDistanceKm": round(total_distance_km, 1),
             "lateMinutes": total_late_minutes,
             "pickupPallets": pickup_plt,
         })
 
-    # Unplanned
     unplanned = []
     for oi, order in enumerate(delivery_orders):
         if oi not in served_delivery_orders:
@@ -407,7 +303,7 @@ def main() -> None:
                 "id": order["id"],
                 "label": order.get("label") or order["id"],
                 "pallets": int(order.get("pallets", 0)),
-                "reason": "Could not fit in any vehicle route",
+                "reason": "容量或时间窗不适合当前车辆路线",
             })
     for pi, porder in enumerate(pickup_orders):
         if pi not in served_pickup_orders:
@@ -415,7 +311,7 @@ def main() -> None:
                 "id": porder["id"],
                 "label": porder.get("label") or porder["id"],
                 "pallets": int(porder.get("pallets", 0)),
-                "reason": "Could not fit pickup order in any vehicle route",
+                "reason": "顺路取货会超载或影响路线",
             })
 
     print(json.dumps({
@@ -423,7 +319,7 @@ def main() -> None:
         "status": "OPTIMAL",
         "routes": routes,
         "unplanned": unplanned,
-    }))
+    }, ensure_ascii=False))
 
 
 if __name__ == "__main__":

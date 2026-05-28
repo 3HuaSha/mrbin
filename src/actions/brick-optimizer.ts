@@ -14,10 +14,8 @@ export type BrickOptimizerOrder = {
   id: string;
   label: string;
   pallets: number;
-  pickupAddress: string;   // yard address where goods are loaded
-  deliveryAddress: string; // customer address where goods are delivered
-  pickupLabel?: string;    // e.g. "2967场地"
-  deliveryLabel?: string;  // e.g. customer name
+  deliveryAddress: string;
+  deliveryLabel?: string;
   priority: string;
   startMinutes?: number;
   endMinutes?: number;
@@ -28,20 +26,20 @@ export type BrickPickupOrder = {
   id: string;
   label: string;
   pallets: number;
-  pickupAddress: string;   // supplier address (e.g. UNILOCK Pickering)
-  deliveryAddress: string; // yard or customer address (e.g. 3445, 12441)
-  pickupLabel?: string;    // display label for pickup stop
-  deliveryLabel?: string;  // display label for delivery stop
+  pickupAddress: string;
+  deliveryAddress: string;
+  pickupLabel?: string;
+  deliveryLabel?: string;
   priority?: string;
-  endMinutes?: number;     // latest arrival (e.g. 20*60=1200 for 8pm close)
+  endMinutes?: number;
 };
 
 export type BrickOptimizerInput = {
   vehicles: BrickOptimizerVehicle[];
   deliveryOrders: BrickOptimizerOrder[];
   pickupOrders?: BrickPickupOrder[];
-  durationMatrix: number[][];   // (1+2*D+2*P) x (1+2*D+2*P), in minutes, index 0 = depot
-  distanceMatrix: number[][];   // same dims, in km
+  durationMatrix: number[][];
+  distanceMatrix: number[][];
   serviceMinutes?: number;
   routeStartHour?: number;
   timeLimitSeconds?: number;
@@ -54,7 +52,14 @@ export type BrickOptimizerStop = {
   priority: string;
   etaMinutes: number;
   lateMinutes: number;
-  type: "yard_pickup" | "delivery" | "pickup" | "pickup_delivery";
+  type: "delivery" | "pickup" | "pickup_delivery";
+};
+
+export type BrickPreloadOrder = {
+  orderId: string;
+  label: string;
+  pallets: number;
+  priority: string;
 };
 
 export type BrickOptimizerRoute = {
@@ -63,6 +68,7 @@ export type BrickOptimizerRoute = {
   vehicleName: string;
   load: number;
   capacity: number;
+  preloadOrders: BrickPreloadOrder[];
   stops: BrickOptimizerStop[];
   totalMinutes: number;
   totalDistanceKm: number;
