@@ -16,8 +16,24 @@ import { cn } from "@/lib/utils";
 import { Assignment, Order, Profile, Vehicle } from "@/types/dispatch";
 import { optimizeBrickSchedule } from "@/actions/brick-optimizer";
 import { getCachedRouteMatrix, RouteMatrixEntry } from "@/actions/route-matrix";
+import { supabase } from "@/integrations/supabase/client";
 
 const DEPOT_ADDRESS = "12441 Woodbine Ave, Gormley, ON L4A 2K4";
+const ROUTE_START_MINUTES = 6 * 60;
+const ROUTE_END_MINUTES = 23 * 60;
+
+const KNOWN_LOCATIONS: Record<string, { label: string; address: string }> = {
+  "12441": { label: "12441", address: "12441 Woodbine Ave, Gormley, ON L4A 2K4" },
+  "3445": { label: "3445", address: "3445 Kennedy Rd, Scarborough, ON M1V 4Y3" },
+  "2967": { label: "2967", address: "2967 Kennedy Rd, Scarborough, ON M1V 1S9" },
+  "150": { label: "150", address: "150 Clark Blvd, Brampton, ON L6T 4Y8" },
+  "189": { label: "189", address: "189 Select Ave, Scarborough, ON M1V 5J3" },
+  GEORGETOWN: { label: "GEORGETOWN", address: "287 Armstrong Ave, Georgetown, ON L7G 4X6" },
+  "UNILOCK (GEORGETOWN)": { label: "UNILOCK Georgetown", address: "287 Armstrong Ave, Georgetown, ON L7G 4X6" },
+  "UNILOCK (PICKERING)": { label: "UNILOCK Pickering", address: "1019 Toy Ave, Pickering, ON L1W 3N9" },
+  "TRIPLE H (PUTNAM)": { label: "TRIPLE H Putnam", address: "596728 Highway 59, Putnam, ON N0L 2B0" },
+  "BW (WOODBRIDGE)": { label: "BW Woodbridge", address: "75 Haist Ave, Woodbridge, ON L4L 5V5" },
+};
 
 interface BrickScheduleAssistantProps {
   drivers: Profile[];
@@ -26,7 +42,7 @@ interface BrickScheduleAssistantProps {
   getVehicle: (driverId: string) => Vehicle | undefined;
 }
 
-type PreloadOrder = {
+type LoadOrder = {
   orderId: string;
   label: string;
   pallets: number;
@@ -38,7 +54,7 @@ type RouteEta = {
   label: string;
   eta: string;
   lateMinutes: number;
-  type: "delivery" | "pickup" | "pickup_delivery";
+  type: "order_pickup" | "delivery" | "restock_pickup" | "restock_dropoff";
 };
 
 type WholeRouteResult = {
@@ -52,8 +68,8 @@ type WholeRouteResult = {
   totalMinutes: number;
   totalDistanceKm: number;
   lateMinutes: number;
-  pickupPallets: number;
-  preloadOrders: PreloadOrder[];
+  restockPallets: number;
+  loadOrders: LoadOrder[];
   etas: RouteEta[];
 };
 
@@ -68,6 +84,10 @@ type WholeRouteResponse = {
   fallbackElements?: number;
   totalPairs?: number;
 };
+
+type LocationLookup = Map<string, { label: string; address: string }>;
+type DeliveryOrderInput = ReturnType<typeof buildDeliveryOrder>;
+type RestockOrderInput = NonNullable<ReturnType<typeof buildRestockOrder>>;
 
 function isFlatVehicle(vehicle: Vehicle | undefined) {
   return (vehicle?.name || "").toUpperCase().startsWith("FLAT");
@@ -134,56 +154,51 @@ export function BrickScheduleAssistant({
     nonFlatAssigned.length +
     missingPalletOrders.length;
 
-  const optimizerInput = useMemo(() => ({
-    vehicles: flatDrivers.map(({ driver, vehicle }) => ({
-      driverId: driver.id,
-      driverName: driver.name,
-      vehicleName: vehicle?.name || "",
-      capacity: capacityOf(vehicle),
-      currentLoad: driverLoads.get(driver.id) || 0,
-    })),
-    orders: unassigned
-      .filter((order) => (order.pallet_count || 0) > 0 && order.address)
-      .map((order) => {
-        const window = parseTimeWindow(order);
-        return {
-          id: order.id,
-          label: orderLabel(order),
-          pallets: order.pallet_count || 0,
-          deliveryAddress: order.address || "",
-          deliveryLabel: orderLabel(order),
-          priority: order.priority || "P3",
-          startMinutes: window.startMinutes,
-          endMinutes: window.endMinutes,
-          must: window.must,
-        };
-      }),
-    timeLimitSeconds: 30,
-  }), [flatDrivers, driverLoads, unassigned]);
+  const vehicleInput = useMemo(() => flatDrivers.map(({ driver, vehicle }) => ({
+    driverId: driver.id,
+    driverName: driver.name,
+    vehicleName: vehicle?.name || "",
+    capacity: capacityOf(vehicle),
+    currentLoad: driverLoads.get(driver.id) || 0,
+  })), [flatDrivers, driverLoads]);
+
+  const schedulableCount = useMemo(
+    () => unassigned.filter((order) => (order.pallet_count || 0) > 0 && order.address).length,
+    [unassigned],
+  );
 
   const wholeRoute = useMutation({
     mutationFn: async (): Promise<WholeRouteResponse> => {
-      const deliveryOrders = optimizerInput.orders;
-      if (deliveryOrders.length === 0) {
-        return { success: false as const, error: "没有可排的订单地址" };
+      const lookup = await buildLocationLookup();
+
+      const deliveryOrders = unassigned
+        .filter((order) =>
+          (order.pallet_count || 0) > 0 &&
+          order.address &&
+          (order.brick_order_type || "delivery_to_customer") === "delivery_to_customer"
+        )
+        .map((order) => buildDeliveryOrder(order, lookup));
+
+      const restockOrders: RestockOrderInput[] = unassigned
+        .filter((order) =>
+          (order.pallet_count || 0) > 0 &&
+          order.brick_order_type === "pickup_from_factory"
+        )
+        .map((order) => buildRestockOrder(order, lookup))
+        .filter((order): order is RestockOrderInput => Boolean(order));
+
+      if (deliveryOrders.length === 0 && restockOrders.length === 0) {
+        return { success: false as const, error: "没有可排的送砖/补货订单" };
       }
 
-      // Future factory pickup/restock jobs can be inserted here as pickup/dropoff pairs.
-      const pickupOrders: Array<{
-        id: string;
-        label: string;
-        pallets: number;
-        pickupAddress: string;
-        deliveryAddress: string;
-        pickupLabel?: string;
-        deliveryLabel?: string;
-        priority?: string;
-        endMinutes?: number;
-      }> = [];
-
-      const deliveryAddresses = deliveryOrders.map((order) => order.deliveryAddress);
-      const pickupAddresses = pickupOrders.flatMap((order) => [order.pickupAddress, order.deliveryAddress]);
-      const addresses = [DEPOT_ADDRESS, ...deliveryAddresses, ...pickupAddresses];
+      const addresses = [
+        DEPOT_ADDRESS,
+        ...deliveryOrders.flatMap((order) => [
+          ...order.pickups.map((pickup) => pickup.address),
+          order.deliveryAddress,
+        ]),
+        ...restockOrders.flatMap((order) => [order.pickupAddress, order.deliveryAddress]),
+      ];
 
       const matrix = await getCachedRouteMatrix({ data: { addresses } });
       const matrixMap = makeMatrixMap(matrix.entries);
@@ -191,6 +206,7 @@ export function BrickScheduleAssistant({
       const n = addresses.length;
       const durationMatrix: number[][] = [];
       const distanceMatrix: number[][] = [];
+      const serviceMinutesByNode = buildServiceMinutes(deliveryOrders, restockOrders);
 
       for (let i = 0; i < n; i++) {
         durationMatrix[i] = [];
@@ -209,13 +225,14 @@ export function BrickScheduleAssistant({
 
       const optimized = await optimizeBrickSchedule({
         data: {
-          vehicles: optimizerInput.vehicles,
+          vehicles: vehicleInput,
           deliveryOrders,
-          pickupOrders,
+          restockOrders,
           durationMatrix,
           distanceMatrix,
-          serviceMinutes: 15,
-          routeStartHour: 8,
+          serviceMinutesByNode,
+          routeStartMinutes: ROUTE_START_MINUTES,
+          routeEndMinutes: ROUTE_END_MINUTES,
           timeLimitSeconds: 30,
         },
       });
@@ -235,8 +252,8 @@ export function BrickScheduleAssistant({
         totalMinutes: route.totalMinutes,
         totalDistanceKm: route.totalDistanceKm,
         lateMinutes: route.lateMinutes,
-        pickupPallets: route.pickupPallets || 0,
-        preloadOrders: route.preloadOrders || [],
+        restockPallets: route.restockPallets || 0,
+        loadOrders: route.loadOrders || [],
         etas: route.stops.map((stop) => ({
           orderId: stop.orderId,
           label: stop.label,
@@ -276,7 +293,7 @@ export function BrickScheduleAssistant({
         <SheetHeader>
           <SheetTitle>送砖辅助排班</SheetTitle>
           <SheetDescription>
-            只使用车名以 FLAT 开头的车辆，普通送货单按出车前预装计算，途中取货只用于砖厂补货/直送。
+            FLAT 车辆参与排班，客户单按取货场地到客户建模，补货单按砖厂到四个场地建模。
           </SheetDescription>
         </SheetHeader>
 
@@ -327,7 +344,7 @@ export function BrickScheduleAssistant({
               variant="secondary"
               className="mb-3 w-full gap-2"
               onClick={() => wholeRoute.mutate()}
-              disabled={wholeRoute.isPending || optimizerInput.vehicles.length === 0 || optimizerInput.orders.length === 0}
+              disabled={wholeRoute.isPending || vehicleInput.length === 0 || schedulableCount === 0}
             >
               <Wand2 className="h-4 w-4" />
               {wholeRoute.isPending ? "整体排班计算中..." : "整体自动排班"}
@@ -352,12 +369,12 @@ export function BrickScheduleAssistant({
                   <div key={route.driverId} className="rounded border bg-background p-2">
                     <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold">
                       <span className="truncate">{route.driverName} · {route.vehicleName}</span>
-                      <span>{route.load}/{route.capacity} PLT{route.pickupPallets > 0 ? ` (+${route.pickupPallets} 取货)` : ""}</span>
+                      <span>{route.load}/{route.capacity} PLT{route.restockPallets > 0 ? ` (+${route.restockPallets} 补货)` : ""}</span>
                     </div>
-                    {route.preloadOrders.length > 0 && (
+                    {route.loadOrders.length > 0 && (
                       <div className="mb-1 rounded bg-muted/40 px-2 py-1 text-xs">
-                        <span className="font-medium">出车前装货：</span>
-                        {route.preloadOrders.map((order) => `${order.label} ${order.pallets} PLT`).join("、")}
+                        <span className="font-medium">本车客户货：</span>
+                        {route.loadOrders.map((order) => `${order.label} ${order.pallets} PLT`).join("、")}
                       </div>
                     )}
                     {route.etas.length > 0 ? (
@@ -370,8 +387,8 @@ export function BrickScheduleAssistant({
                           {route.lateMinutes > 0 && <span className="text-destructive"> · 晚到 {route.lateMinutes} 分钟</span>}
                         </div>
                         <div className="space-y-0.5">
-                          {route.etas.map((eta) => (
-                            <div key={`${eta.orderId}-${eta.type}`} className={cn("flex justify-between gap-2 text-xs", eta.type !== "delivery" && "rounded bg-blue-500/10 px-1")}>
+                          {route.etas.map((eta, index) => (
+                            <div key={`${eta.orderId}-${eta.type}-${index}`} className={cn("flex justify-between gap-2 text-xs", eta.type !== "delivery" && "rounded bg-blue-500/10 px-1")}>
                               <span className="truncate">{formatStopLabel(eta)}</span>
                               <span className={eta.lateMinutes > 0 ? "text-destructive" : "text-muted-foreground"}>
                                 {eta.eta}{eta.lateMinutes > 0 ? ` +${eta.lateMinutes}m` : ""}
@@ -397,7 +414,7 @@ export function BrickScheduleAssistant({
             )}
 
             <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-              OR-Tools 同时分配订单到车辆并优化路线。普通客户单作为出车前装货参与容量计算，路线上只显示客户送货和途中砖厂取货。
+              司机时间按 06:00-23:00；取货/卸货服务时间按 10 + 2 × PLT 分钟；P1/must 为硬时间窗。
             </div>
           </section>
 
@@ -453,17 +470,156 @@ function IssueLine({ text }: { text: string }) {
   );
 }
 
+async function buildLocationLookup(): Promise<LocationLookup> {
+  const lookup: LocationLookup = new Map();
+  Object.entries(KNOWN_LOCATIONS).forEach(([key, value]) => {
+    lookup.set(normalizeLocationKey(key), value);
+  });
+
+  const [{ data: yards }, { data: factories }] = await Promise.all([
+    supabase.from("company_yards").select("id,name,address"),
+    (supabase.from("brick_factories") as any).select("id,name,address"),
+  ]);
+
+  ((yards || []) as Array<{ id: string; name: string; address: string }>).forEach((yard) => {
+    const value = { label: yard.name, address: yard.address };
+    lookup.set(normalizeLocationKey(yard.id), value);
+    lookup.set(normalizeLocationKey(yard.name), value);
+    const code = yard.name.match(/\b\d{3,5}\b/)?.[0];
+    if (code) lookup.set(normalizeLocationKey(code), value);
+  });
+
+  ((factories || []) as Array<{ id: string; name: string; address: string }>).forEach((factory) => {
+    const value = { label: factory.name, address: factory.address };
+    lookup.set(normalizeLocationKey(factory.id), value);
+    lookup.set(normalizeLocationKey(factory.name), value);
+  });
+
+  return lookup;
+}
+
+function buildDeliveryOrder(order: Order, lookup: LocationLookup) {
+  const window = parseTimeWindow(order);
+  const pickupKeys = getPickupKeys(order);
+  const splitPallets = splitPalletCount(order.pallet_count || 0, pickupKeys.length);
+
+  return {
+    id: order.id,
+    label: orderLabel(order),
+    pallets: order.pallet_count || 0,
+    pickups: pickupKeys.map((key, index) => {
+      const location = resolveLocation(key, lookup);
+      return {
+        label: `${location.label} 取 ${orderLabel(order)}`,
+        address: location.address,
+        pallets: splitPallets[index],
+      };
+    }),
+    deliveryAddress: order.address || "",
+    deliveryLabel: orderLabel(order),
+    priority: order.priority || "P3",
+    startMinutes: window.startMinutes,
+    endMinutes: window.endMinutes,
+    must: window.must,
+    canSplit: order.can_split !== false,
+  };
+}
+
+function buildRestockOrder(order: Order, lookup: LocationLookup) {
+  const pickupText = extractPickupText(order);
+  const pickupLocation = resolveLocation(order.origin_factory_id || pickupText || "", lookup);
+  const destinationLocation = resolveLocation(
+    order.destination_yard_id || destinationCodeFromAddress(order.address) || "",
+    lookup,
+  );
+
+  if (!pickupLocation.address || !destinationLocation.address) return null;
+
+  return {
+    id: order.id,
+    label: orderLabel(order),
+    pallets: order.pallet_count || 0,
+    pickupAddress: pickupLocation.address,
+    deliveryAddress: destinationLocation.address,
+    pickupLabel: `${pickupLocation.label} 补货`,
+    deliveryLabel: `${destinationLocation.label} 卸货`,
+    priority: order.priority || "P4",
+    endMinutes: ROUTE_END_MINUTES,
+  };
+}
+
+function getPickupKeys(order: Order) {
+  const pickupText = extractPickupText(order);
+  const rawKeys = pickupText
+    ? pickupText.split("+").map((part) => part.trim()).filter(Boolean)
+    : [];
+
+  if (rawKeys.length > 0) return rawKeys;
+  if (order.origin_yard_id) return [order.origin_yard_id];
+  return ["12441"];
+}
+
+function extractPickupText(order: Order) {
+  const notes = order.customer_notes || "";
+  const match = notes.match(/(?:^|\|\s*)pickup\s+([^|]+)/i);
+  return match?.[1]?.trim();
+}
+
+function destinationCodeFromAddress(address: string | null) {
+  if (!address) return "";
+  const trimmed = address.trim();
+  if (/^\d{3,5}$/.test(trimmed)) return trimmed;
+  return trimmed;
+}
+
+function resolveLocation(key: string, lookup: LocationLookup) {
+  const normalized = normalizeLocationKey(key);
+  return lookup.get(normalized) || KNOWN_LOCATIONS[key.toUpperCase()] || { label: key || "未知地点", address: key };
+}
+
+function normalizeLocationKey(value: string) {
+  return (value || "").trim().toUpperCase();
+}
+
+function splitPalletCount(total: number, parts: number) {
+  const count = Math.max(1, parts);
+  const base = Math.floor(total / count);
+  const remainder = total % count;
+  return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+
+function buildServiceMinutes(
+  deliveryOrders: DeliveryOrderInput[],
+  restockOrders: RestockOrderInput[],
+) {
+  const values = [0];
+  deliveryOrders.forEach((order) => {
+    order.pickups.forEach((pickup) => values.push(serviceMinutes(pickup.pallets)));
+    values.push(serviceMinutes(order.pallets));
+  });
+  restockOrders.forEach((order) => {
+    values.push(serviceMinutes(order.pallets));
+    values.push(serviceMinutes(order.pallets));
+  });
+  return values;
+}
+
+function serviceMinutes(pallets: number) {
+  return 10 + pallets * 2;
+}
+
 function formatStopLabel(eta: RouteEta) {
-  if (eta.type === "pickup") return `取 ${eta.label}`;
-  if (eta.type === "pickup_delivery") return `送 ${eta.label}`;
-  return eta.label;
+  if (eta.type === "order_pickup") return `取 ${eta.label}`;
+  if (eta.type === "restock_pickup") return `补货取 ${eta.label}`;
+  if (eta.type === "restock_dropoff") return `补货卸 ${eta.label}`;
+  return `送 ${eta.label}`;
 }
 
 function parseTimeWindow(order: Order) {
   const raw = `${order.time_window === "custom" ? order.time_window_custom || "" : order.time_window} ${order.customer_notes || ""}`.toLowerCase();
   const priority = order.priority || "P3";
-  let startMinutes = 8 * 60;
-  let endMinutes = 17 * 60;
+  let startMinutes = ROUTE_START_MINUTES;
+  let endMinutes = ROUTE_END_MINUTES;
 
   if (raw.includes("asap")) {
     endMinutes = 10 * 60;

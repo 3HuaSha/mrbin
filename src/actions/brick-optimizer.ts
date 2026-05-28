@@ -10,19 +10,27 @@ export type BrickOptimizerVehicle = {
   currentLoad: number;
 };
 
-export type BrickOptimizerOrder = {
+export type BrickPickupStop = {
+  label: string;
+  address: string;
+  pallets: number;
+};
+
+export type BrickDeliveryOrder = {
   id: string;
   label: string;
   pallets: number;
+  pickups: BrickPickupStop[];
   deliveryAddress: string;
   deliveryLabel?: string;
   priority: string;
   startMinutes?: number;
   endMinutes?: number;
   must?: boolean;
+  canSplit?: boolean;
 };
 
-export type BrickPickupOrder = {
+export type BrickRestockOrder = {
   id: string;
   label: string;
   pallets: number;
@@ -36,12 +44,13 @@ export type BrickPickupOrder = {
 
 export type BrickOptimizerInput = {
   vehicles: BrickOptimizerVehicle[];
-  deliveryOrders: BrickOptimizerOrder[];
-  pickupOrders?: BrickPickupOrder[];
+  deliveryOrders: BrickDeliveryOrder[];
+  restockOrders?: BrickRestockOrder[];
   durationMatrix: number[][];
   distanceMatrix: number[][];
-  serviceMinutes?: number;
-  routeStartHour?: number;
+  serviceMinutesByNode: number[];
+  routeStartMinutes?: number;
+  routeEndMinutes?: number;
   timeLimitSeconds?: number;
 };
 
@@ -52,10 +61,10 @@ export type BrickOptimizerStop = {
   priority: string;
   etaMinutes: number;
   lateMinutes: number;
-  type: "delivery" | "pickup" | "pickup_delivery";
+  type: "order_pickup" | "delivery" | "restock_pickup" | "restock_dropoff";
 };
 
-export type BrickPreloadOrder = {
+export type BrickLoadOrder = {
   orderId: string;
   label: string;
   pallets: number;
@@ -68,12 +77,12 @@ export type BrickOptimizerRoute = {
   vehicleName: string;
   load: number;
   capacity: number;
-  preloadOrders: BrickPreloadOrder[];
+  loadOrders: BrickLoadOrder[];
   stops: BrickOptimizerStop[];
   totalMinutes: number;
   totalDistanceKm: number;
   lateMinutes: number;
-  pickupPallets: number;
+  restockPallets: number;
 };
 
 type OptimizerResult = {
