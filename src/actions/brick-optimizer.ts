@@ -57,6 +57,7 @@ export type BrickOptimizerInput = {
 export type BrickOptimizerStop = {
   orderId: string;
   label: string;
+  address?: string;
   pallets: number;
   priority: string;
   etaMinutes: number;

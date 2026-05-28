@@ -54,6 +54,7 @@ def main() -> None:
                 "orderIndex": order_index,
                 "pallets": int(pickup.get("pallets") or 0),
                 "label": pickup.get("label") or order.get("label") or order["id"],
+                "address": pickup.get("address") or "",
             })
             pickup_nodes.append(node)
         delivery_node = len(nodes)
@@ -62,6 +63,7 @@ def main() -> None:
             "orderIndex": order_index,
             "pallets": int(order.get("pallets") or 0),
             "label": order.get("deliveryLabel") or order.get("label") or order["id"],
+            "address": order.get("deliveryAddress") or "",
         })
         delivery_meta.append({"pickupNodes": pickup_nodes, "deliveryNode": delivery_node})
 
@@ -72,6 +74,7 @@ def main() -> None:
             "restockIndex": restock_index,
             "pallets": int(order.get("pallets") or 0),
             "label": order.get("pickupLabel") or order.get("label") or order["id"],
+            "address": order.get("pickupAddress") or "",
         })
         drop_node = len(nodes)
         nodes.append({
@@ -79,6 +82,7 @@ def main() -> None:
             "restockIndex": restock_index,
             "pallets": int(order.get("pallets") or 0),
             "label": order.get("deliveryLabel") or order.get("label") or order["id"],
+            "address": order.get("deliveryAddress") or "",
         })
         restock_meta.append({"pickupNode": pickup_node, "dropNode": drop_node})
 
@@ -223,6 +227,7 @@ def main() -> None:
                 stops.append({
                     "orderId": order["id"],
                     "label": info["label"],
+                    "address": info.get("address") or "",
                     "pallets": int(info["pallets"]),
                     "priority": order.get("priority") or "P3",
                     "etaMinutes": arrival,
@@ -250,6 +255,7 @@ def main() -> None:
                 stops.append({
                     "orderId": order_id,
                     "label": order.get("deliveryLabel") or order.get("label") or order_id,
+                    "address": info.get("address") or "",
                     "pallets": int(order.get("pallets", 0)),
                     "priority": order.get("priority") or "P3",
                     "etaMinutes": arrival,
@@ -267,6 +273,7 @@ def main() -> None:
                 stops.append({
                     "orderId": order["id"],
                     "label": info["label"],
+                    "address": info.get("address") or "",
                     "pallets": int(info["pallets"]),
                     "priority": order.get("priority") or "P4",
                     "etaMinutes": arrival,
@@ -284,6 +291,7 @@ def main() -> None:
                 stops.append({
                     "orderId": order["id"],
                     "label": info["label"],
+                    "address": info.get("address") or "",
                     "pallets": int(info["pallets"]),
                     "priority": order.get("priority") or "P4",
                     "etaMinutes": arrival,

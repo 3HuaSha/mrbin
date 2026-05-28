@@ -52,6 +52,7 @@ type LoadOrder = {
 type RouteEta = {
   orderId: string;
   label: string;
+  address?: string;
   eta: string;
   depart?: string;
   serviceMinutes?: number;
@@ -261,6 +262,7 @@ export function BrickScheduleAssistant({
         etas: route.stops.map((stop) => ({
           orderId: stop.orderId,
           label: stop.label,
+          address: stop.address,
           eta: formatClock(stop.etaMinutes),
           depart: typeof stop.departMinutes === "number" ? formatClock(stop.departMinutes) : undefined,
           serviceMinutes: stop.serviceMinutes,
@@ -381,8 +383,8 @@ export function BrickScheduleAssistant({
                     </div>
                     {route.loadOrders.length > 0 && (
                       <div className="mb-1 rounded bg-muted/40 px-2 py-1 text-xs">
-                        <span className="font-medium">本车安排客户：</span>
-                        {route.loadOrders.map((order) => `${order.label} ${order.pallets} PLT`).join("、")}
+                        <span className="font-medium">本车送货：</span>
+                        {route.loadOrders.length} 单 · {route.loadOrders.reduce((sum, order) => sum + order.pallets, 0)} PLT
                       </div>
                     )}
                     {route.etas.length > 0 ? (
@@ -399,8 +401,11 @@ export function BrickScheduleAssistant({
                                 {eta.depart && eta.depart !== eta.eta && <div>离 {eta.depart}</div>}
                               </div>
                               <div className={cn("rounded border bg-background px-2 py-1.5", eta.type !== "delivery" && "bg-blue-500/10", eta.lateMinutes > 0 && "border-destructive/40 bg-destructive/5")}>
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="min-w-0 truncate font-medium">{formatStopLabel(eta)}</span>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="font-medium">{formatStopAction(eta)}</div>
+                                    <div className="mt-0.5 break-words leading-snug">{formatStopAddress(eta)}</div>
+                                  </div>
                                   <Badge variant={eta.type === "delivery" ? "outline" : "secondary"} className="shrink-0 text-[10px]">
                                     {eta.pallets} PLT
                                   </Badge>
@@ -634,11 +639,15 @@ function serviceMinutes(pallets: number) {
   return 10 + pallets * 2;
 }
 
-function formatStopLabel(eta: RouteEta) {
-  if (eta.type === "order_pickup") return `取 ${eta.label}`;
-  if (eta.type === "restock_pickup") return `补货取 ${eta.label}`;
-  if (eta.type === "restock_dropoff") return `补货卸 ${eta.label}`;
-  return `送 ${eta.label}`;
+function formatStopAction(eta: RouteEta) {
+  if (eta.type === "order_pickup") return "取货";
+  if (eta.type === "restock_pickup") return "补货取货";
+  if (eta.type === "restock_dropoff") return "补货卸货";
+  return "送货";
+}
+
+function formatStopAddress(eta: RouteEta) {
+  return eta.address || eta.label;
 }
 
 function parseTimeWindow(order: Order) {
