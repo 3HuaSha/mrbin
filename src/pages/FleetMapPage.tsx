@@ -5,7 +5,7 @@ import { todayISO, typeMeta } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateCcw, Plus } from "lucide-react";
+import { AlertTriangle, Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateCcw, Plus } from "lucide-react";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
@@ -367,6 +367,37 @@ export function FleetMapPage() {
 
     return map;
   }, [jobSteps, merged.assigned, orderById, date, draftManualSteps, deleteStepIds, filteredDrivers]);
+
+  const driverExecutionSummaries = useMemo(() => {
+    return filteredDrivers.map((driver: Driver) => {
+      const steps = (driverJobSteps[driver.id] ?? [])
+        .slice()
+        .sort((a, b) => a.step_number - b.step_number);
+      const activeSteps = steps.filter((step) => step.status !== "done");
+      const nextStep = activeSteps[0] ?? null;
+      const lastDone = steps
+        .filter((step) => step.status === "done")
+        .sort((a, b) => b.step_number - a.step_number)[0] ?? null;
+      const driverETA = driverETAs[driver.id];
+      const nextEta = nextStep ? findStepETA(driverETA, nextStep) : null;
+      const etaRange = nextEta?.status === "OK" ? formatEtaRange(nextEta.eta, nextStep) : null;
+      const upcoming = activeSteps.slice(0, 4).map((step) => ({
+        step,
+        eta: findStepETA(driverETA, step),
+      }));
+
+      return {
+        driver,
+        steps,
+        nextStep,
+        lastDone,
+        driverETA,
+        nextEta,
+        etaRange,
+        upcoming,
+      };
+    });
+  }, [filteredDrivers, driverJobSteps, driverETAs]);
 
   // 拖拽预览路线: 当拖拽订单悬停在司机上时, 计算该司机现有任务 + 新订单的路线坐标
   // 使用 localStorage 中的 geocode 缓存 + MANUAL_STEP_LOCATIONS 的固定坐标
@@ -1040,6 +1071,81 @@ export function FleetMapPage() {
         <BusinessTypeSelector value={businessType} onChange={setBusinessType} />
       </div>
       
+      <div className="border-b bg-muted/20 px-3 py-2">
+        <div className="mb-1 flex items-center justify-between">
+          <div className="text-xs font-semibold flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5" />
+            司机执行监督
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            点司机旁边的时钟计算 ETA；之后用打卡状态和任务顺序显示当前去向
+          </div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {driverExecutionSummaries.map(({ driver, nextStep, lastDone, nextEta, etaRange, upcoming, driverETA }) => {
+            const hasEta = !!driverETA;
+            const isLateRisk = nextEta?.status === "OK" && etaRange?.risk;
+            return (
+              <div
+                key={driver.id}
+                className={`min-w-[280px] max-w-[340px] rounded-md border bg-background p-2 text-xs shadow-sm ${
+                  isLateRisk ? "border-destructive/50 bg-destructive/5" : hasEta ? "border-blue-200" : ""
+                }`}
+              >
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="font-semibold truncate">{driver.name}</div>
+                  <Badge variant={isLateRisk ? "destructive" : hasEta ? "default" : "outline"} className="h-5 text-[10px]">
+                    {isLateRisk ? "可能晚到" : hasEta ? "已算 ETA" : "未计算"}
+                  </Badge>
+                </div>
+
+                {nextStep ? (
+                  <>
+                    <div className="text-[11px] text-muted-foreground">当前动作</div>
+                    <div className="mt-0.5 leading-snug">
+                      <span className="text-muted-foreground">{lastDone ? stepActionLabel(lastDone) : "车辆当前位置"}</span>
+                      <ChevronRight className="mx-1 inline h-3 w-3 text-muted-foreground" />
+                      <span className="font-medium">{stepActionLabel(nextStep)}</span>
+                    </div>
+                    <div className="mt-1 truncate text-[11px] text-muted-foreground" title={stepLocationLabel(nextStep)}>
+                      {stepLocationLabel(nextStep)}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      {nextEta?.status === "OK" && etaRange ? (
+                        <>
+                          <Badge variant="secondary" className="h-5 text-[10px]">预计 {formatETATime(nextEta.eta)}</Badge>
+                          <span className="text-[10px] text-muted-foreground">合理 {etaRange.label}</span>
+                        </>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">还没有 ETA，点司机行的时钟计算</span>
+                      )}
+                      {isLateRisk && <AlertTriangle className="h-3.5 w-3.5 text-destructive" />}
+                    </div>
+                    {upcoming.length > 1 && (
+                      <div className="mt-2 border-t pt-1.5">
+                        <div className="mb-1 text-[10px] text-muted-foreground">后续动作</div>
+                        <div className="space-y-1">
+                          {upcoming.slice(1).map(({ step, eta }) => (
+                            <div key={step.id} className="flex items-center justify-between gap-2 text-[10px]">
+                              <span className="truncate">{stepActionLabel(step)}</span>
+                              <span className="shrink-0 text-muted-foreground">
+                                {eta?.status === "OK" ? formatETATime(eta.eta) : "无 ETA"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="py-3 text-center text-xs text-muted-foreground">今天任务已完成</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="flex-1 flex min-h-0">
         {/* 左侧司机任务列表 - 缩小宽度 */}
         <Card className="w-64 flex flex-col overflow-hidden shrink-0 shadow-sm rounded-none border-r border-t-0 border-l-0 border-b-0">
@@ -1497,6 +1603,79 @@ export function FleetMapPage() {
 }
 
 // ============ DropIndicator: 拖拽时显示的"插入位置"指示条 ============
+function findStepETA(driverETA: DriverETA | undefined, step: JobStep) {
+  if (!driverETA) return null;
+  const targetId = step.node_type === "order" && step.order_id ? step.order_id : step.id;
+  return driverETA.orders.find((eta) => eta.orderId === targetId) ?? null;
+}
+
+function stepActionLabel(step: JobStep) {
+  if (step.node_type === "step") {
+    return STEP_TYPE_LABELS[step.step_type] || step.step_type;
+  }
+
+  const order = step.orders;
+  if (!order) return STEP_TYPE_LABELS[step.step_type] || step.step_type;
+  const meta = typeMeta(order.type);
+  const size = order.bin_size ? `${order.bin_size}yd` : "";
+  const binType = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : "";
+  return `${meta.label}${size ? ` ${size}` : ""}${binType ? ` ${binType}` : ""}`;
+}
+
+function stepLocationLabel(step: JobStep) {
+  if (step.node_type === "order" && step.orders?.address) return step.orders.address;
+  return step.location || "未设置地点";
+}
+
+function formatEtaRange(etaIso: string, step: JobStep) {
+  const eta = new Date(etaIso);
+  const early = new Date(eta.getTime() - 5 * 60_000);
+  const late = new Date(eta.getTime() + etaBufferMinutes(step) * 60_000);
+  const due = stepDueTime(step, eta);
+  return {
+    label: `${formatShortTime(early)}-${formatShortTime(late)}`,
+    risk: due ? eta.getTime() > due.getTime() : false,
+  };
+}
+
+function etaBufferMinutes(step: JobStep) {
+  const raw = `${step.orders?.time_window || ""} ${step.orders?.time_window_custom || ""} ${step.orders?.customer_notes || ""}`.toLowerCase();
+  if (raw.includes("must")) return 5;
+  if (raw.includes("asap") || raw.includes("before")) return 10;
+  return 15;
+}
+
+function stepDueTime(step: JobStep, reference: Date) {
+  const raw = `${step.orders?.time_window_custom || ""} ${step.orders?.time_window || ""}`.toLowerCase();
+  if (!raw.trim()) return null;
+
+  let hour: number | null = null;
+  const range = raw.match(/(\d{1,2})(?::\d{2})?\s*(am|pm)?\s*[-~]\s*(\d{1,2})(?::\d{2})?\s*(am|pm)?/);
+  if (range) {
+    hour = Number(range[3]);
+    const suffix = range[4] || range[2] || "";
+    if (suffix === "pm" && hour < 12) hour += 12;
+    if (suffix === "am" && hour === 12) hour = 0;
+  } else if (raw.includes("noon") || raw.includes("before 12")) {
+    hour = 12;
+  } else if (raw.includes("am")) {
+    hour = 12;
+  }
+
+  if (hour == null) return null;
+  const due = new Date(reference);
+  due.setHours(hour, 0, 0, 0);
+  return due;
+}
+
+function formatShortTime(date: Date) {
+  return date.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 function DropIndicator({
   driverId, index, active, onDrop,
 }: {
