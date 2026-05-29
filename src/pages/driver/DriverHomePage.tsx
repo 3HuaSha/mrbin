@@ -9,15 +9,17 @@ import { STEP_TYPE_EMOJI, STEP_TYPE_LABEL, todayISO, typeMeta } from "@/lib/busi
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { usePWA } from "@/hooks/use-pwa";
-import { getCachedRouteMatrix } from "@/actions/route-matrix";
 import { formatETA, formatETATime } from "@/lib/eta-calculator";
-import { getFullAddress } from "@/lib/manual-step-locations";
 
-function normalizeEtaAddress(address: string) {
-  const trimmed = address.trim();
-  if (/\b(on|ontario|canada)\b/i.test(trimmed) || trimmed.includes(",")) return trimmed;
-  return `${trimmed}, ON, Canada`;
-}
+type SavedEtaRow = {
+  step_id: string;
+  eta_at: string;
+  eta_min_at: string | null;
+  eta_max_at: string | null;
+  duration_seconds: number | null;
+  status: string | null;
+  computed_at: string | null;
+};
 
 type StepRow = {
   id: string;
@@ -32,11 +34,13 @@ type StepRow = {
   bin_id: string | null;
   notes: string | null;
   status: string;
+  completed_at: string | null;
   orders?: {
     order_number: string;
     type: string;
     bin_size: string | null;
     bin_type: string | null;
+    pallet_count?: number | null;
     customer_name: string;
     customer_notes: string | null;
   } | null;
@@ -46,7 +50,6 @@ export function DriverHomePage() {
   const nav = useNavigate();
   const [date, setDate] = useState(todayISO());
   const [gpsActive, setGpsActive] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState<{lat: number; lng: number} | null>(null);
   const { session, loading, profile, hasRole } = useCurrentUser();
   const { canInstall, isInstalled, isIOS, promptInstall } = usePWA();
   const [dismissInstallHint, setDismissInstallHint] = useState(false);
@@ -90,65 +93,54 @@ export function DriverHomePage() {
     });
   }, [steps]);
 
-  // ETA 查询逻辑
-  const pendingSteps = useMemo(() => stepsWithLockStatus.filter((s: any) => s.status !== "done"), [stepsWithLockStatus]);
-  const activeStep = pendingSteps[0];
-  const nextStep = pendingSteps[1];
-  
-  const { data: etas } = useQuery({
-    queryKey: ["driver-etas", driverId, currentLocation, activeStep?.id, nextStep?.id],
-    enabled: !!currentLocation && !!activeStep,
-    refetchInterval: 300_000, // 5分钟重新计算一次
+  const { data: etaRows = [] } = useQuery({
+    queryKey: ["saved-driver-etas", driverId, date],
+    enabled: !!driverId,
+    refetchInterval: 60_000,
     queryFn: async () => {
-      if (!currentLocation) return null;
-      
-      const addressesToCalc: { id: string; address: string }[] = [];
-      
-      const addStepAddress = (s: typeof activeStep) => {
-        if (!s) return;
-        if (s.node_type === 'order' && s.orders) {
-          addressesToCalc.push({ id: s.id, address: normalizeEtaAddress(s.orders.address) });
-        } else if (s.node_type === 'step' && s.location) {
-          addressesToCalc.push({ id: s.id, address: normalizeEtaAddress(getFullAddress(s.location)) });
-        }
-      };
-
-      addStepAddress(activeStep);
-      addStepAddress(nextStep);
-
-      if (addressesToCalc.length === 0) return null;
-
-      const currentAddress = `${currentLocation.lat},${currentLocation.lng}`;
-      const routeAddresses = [currentAddress, ...addressesToCalc.map((step) => step.address)];
-      const routePairs = routeAddresses.slice(1).map((address, index) => ({
-        from: routeAddresses[index],
-        to: address,
-      }));
-
-      const matrix = await getCachedRouteMatrix({ data: { addresses: routeAddresses, pairs: routePairs } });
-      if (!matrix.success || !matrix.entries) return null;
-
-      let cumulativeSeconds = 0;
-      const now = Date.now();
-      const STOP_DURATION_SECONDS = 15 * 60; // 15分钟作业时间
-      
-      const result: Record<string, string> = {};
-      
-      addressesToCalc.forEach((step, index) => {
-        const fromAddress = index === 0 ? currentAddress : addressesToCalc[index - 1].address;
-        const leg = matrix.entries.find((e: any) => e.from === fromAddress && e.to === step.address);
-        
-        const driveSeconds = Math.round((leg?.duration || 0) * 1.2); // 卡车速度补偿
-        cumulativeSeconds += driveSeconds;
-        
-        result[step.id] = new Date(now + cumulativeSeconds * 1000).toISOString();
-        
-        cumulativeSeconds += STOP_DURATION_SECONDS;
-      });
-
-      return result;
-    }
+      const { data, error } = await (supabase.from as any)("driver_eta_snapshots")
+        .select("step_id,eta_at,eta_min_at,eta_max_at,duration_seconds,status,computed_at")
+        .eq("driver_id", driverId)
+        .eq("scheduled_date", date)
+        .order("step_number");
+      if (error) throw error;
+      return (data ?? []) as SavedEtaRow[];
+    },
   });
+
+  const etaByStepId = useMemo(() => {
+    const saved = new Map(etaRows.map((row) => [row.step_id, row]));
+    const adjusted = new Map(saved);
+    const sorted = stepsWithLockStatus.slice().sort((a: StepRow, b: StepRow) => a.step_number - b.step_number);
+
+    sorted.forEach((target: StepRow, targetIndex: number) => {
+      if (target.status === "done") return;
+      const planned = saved.get(target.id);
+      if (!planned) return;
+
+      for (let i = targetIndex - 1; i >= 0; i -= 1) {
+        const completedAt = sorted[i].completed_at;
+        if (!completedAt || sorted[i].status !== "done") continue;
+
+        let rollingTime = new Date(completedAt).getTime();
+        for (let j = i + 1; j <= targetIndex; j += 1) {
+          if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
+          rollingTime += (saved.get(sorted[j].id)?.duration_seconds || 0) * 1000;
+        }
+
+        const etaAt = new Date(rollingTime).toISOString();
+        adjusted.set(target.id, {
+          ...planned,
+          eta_at: etaAt,
+          eta_min_at: new Date(rollingTime - 5 * 60_000).toISOString(),
+          eta_max_at: new Date(rollingTime + 15 * 60_000).toISOString(),
+        });
+        break;
+      }
+    });
+
+    return adjusted;
+  }, [etaRows, stepsWithLockStatus]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -233,7 +225,7 @@ export function DriverHomePage() {
         )}
 
         <div className="bg-card rounded-2xl border shadow-sm overflow-hidden">
-          <div className="p-4 flex items-center justify-between border-b bg-muted/20">
+          <div className="p-4 flex items-center justify-between bg-muted/20">
             <div>
               <h2 className="font-bold text-foreground flex items-center gap-2">
                 <span>📅</span> 工作日程
@@ -248,31 +240,11 @@ export function DriverHomePage() {
               />
             </div>
           </div>
-          <div className="p-5 flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium text-muted-foreground mb-1">今日任务进度</div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-4xl font-black text-foreground">{doneCount}</span>
-                <span className="text-lg font-bold text-muted-foreground">/ {total}</span>
-              </div>
-            </div>
-            <div className={cn(
-              "h-16 w-16 rounded-full flex items-center justify-center border-[5px]",
-              total > 0 && doneCount === total 
-                ? "border-green-500 bg-green-50 text-green-600 dark:bg-green-950/30" 
-                : "border-primary/20 bg-primary/5 text-primary"
-            )}>
-              {total > 0 && doneCount === total ? <CheckCircle2 className="h-8 w-8" /> : <span className="text-xl font-bold">{total > 0 ? Math.round((doneCount/total)*100) : 0}<span className="text-xs">%</span></span>}
-            </div>
-          </div>
         </div>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
             <h3 className="font-bold text-lg tracking-tight">执行路线</h3>
-            <span className="text-xs font-medium text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
-              当前可见 {Math.min(3, total)} 项
-            </span>
           </div>
 
           {total === 0 && (
@@ -290,8 +262,6 @@ export function DriverHomePage() {
               const activeIndex = currentIndex === -1 ? stepsWithLockStatus.length : currentIndex;
 
               return stepsWithLockStatus.map((s, index) => {
-                if (index < activeIndex - 1 || index > activeIndex + 1) return null;
-
                 const isOrderNode = s.node_type === 'order' && s.orders;
                 const tm = isOrderNode ? typeMeta(s.orders!.type) : null;
                 const isDone = s.status === "done";
@@ -299,7 +269,6 @@ export function DriverHomePage() {
                 const isPending = s.status !== "done";
                 
                 const isCurrent = index === activeIndex;
-                const isPrev = index === activeIndex - 1;
                 const isNext = index === activeIndex + 1;
                 
                 // 步骤类型标签
@@ -322,11 +291,12 @@ export function DriverHomePage() {
                   'garbage': '垃圾桶', 'brick': '砖桶', 'soil': '土桶', 'cement': '水泥桶', 'asphalt': '沥青桶',
                 };
                 const binTypeName = isOrderNode && s.orders?.bin_type ? binTypeNames[s.orders.bin_type] || s.orders.bin_type : '';
+                const stepEta = etaByStepId.get(s.id);
                 
                 return (
                   <div key={s.id} className="w-full flex flex-col items-center">
                     {/* 连接线 */}
-                    {index > activeIndex - 1 && index <= activeIndex + 1 && (
+                    {index > 0 && (
                       <div className="h-4 w-[2px] bg-border/50 my-1 rounded-full" />
                     )}
 
@@ -334,22 +304,22 @@ export function DriverHomePage() {
                       className={cn(
                         "w-full rounded-2xl overflow-hidden transition-all duration-500",
                         isCurrent && "border-primary border-2 shadow-xl shadow-primary/10 bg-card translate-y-0 scale-100 opacity-100",
-                        isPrev && "border border-border/50 bg-muted/30 scale-[0.96] opacity-60 blur-[0.5px]",
-                        isNext && "border border-dashed border-border bg-card/50 scale-[0.96] opacity-60 blur-[0.5px]"
+                        isDone && !isCurrent && "border border-border/50 bg-muted/30 scale-[0.96] opacity-60 blur-[0.5px]",
+                        !isDone && !isCurrent && "border border-dashed border-border bg-card/80 scale-[0.98] opacity-80"
                       )}
                     >
                       <div className={cn(
                         "text-[11px] font-bold px-4 py-1.5 flex items-center gap-2",
                         isCurrent ? "bg-primary text-primary-foreground" :
-                        isPrev ? "bg-muted text-muted-foreground" :
+                        isDone ? "bg-muted text-muted-foreground" :
                         "bg-muted/50 text-muted-foreground"
                       )}>
                         {isCurrent && <><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-primary-foreground"></span></span> 当前任务</>}
-                        {isPrev && "✓ 上一个任务"}
-                        {isNext && "⏳ 下一个任务"}
+                        {isDone && !isCurrent && "✓ 已完成任务"}
+                        {!isDone && !isCurrent && "⏳ 待执行任务"}
                       </div>
 
-                      <div className={cn("p-4 flex items-start gap-3", isPrev && "grayscale-[0.5]")}>
+                      <div className={cn("p-4 flex items-start gap-3", isDone && !isCurrent && "grayscale-[0.5]")}>
                         <div
                           className={cn(
                             "h-12 w-12 rounded-full font-bold flex items-center justify-center shrink-0 text-lg shadow-sm",
@@ -383,7 +353,7 @@ export function DriverHomePage() {
                               )}
                               
                               {/* ETA 显示 */}
-                              {(isCurrent || isNext) && etas && etas[s.id] && (
+                              {isPending && stepEta?.eta_at && (
                                 <div className={cn(
                                   "flex items-center gap-1.5 mt-3 w-fit font-semibold",
                                   isCurrent 
@@ -391,7 +361,13 @@ export function DriverHomePage() {
                                     : "text-xs text-blue-600/80 dark:text-blue-400/80"
                                 )}>
                                   <Clock className={cn("shrink-0", isCurrent ? "h-4 w-4" : "h-3.5 w-3.5")} />
-                                  <span>ETA: {formatETATime(etas[s.id])} {isCurrent && <span className="opacity-80 font-medium">({formatETA(etas[s.id])})</span>}</span>
+                                  <span>
+                                    ETA: {formatETATime(stepEta.eta_at)}
+                                    {stepEta.eta_min_at && stepEta.eta_max_at && (
+                                      <span className="opacity-80 font-medium"> · {formatETATime(stepEta.eta_min_at)}-{formatETATime(stepEta.eta_max_at)}</span>
+                                    )}
+                                    {isCurrent && <span className="opacity-80 font-medium"> ({formatETA(stepEta.eta_at)})</span>}
+                                  </span>
                                 </div>
                               )}
                             </>
@@ -415,7 +391,7 @@ export function DriverHomePage() {
                               )}
                               
                               {/* ETA 显示 */}
-                              {(isCurrent || isNext) && etas && etas[s.id] && (
+                              {isPending && stepEta?.eta_at && (
                                 <div className={cn(
                                   "flex items-center gap-1.5 mt-3 w-fit font-semibold",
                                   isCurrent 
@@ -423,7 +399,13 @@ export function DriverHomePage() {
                                     : "text-xs text-blue-600/80 dark:text-blue-400/80"
                                 )}>
                                   <Clock className={cn("shrink-0", isCurrent ? "h-4 w-4" : "h-3.5 w-3.5")} />
-                                  <span>ETA: {formatETATime(etas[s.id])} {isCurrent && <span className="opacity-80 font-medium">({formatETA(etas[s.id])})</span>}</span>
+                                  <span>
+                                    ETA: {formatETATime(stepEta.eta_at)}
+                                    {stepEta.eta_min_at && stepEta.eta_max_at && (
+                                      <span className="opacity-80 font-medium"> · {formatETATime(stepEta.eta_min_at)}-{formatETATime(stepEta.eta_max_at)}</span>
+                                    )}
+                                    {isCurrent && <span className="opacity-80 font-medium"> ({formatETA(stepEta.eta_at)})</span>}
+                                  </span>
                                 </div>
                               )}
                             </>
@@ -458,4 +440,10 @@ export function DriverHomePage() {
       </div>
     </div>
   );
+}
+
+function serviceSecondsForStep(step: StepRow) {
+  const pallets = Number(step.orders?.pallet_count || 0);
+  if (pallets > 0) return (10 + pallets * 2) * 60;
+  return 15 * 60;
 }

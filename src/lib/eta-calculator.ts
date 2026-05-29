@@ -12,6 +12,7 @@ const STOP_DURATION_SEC = 15 * 60;
 
 export interface ETAResult {
   orderId: string;
+  stepId?: string;
   orderAddress: string;
   distance: number; // 米
   duration: number; // 秒

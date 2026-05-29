@@ -49,6 +49,23 @@ const STEP_TYPE_LABELS: Record<string, string> = {
 
 const STOP_DURATION_SECONDS = 15 * 60;
 
+type SavedEtaRow = {
+  step_id: string;
+  order_id: string | null;
+  driver_id: string;
+  scheduled_date: string;
+  step_number: number;
+  eta_at: string;
+  eta_min_at: string | null;
+  eta_max_at: string | null;
+  duration_seconds: number | null;
+  distance_meters: number | null;
+  source: string | null;
+  status: string | null;
+  computed_at: string | null;
+  payload: Record<string, unknown> | null;
+};
+
 export function FleetMapPage() {
   const qc = useQueryClient();
   const [date, setDate] = useState(todayISO());
@@ -67,6 +84,19 @@ export function FleetMapPage() {
     jobSteps,
     commonLocations,
   } = useDispatchData(date, businessType);
+
+  const { data: savedEtaRows = [], refetch: refetchSavedEtas } = useQuery({
+    queryKey: ["driver-eta-snapshots", date],
+    queryFn: async () => {
+      const { data, error } = await (supabase.from as any)("driver_eta_snapshots")
+        .select("*")
+        .eq("scheduled_date", date)
+        .order("driver_id")
+        .order("step_number");
+      if (error) throw error;
+      return (data ?? []) as SavedEtaRow[];
+    },
+  });
 
   // 转换 assignments 格式以匹配原有逻辑
   const serverAssignments = useMemo(() => {
@@ -372,6 +402,93 @@ export function FleetMapPage() {
     return map;
   }, [jobSteps, merged.assigned, orderById, date, draftManualSteps, deleteStepIds, filteredDrivers]);
 
+  const savedDriverETAs = useMemo(() => {
+    const byDriver = new Map<string, SavedEtaRow[]>();
+    savedEtaRows.forEach((row) => {
+      const list = byDriver.get(row.driver_id) ?? [];
+      list.push(row);
+      byDriver.set(row.driver_id, list);
+    });
+
+    const result: Record<string, DriverETA> = {};
+    byDriver.forEach((rows, driverId) => {
+      const driver = filteredDrivers.find((item: Driver) => item.id === driverId);
+      result[driverId] = {
+        driverId,
+        driverName: driver?.name ?? "司机",
+        vehicleId: "",
+        samsaraVehicleId: "",
+        currentLocation: null,
+        orders: rows
+          .slice()
+          .sort((a, b) => a.step_number - b.step_number)
+          .map((row) => ({
+            orderId: row.order_id || row.step_id,
+            stepId: row.step_id,
+            orderAddress: String(row.payload?.orderAddress || ""),
+            distance: row.distance_meters || 0,
+            duration: row.duration_seconds || 0,
+            source: (row.source as ETAResult["source"]) || "cache",
+            eta: row.eta_at,
+            status: row.status === "ERROR" ? "ERROR" as const : "OK" as const,
+          })),
+        totalDistance: rows.reduce((sum, row) => sum + (row.distance_meters || 0), 0),
+        totalDuration: rows.reduce((sum, row) => sum + (row.duration_seconds || 0), 0),
+        lastUpdated: rows[0]?.computed_at || new Date().toISOString(),
+      };
+    });
+    return result;
+  }, [filteredDrivers, savedEtaRows]);
+
+  const displayDriverETAs = useMemo(() => {
+    const mergedETAs = { ...savedDriverETAs, ...driverETAs };
+    const result: Record<string, DriverETA> = {};
+
+    Object.entries(mergedETAs).forEach(([driverId, eta]) => {
+      const steps = (driverJobSteps[driverId] ?? []).slice().sort((a, b) => a.step_number - b.step_number);
+      if (!steps.length) {
+        result[driverId] = eta;
+        return;
+      }
+
+      result[driverId] = {
+        ...eta,
+        orders: eta.orders.map((orderEta) => {
+          const step = steps.find((item) => stepEtaId(item) === orderEta.orderId || item.id === orderEta.stepId);
+          if (!step) return orderEta;
+          return findStepETA(eta, step, steps) ?? orderEta;
+        }),
+      };
+    });
+
+    return result;
+  }, [driverETAs, driverJobSteps, savedDriverETAs]);
+
+  const etaPersistKeyRef = useRef("");
+  useEffect(() => {
+    const key = JSON.stringify(
+      Object.entries(displayDriverETAs).map(([driverId, eta]) => [
+        driverId,
+        eta.orders.map((order) => [order.stepId || order.orderId, order.eta]),
+      ]),
+    );
+    if (!key || key === "[]" || key === etaPersistKeyRef.current) return;
+    etaPersistKeyRef.current = key;
+
+    Object.entries(displayDriverETAs).forEach(([driverId, eta]) => {
+      const steps = driverJobSteps[driverId] ?? [];
+      if (!steps.length || !eta.orders.length) return;
+      saveDriverETASnapshot({
+        driverId,
+        scheduledDate: date,
+        eta,
+        steps,
+      }).catch((error) => {
+        console.warn("保存 ETA 快照失败:", error);
+      });
+    });
+  }, [date, displayDriverETAs, driverJobSteps]);
+
   const driverExecutionSummaries = useMemo(() => {
     return filteredDrivers.map((driver: Driver) => {
       const steps = (driverJobSteps[driver.id] ?? [])
@@ -382,10 +499,10 @@ export function FleetMapPage() {
       const lastDone = steps
         .filter((step) => step.status === "done")
         .sort((a, b) => b.step_number - a.step_number)[0] ?? null;
-      const driverETA = driverETAs[driver.id];
+      const driverETA = displayDriverETAs[driver.id];
       const nextEta = nextStep ? findStepETA(driverETA, nextStep, steps) : null;
       const etaRange = nextEta?.status === "OK" ? formatEtaRange(nextEta.eta, nextStep) : null;
-      const upcoming = activeSteps.slice(0, 4).map((step) => ({
+      const upcoming = activeSteps.map((step) => ({
         step,
         eta: findStepETA(driverETA, step, steps),
       }));
@@ -401,7 +518,7 @@ export function FleetMapPage() {
         upcoming,
       };
     });
-  }, [filteredDrivers, driverJobSteps, driverETAs]);
+  }, [filteredDrivers, driverJobSteps, displayDriverETAs]);
 
   // 拖拽预览路线: 当拖拽订单悬停在司机上时, 计算该司机现有任务 + 新订单的路线坐标
   // 使用 localStorage 中的 geocode 缓存 + MANUAL_STEP_LOCATIONS 的固定坐标
@@ -983,6 +1100,8 @@ export function FleetMapPage() {
         if (s.node_type === 'order' && s.orders) {
           return {
             id: s.orders.id,
+            stepId: s.id,
+            orderId: s.orders.id,
             address: s.orders.address,
             type: 'order' as const,
             stepNumber: s.step_number
@@ -991,6 +1110,8 @@ export function FleetMapPage() {
           // 对于手动步骤，使用完整地址
           return {
             id: s.id,
+            stepId: s.id,
+            orderId: null,
             address: getFullAddress(s.location), // 转换为完整地址
             type: 'manual' as const,
             stepNumber: s.step_number
@@ -1032,6 +1153,8 @@ export function FleetMapPage() {
       // 准备所有步骤数据（包含订单和手动步骤）
       const stepsForETA = allSteps.map(s => ({
         id: s!.id,
+        stepId: s!.stepId,
+        orderId: s!.orderId,
         address: normalizeEtaAddress(s!.address),
       }));
 
@@ -1069,6 +1192,18 @@ export function FleetMapPage() {
 
       setDriverETAs(prev => ({ ...prev, [driverId]: eta }));
       setShowingETADrivers(prev => new Set(prev).add(driverId)); // 标记为显示
+      try {
+        await saveDriverETASnapshot({
+          driverId,
+          scheduledDate: date,
+          eta,
+          steps: driverSteps,
+        });
+        refetchSavedEtas();
+      } catch (saveError) {
+        console.warn("保存 ETA 快照失败:", saveError);
+        toast.warning("ETA 已计算，但保存到数据库失败");
+      }
       toast.success(`${driverName} 的 ETA 计算完成`);
     } catch (error) {
       console.error('计算 ETA 失败:', error);
@@ -1293,7 +1428,7 @@ export function FleetMapPage() {
                               const tm = typeMeta(order.type);
                               const binTypeName = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : '';
                               const timeLabelStr = order.time_window_custom || order.time_window || '';
-                              const driverETA = driverETAs[d.id];
+                              const driverETA = displayDriverETAs[d.id];
                               const orderETA = findStepETA(driverETA, step, steps);
                               // 这个卡片是否为本地 draft 新增 / 变动
                               const isDraft = !!draft[order.id];
@@ -1386,7 +1521,7 @@ export function FleetMapPage() {
                             } else {
                               // 手动步骤节点卡片
                               const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
-                              const driverETA = driverETAs[d.id];
+                              const driverETA = displayDriverETAs[d.id];
                               const stepETA = findStepETA(driverETA, step, steps);
                               const isDraftStep = step.id.startsWith('draft-step-');
                               const isMarkedForDelete = deleteStepIds.includes(step.id);
@@ -1534,7 +1669,7 @@ export function FleetMapPage() {
              drivers={filteredDrivers} 
              orders={orders} 
              assignments={assignments}
-             driverETAs={driverETAs}
+             driverETAs={displayDriverETAs}
              businessType={businessType}
              draggableOrderIds={allDayOrders.map(o => o.id)}
              unassignedOrderIds={unassignedOrders.map(o => o.id)}
@@ -1613,7 +1748,7 @@ function buildDriverETAFromMatrix(input: {
   samsaraVehicleId: string;
   currentLocation: { lat: number; lng: number };
   currentAddress: string;
-  steps: Array<{ id: string; address: string }>;
+  steps: Array<{ id: string; stepId: string; orderId: string | null; address: string }>;
   entries: RouteMatrixEntry[];
 }): DriverETA {
   let cumulativeSeconds = 0;
@@ -1632,6 +1767,7 @@ function buildDriverETAFromMatrix(input: {
 
     return {
       orderId: step.id,
+      stepId: step.stepId,
       orderAddress: step.address,
       distance,
       duration: driveSeconds,
@@ -1653,6 +1789,58 @@ function buildDriverETAFromMatrix(input: {
     totalDuration: orders.reduce((sum, order) => sum + order.duration, 0),
     lastUpdated: new Date().toISOString(),
   };
+}
+
+async function saveDriverETASnapshot(input: {
+  driverId: string;
+  scheduledDate: string;
+  eta: DriverETA;
+  steps: JobStep[];
+}) {
+  const stepByEtaId = new Map(input.steps.map((step) => [stepEtaId(step), step]));
+  const rows = input.eta.orders
+    .map((result) => {
+      const step = result.stepId
+        ? input.steps.find((item) => item.id === result.stepId)
+        : stepByEtaId.get(result.orderId);
+      if (!step) return null;
+      const range = result.status === "OK" ? formatEtaRange(result.eta, step) : null;
+      const etaDate = new Date(result.eta);
+      const etaMin = range ? new Date(etaDate.getTime() - 5 * 60_000).toISOString() : null;
+      const etaMax = range
+        ? new Date(etaDate.getTime() + etaBufferMinutes(step) * 60_000).toISOString()
+        : null;
+
+      return {
+        step_id: step.id,
+        order_id: step.node_type === "order" ? step.order_id : null,
+        driver_id: input.driverId,
+        scheduled_date: input.scheduledDate,
+        step_number: step.step_number,
+        eta_at: result.eta,
+        eta_min_at: etaMin,
+        eta_max_at: etaMax,
+        duration_seconds: Math.round(result.duration || 0),
+        distance_meters: Math.round(result.distance || 0),
+        source: result.source || "matrix",
+        status: result.status,
+        computed_at: input.eta.lastUpdated,
+        payload: {
+          orderId: result.orderId,
+          orderAddress: result.orderAddress,
+          fromStepId: result.fromStepId ?? null,
+          rangeLabel: range?.label ?? null,
+          risk: range?.risk ?? false,
+        },
+      };
+    })
+    .filter(Boolean);
+
+  if (!rows.length) return;
+  const { error } = await (supabase.from as any)("driver_eta_snapshots").upsert(rows, {
+    onConflict: "step_id",
+  });
+  if (error) throw error;
 }
 
 function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: JobStep[]) {
