@@ -257,132 +257,143 @@ export function DriverHomePage() {
           </div>
         )}
 
-        {stepsWithLockStatus.map((s) => {
-          const isOrderNode = s.node_type === 'order' && s.orders;
-          const tm = isOrderNode ? typeMeta(s.orders!.type) : null;
-          const isDone = s.status === "done";
-          const isLocked = s.isLocked;
-          // 只要不是 done 状态就算 pending
-          const isPending = s.status !== "done";
-          
-          // 步骤类型标签 - 对于订单节点, 用订单类型; 对于手动步骤, 用步骤类型
-          const stepTypeLabels: Record<string, string> = {
-            'pickup_bin': '取桶',
-            'drop_bin': '放桶',
-            'dump_waste': '倒垃圾',
-            'load_material': '装料',
-            'unload_material': '卸料',
-            'depot_pickup': '仓库取桶',
-            'customer_delivery': '送到客户',
-            'customer_pickup': '去客户取桶',
-            'dump_site': '去垃圾场',
-            'pickup': '取货',
-            'delivery': '送货',
-            'swap': '换桶',
-          };
-          // 订单节点: 显示订单类型 (送桶/收桶/换桶) 而不是步骤类型
-          const orderTypeLabels: Record<string, string> = {
-            'delivery': '送桶',
-            'pickup': '收桶',
-            'swap': '换桶',
-            'material': '物料',
-          };
-          const stepLabel = isOrderNode
-            ? (s.orders!.type === 'material' 
-                ? (stepTypeLabels[s.step_type] || s.step_type)
-                : (orderTypeLabels[s.orders!.type] || stepTypeLabels[s.step_type] || s.step_type))
-            : (stepTypeLabels[s.step_type] || s.step_type);
-          
-          // 桶类型中文映射
-          const binTypeNames: Record<string, string> = {
-            'garbage': '垃圾桶',
-            'brick': '砖桶',
-            'soil': '土桶',
-            'cement': '水泥桶',
-            'asphalt': '沥青桶',
-          };
-          const binTypeName = isOrderNode && s.orders?.bin_type ? binTypeNames[s.orders.bin_type] || s.orders.bin_type : '';
-          
-          return (
-            <div
-              key={s.id}
-              className={cn(
-                "rounded-xl border bg-card overflow-hidden transition-all",
-                isPending && !isLocked && "border-primary border-2 shadow-md",
-                isDone && "opacity-70",
-                isLocked && "opacity-50",
-              )}
-            >
-              <div className="p-3 flex items-start gap-3">
-                <div
-                  className={cn(
-                    "h-10 w-10 rounded-full font-bold flex items-center justify-center shrink-0",
-                    isDone
-                      ? "bg-status-done text-primary-foreground"
-                      : isLocked
-                      ? "bg-muted text-muted-foreground"
-                      : "bg-primary text-primary-foreground",
+        <div className="relative flex flex-col gap-3 py-2">
+          {(() => {
+            const currentIndex = stepsWithLockStatus.findIndex((s) => s.status !== "done");
+            const activeIndex = currentIndex === -1 ? stepsWithLockStatus.length : currentIndex;
+
+            return stepsWithLockStatus.map((s, index) => {
+              if (index < activeIndex - 1 || index > activeIndex + 1) return null;
+
+              const isOrderNode = s.node_type === 'order' && s.orders;
+              const tm = isOrderNode ? typeMeta(s.orders!.type) : null;
+              const isDone = s.status === "done";
+              const isLocked = s.isLocked;
+              const isPending = s.status !== "done";
+              
+              const isCurrent = index === activeIndex;
+              const isPrev = index === activeIndex - 1;
+              const isNext = index === activeIndex + 1;
+              
+              // 步骤类型标签
+              const stepTypeLabels: Record<string, string> = {
+                'pickup_bin': '取桶', 'drop_bin': '放桶', 'dump_waste': '倒垃圾',
+                'load_material': '装料', 'unload_material': '卸料', 'depot_pickup': '仓库取桶',
+                'customer_delivery': '送到客户', 'customer_pickup': '去客户取桶', 'dump_site': '去垃圾场',
+                'pickup': '取货', 'delivery': '送货', 'swap': '换桶',
+              };
+              const orderTypeLabels: Record<string, string> = {
+                'delivery': '送桶', 'pickup': '收桶', 'swap': '换桶', 'material': '物料',
+              };
+              const stepLabel = isOrderNode
+                ? (s.orders!.type === 'material' 
+                    ? (stepTypeLabels[s.step_type] || s.step_type)
+                    : (orderTypeLabels[s.orders!.type] || stepTypeLabels[s.step_type] || s.step_type))
+                : (stepTypeLabels[s.step_type] || s.step_type);
+              
+              const binTypeNames: Record<string, string> = {
+                'garbage': '垃圾桶', 'brick': '砖桶', 'soil': '土桶', 'cement': '水泥桶', 'asphalt': '沥青桶',
+              };
+              const binTypeName = isOrderNode && s.orders?.bin_type ? binTypeNames[s.orders.bin_type] || s.orders.bin_type : '';
+              
+              return (
+                <div key={s.id} className="w-full flex flex-col items-center">
+                  {/* 连接线 */}
+                  {index > activeIndex - 1 && index <= activeIndex + 1 && (
+                    <div className="h-4 w-[2px] bg-border/50 my-1 rounded-full" />
                   )}
-                >
-                  {isLocked ? (
-                    <Lock className="h-4 w-4" />
-                  ) : isDone ? (
-                    <CheckCircle2 className="h-5 w-5" />
-                  ) : (
-                    s.step_number
-                  )}
+
+                  <div
+                    className={cn(
+                      "w-full rounded-2xl overflow-hidden transition-all duration-500",
+                      isCurrent && "border-primary border-2 shadow-xl shadow-primary/10 bg-card translate-y-0 scale-100 opacity-100",
+                      isPrev && "border border-border/50 bg-muted/30 scale-[0.96] opacity-60 blur-[0.5px]",
+                      isNext && "border border-dashed border-border bg-card/50 scale-[0.96] opacity-60 blur-[0.5px]"
+                    )}
+                  >
+                    <div className={cn(
+                      "text-[11px] font-bold px-4 py-1.5 flex items-center gap-2",
+                      isCurrent ? "bg-primary text-primary-foreground" :
+                      isPrev ? "bg-muted text-muted-foreground" :
+                      "bg-muted/50 text-muted-foreground"
+                    )}>
+                      {isCurrent && <><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-primary-foreground"></span></span> 当前任务</>}
+                      {isPrev && "✓ 上一个任务"}
+                      {isNext && "⏳ 下一个任务"}
+                    </div>
+
+                    <div className={cn("p-4 flex items-start gap-3", isPrev && "grayscale-[0.5]")}>
+                      <div
+                        className={cn(
+                          "h-12 w-12 rounded-full font-bold flex items-center justify-center shrink-0 text-lg shadow-sm",
+                          isDone
+                            ? "bg-status-done text-primary-foreground"
+                            : isLocked
+                            ? "bg-muted text-muted-foreground"
+                            : "bg-primary text-primary-foreground",
+                        )}
+                      >
+                        {isDone ? <CheckCircle2 className="h-6 w-6" /> : isLocked ? <Lock className="h-5 w-5" /> : s.step_number}
+                      </div>
+                      <div className="flex-1 min-w-0 pt-0.5">
+                        {isOrderNode ? (
+                          <>
+                            <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                              <Badge className={cn("text-[10px] shadow-sm", tm?.className)}>{tm?.label}</Badge>
+                            </div>
+                            <div className="text-base font-bold tracking-tight text-foreground/90">
+                              {STEP_TYPE_EMOJI[s.step_type] || tm?.emoji} {stepLabel} {s.orders!.bin_size ? `${s.orders!.bin_size}yd` : ""} {binTypeName}
+                            </div>
+                            <div className="text-sm text-muted-foreground mt-1 line-clamp-2 leading-relaxed flex items-start gap-1">
+                              <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
+                              <span>{s.location}</span>
+                            </div>
+                            {s.orders!.customer_notes && isPending && !isLocked && (
+                              <div className="mt-3 text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md px-3 py-2 border border-amber-500/20 flex gap-2">
+                                <span className="shrink-0">📝</span> 
+                                <span className="leading-relaxed">{s.orders!.customer_notes}</span>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                              <Badge variant="outline" className="text-[10px] shadow-sm">手动步骤</Badge>
+                            </div>
+                            <div className="text-base font-bold tracking-tight text-foreground/90">
+                              {STEP_TYPE_EMOJI[s.step_type] || '📍'} {stepLabel}
+                            </div>
+                            <div className="text-sm text-muted-foreground mt-1 line-clamp-2 leading-relaxed flex items-start gap-1">
+                              <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
+                              <span>{s.location}</span>
+                            </div>
+                            {s.notes && isPending && !isLocked && (
+                              <div className="mt-3 text-xs bg-muted rounded-md px-3 py-2 border flex gap-2">
+                                <span className="shrink-0">📝</span>
+                                <span className="leading-relaxed">{s.notes}</span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {isCurrent && isPending && !isLocked && (
+                      <div className="p-3 pt-0">
+                        <Link
+                          to="/driver/step/$stepId"
+                          params={{ stepId: s.id }}
+                          className="flex items-center justify-center w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-all py-3.5 rounded-xl font-bold text-[15px] active:scale-[0.98]"
+                        >
+                          开始执行任务 <ArrowRight className="inline h-5 w-5 ml-1.5" />
+                        </Link>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  {isOrderNode ? (
-                    <>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge className={cn("text-[10px]", tm?.className)}>{tm?.label}</Badge>
-                      </div>
-                      <div className="text-sm font-semibold mt-1">
-                        {STEP_TYPE_EMOJI[s.step_type] || tm?.emoji} {stepLabel} {s.orders!.bin_size ? `${s.orders!.bin_size}yd` : ""} {binTypeName}
-                      </div>
-                      <div className="text-sm text-muted-foreground mt-0.5">{s.location}</div>
-                      {s.orders!.customer_notes && isPending && !isLocked && (
-                        <div className="mt-2 text-xs bg-status-progress/15 text-status-progress rounded px-2 py-1">
-                          📝 {s.orders!.customer_notes}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-[10px]">手动步骤</Badge>
-                      </div>
-                      <div className="text-sm font-semibold mt-1">
-                        {STEP_TYPE_EMOJI[s.step_type] || '📍'} {stepLabel}
-                      </div>
-                      <div className="text-sm text-muted-foreground mt-0.5">{s.location}</div>
-                      {s.notes && isPending && !isLocked && (
-                        <div className="mt-2 text-xs bg-muted rounded px-2 py-1">
-                          📝 {s.notes}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-              {isPending && !isLocked && (
-                <Link
-                  to="/driver/step/$stepId"
-                  params={{ stepId: s.id }}
-                  className="block bg-primary text-primary-foreground text-center py-3 font-semibold text-sm"
-                >
-                  开始 <ArrowRight className="inline h-4 w-4 ml-1" />
-                </Link>
-              )}
-              {isLocked && (
-                <div className="bg-muted text-muted-foreground text-center py-3 text-sm">
-                  🔒 请先完成上一步
-                </div>
-              )}
-            </div>
-          );
-        })}
+              );
+            });
+          })()}
+        </div>
 
         <button
           className="text-xs text-muted-foreground w-full text-center pt-2"
