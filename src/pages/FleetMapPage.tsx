@@ -49,6 +49,9 @@ const STEP_TYPE_LABELS: Record<string, string> = {
 
 const STOP_DURATION_SECONDS = 15 * 60;
 
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 type SavedEtaRow = {
   step_id: string;
   order_id: string | null;
@@ -1351,7 +1354,7 @@ export function FleetMapPage() {
                     <div className="mt-2 pl-6">
                       {nextStep ? (
                         <>
-                          <div className={cn(
+                          <div className={cx(
                             "rounded-md border px-2 py-1.5",
                             isLateRisk
                               ? "border-destructive/30 bg-destructive/10"
@@ -1360,7 +1363,7 @@ export function FleetMapPage() {
                               : "border-border bg-muted/30"
                           )}>
                             <div className="flex items-start gap-2">
-                              <div className={cn(
+                              <div className={cx(
                                 "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
                                 isLateRisk ? "bg-destructive text-destructive-foreground" : hasEta ? "bg-blue-600 text-white" : "bg-muted text-muted-foreground"
                               )}>
@@ -1377,7 +1380,7 @@ export function FleetMapPage() {
                                     </div>
                                   </div>
                                   {nextEta?.status === "OK" && etaRange && (
-                                    <div className={cn(
+                                    <div className={cx(
                                       "shrink-0 rounded-md px-1.5 py-1 text-right leading-none",
                                       isLateRisk ? "bg-destructive text-destructive-foreground" : "bg-blue-600 text-white"
                                     )}>
@@ -1390,7 +1393,7 @@ export function FleetMapPage() {
                                   {stepLocationLabel(nextStep)}
                                 </div>
                                 {nextEta?.status === "OK" && etaRange && (
-                                  <div className={cn("mt-1 text-[10px]", isLateRisk ? "text-destructive" : "text-blue-700")}>
+                                  <div className={cx("mt-1 text-[10px]", isLateRisk ? "text-destructive" : "text-blue-700")}>
                                     合理范围 {etaRange.label}
                                   </div>
                                 )}
@@ -1408,7 +1411,7 @@ export function FleetMapPage() {
                                       <div className="truncate text-[8px] text-muted-foreground">
                                         {stepActionLabel(step)}
                                       </div>
-                                      <div className={cn(
+                                      <div className={cx(
                                         "mt-0.5 rounded px-1 py-0.5 text-center text-[10px] font-semibold tabular-nums",
                                         eta?.status === "OK" ? "bg-slate-100 text-slate-700" : "bg-muted text-muted-foreground"
                                       )}>
