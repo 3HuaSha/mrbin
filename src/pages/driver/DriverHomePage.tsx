@@ -129,7 +129,7 @@ export function DriverHomePage() {
         const completedAt = sorted[i].completed_at;
         if (!completedAt || sorted[i].status !== "done") continue;
 
-        let rollingTime = new Date(completedAt).getTime();
+        let rollingTime = Math.max(etaNow, new Date(completedAt).getTime());
         for (let j = i + 1; j <= targetIndex; j += 1) {
           if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
           rollingTime += (saved.get(sorted[j].id)?.duration_seconds || 0) * 1000;

@@ -1041,23 +1041,8 @@ export function FleetMapPage() {
 
   // 计算单个司机的 ETA
   const handleCalculateDriverETA = async (driverId: string, driverName: string) => {
-    // 如果已经显示ETA，则隐藏
-    if (showingETADrivers.has(driverId)) {
-      setShowingETADrivers(prev => {
-        const next = new Set(prev);
-        next.delete(driverId);
-        return next;
-      });
-      // 从driverETAs中移除
-      setDriverETAs(prev => {
-        const next = { ...prev };
-        delete next[driverId];
-        return next;
-      });
-      toast.success(`已隐藏 ${driverName} 的路线`);
-      return;
-    }
-    
+    const calculationStartedAt = Date.now();
+    setEtaNow(calculationStartedAt);
     setCalculatingDriverId(driverId);
     try {
       // 获取 Samsara 车辆位置
@@ -1160,6 +1145,7 @@ export function FleetMapPage() {
         currentAddress,
         steps: stepsForETA,
         entries: matrix.entries,
+        nowMs: calculationStartedAt,
       });
 
       console.log('✅ ETA 计算结果:', {
@@ -1321,7 +1307,7 @@ export function FleetMapPage() {
                         }}
                         disabled={calculatingDriverId === d.id}
                         className="h-6 w-6 p-0"
-                        title={showingETADrivers.has(d.id) ? "隐藏路线" : "计算 ETA"}
+                        title="重新计算 ETA"
                       >
                         {calculatingDriverId === d.id ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -1816,10 +1802,11 @@ function buildDriverETAFromMatrix(input: {
   currentAddress: string;
   steps: Array<{ id: string; stepId: string; orderId: string | null; address: string }>;
   entries: RouteMatrixEntry[];
+  nowMs?: number;
 }): DriverETA {
   let cumulativeSeconds = 0;
   let totalDistance = 0;
-  const now = Date.now();
+  const now = input.nowMs ?? Date.now();
 
   const orders: ETAResult[] = input.steps.map((step, index) => {
     const fromAddress = index === 0 ? input.currentAddress : input.steps[index - 1].address;
@@ -1923,7 +1910,7 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
     const completedAt = sorted[i].completed_at;
     if (!completedAt || sorted[i].status !== "done") continue;
 
-    let rollingTime = new Date(completedAt).getTime();
+    let rollingTime = Math.max(nowMs, new Date(completedAt).getTime());
     for (let j = i + 1; j <= targetIndex; j++) {
       if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
       const leg = driverETA.orders.find((eta) => eta.orderId === stepEtaId(sorted[j]));
