@@ -262,6 +262,7 @@ export function DriverHomePage() {
               const activeIndex = currentIndex === -1 ? stepsWithLockStatus.length : currentIndex;
 
               return stepsWithLockStatus.map((s, index) => {
+                if (index < activeIndex - 1 || index > activeIndex + 1) return null;
                 const isOrderNode = s.node_type === 'order' && s.orders;
                 const tm = isOrderNode ? typeMeta(s.orders!.type) : null;
                 const isDone = s.status === "done";
