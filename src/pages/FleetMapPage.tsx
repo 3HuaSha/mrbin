@@ -1236,6 +1236,21 @@ export function FleetMapPage() {
                               <span className="text-[10px] text-muted-foreground">点时钟计算 ETA</span>
                             )}
                           </div>
+                          {hasEta && (execution?.upcoming?.length || 0) > 1 && (
+                            <div className="mt-1 rounded border bg-background/70 px-1.5 py-1">
+                              <div className="mb-0.5 text-[9px] font-medium text-muted-foreground">ETA 计算</div>
+                              <div className="space-y-0.5">
+                                {execution?.upcoming.map(({ step, eta }) => (
+                                  <div key={step.id} className="flex items-center justify-between gap-2 text-[9px]">
+                                    <span className="truncate">{stepActionLabel(step)}</span>
+                                    <span className="shrink-0 text-muted-foreground">
+                                      {eta?.status === "OK" ? formatETATime(eta.eta) : "无 ETA"}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </>
                       ) : (
                         <div className="text-[10px] text-muted-foreground">今天任务已完成</div>
