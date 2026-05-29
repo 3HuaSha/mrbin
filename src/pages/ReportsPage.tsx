@@ -376,7 +376,7 @@ export function ReportsPage() {
                     <div className="min-w-0">
                       <div className="text-sm font-medium">{segment.driverName}</div>
                       <div className="text-xs text-muted-foreground mt-1 truncate">
-                        {segment.from} -> {segment.to}
+                        {segment.from} {"->"} {segment.to}
                       </div>
                     </div>
                     <Badge variant="destructive" className="shrink-0">
