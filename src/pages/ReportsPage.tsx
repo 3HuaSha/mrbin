@@ -12,9 +12,8 @@ import {
 } from "@/components/ui/select";
 import {
   AlertTriangle,
-  BarChart3,
-  CheckCircle2,
   Clock3,
+  MapPin,
   Route,
   TimerReset,
   Users as UsersIcon,
@@ -43,9 +42,6 @@ type ReportOrder = {
   status: string;
   business_type?: string | null;
   pallet_count?: number | null;
-  time_window?: string | null;
-  time_window_custom?: string | null;
-  customer_notes?: string | null;
 };
 
 type ReportStep = {
@@ -69,20 +65,27 @@ type SlowSegment = {
   scheduledDate: string;
   from: string;
   to: string;
+  toLocation: string;
   actualMinutes: number;
   expectedMinutes: number;
   delayMinutes: number;
 };
 
-type DriverSupervisionRow = {
+type SlowLocation = {
+  key: string;
+  label: string;
+  location: string;
+  count: number;
+  totalDelayMinutes: number;
+  worstDelayMinutes: number;
+  drivers: string[];
+};
+
+type SlowDriver = {
   driver: Driver;
-  totalSteps: number;
-  doneSteps: number;
-  openSteps: number;
-  completionRate: number;
-  slowSegments: SlowSegment[];
-  averageDelayMinutes: number;
-  lastCompletedAt: string | null;
+  count: number;
+  totalDelayMinutes: number;
+  worstDelayMinutes: number;
 };
 
 const SLOW_BUFFER_MINUTES = 15;
@@ -108,12 +111,12 @@ export function ReportsPage() {
   });
 
   const { data: reportSteps = [] } = useQuery({
-    queryKey: ["driver-supervision-steps", startISO, todayStr, businessType],
+    queryKey: ["slow-point-report-steps", startISO, todayStr, businessType],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("job_steps")
         .select(
-          "id,driver_id,scheduled_date,step_number,step_type,node_type,location,status,completed_at,order_id,orders(id,order_number,type,bin_size,address,status,business_type,pallet_count,time_window,time_window_custom,customer_notes)",
+          "id,driver_id,scheduled_date,step_number,step_type,node_type,location,status,completed_at,order_id,orders(id,order_number,type,bin_size,address,status,business_type,pallet_count)",
         )
         .gte("scheduled_date", startISO)
         .lte("scheduled_date", todayStr)
@@ -133,7 +136,7 @@ export function ReportsPage() {
     return new Map(drivers.map((driver) => [driver.id, driver]));
   }, [drivers]);
 
-  const supervision = useMemo(() => {
+  const slowReport = useMemo(() => {
     const groups = new Map<string, ReportStep[]>();
     for (const step of reportSteps) {
       const key = `${step.driver_id}|${step.scheduled_date}`;
@@ -142,49 +145,14 @@ export function ReportsPage() {
       groups.set(key, list);
     }
 
-    const rows = new Map<string, DriverSupervisionRow>();
-    for (const driver of drivers) {
-      rows.set(driver.id, {
-        driver,
-        totalSteps: 0,
-        doneSteps: 0,
-        openSteps: 0,
-        completionRate: 0,
-        slowSegments: [],
-        averageDelayMinutes: 0,
-        lastCompletedAt: null,
-      });
-    }
-
-    const unassignedDriver: Driver = { id: "unknown", name: "未绑定司机" };
+    const slowSegments: SlowSegment[] = [];
 
     for (const [key, steps] of groups) {
       const [driverId, scheduledDate] = key.split("|");
-      const driver = driverById.get(driverId) ?? unassignedDriver;
-      const row =
-        rows.get(driver.id) ??
-        {
-          driver,
-          totalSteps: 0,
-          doneSteps: 0,
-          openSteps: 0,
-          completionRate: 0,
-          slowSegments: [],
-          averageDelayMinutes: 0,
-          lastCompletedAt: null,
-        };
-
-      const sorted = [...steps].sort((a, b) => a.step_number - b.step_number);
-      row.totalSteps += sorted.length;
-      row.doneSteps += sorted.filter(isStepDone).length;
-      row.openSteps += sorted.filter((step) => !isStepDone(step)).length;
-
-      const completed = sorted.filter((step) => step.completed_at);
-      for (const step of completed) {
-        if (!row.lastCompletedAt || new Date(step.completed_at!).getTime() > new Date(row.lastCompletedAt).getTime()) {
-          row.lastCompletedAt = step.completed_at;
-        }
-      }
+      const driver = driverById.get(driverId) ?? { id: driverId, name: "未绑定司机" };
+      const completed = [...steps]
+        .filter((step) => step.completed_at)
+        .sort((a, b) => a.step_number - b.step_number);
 
       for (let i = 1; i < completed.length; i += 1) {
         const previous = completed[i - 1];
@@ -195,37 +163,81 @@ export function ReportsPage() {
         const expectedMinutes =
           serviceMinutesForStep(previous) + roughDriveMinutes(previous.location, current.location);
         const delayMinutes = Math.max(0, actualMinutes - expectedMinutes);
+
         if (delayMinutes > SLOW_BUFFER_MINUTES) {
-          row.slowSegments.push({
+          slowSegments.push({
             id: `${previous.id}-${current.id}`,
             driverId: driver.id,
             driverName: driver.name,
             scheduledDate,
             from: stepLabel(previous),
             to: stepLabel(current),
+            toLocation: stepAddress(current),
             actualMinutes,
             expectedMinutes,
             delayMinutes,
           });
         }
       }
-
-      rows.set(driver.id, row);
     }
 
-    const driverRows = Array.from(rows.values())
-      .map((row) => {
-        const delayTotal = row.slowSegments.reduce((sum, segment) => sum + segment.delayMinutes, 0);
-        return {
-          ...row,
-          completionRate: row.totalSteps ? row.doneSteps / row.totalSteps : 0,
-          averageDelayMinutes: row.slowSegments.length ? delayTotal / row.slowSegments.length : 0,
-        };
-      })
-      .filter((row) => row.totalSteps > 0)
-      .sort((a, b) => b.slowSegments.length - a.slowSegments.length || b.openSteps - a.openSteps);
+    slowSegments.sort((a, b) => b.delayMinutes - a.delayMinutes);
 
-    const slowSegments = driverRows.flatMap((row) => row.slowSegments);
+    const locationMap = new Map<string, SlowLocation>();
+    for (const segment of slowSegments) {
+      const key = normalizeLocationKey(segment.toLocation || segment.to);
+      const existing =
+        locationMap.get(key) ??
+        {
+          key,
+          label: segment.to,
+          location: segment.toLocation,
+          count: 0,
+          totalDelayMinutes: 0,
+          worstDelayMinutes: 0,
+          drivers: [],
+        };
+
+      existing.count += 1;
+      existing.totalDelayMinutes += segment.delayMinutes;
+      existing.worstDelayMinutes = Math.max(existing.worstDelayMinutes, segment.delayMinutes);
+      if (!existing.drivers.includes(segment.driverName)) existing.drivers.push(segment.driverName);
+      locationMap.set(key, existing);
+    }
+
+    const slowLocations = Array.from(locationMap.values()).sort(
+      (a, b) => b.totalDelayMinutes - a.totalDelayMinutes || b.count - a.count,
+    );
+
+    const driverMap = new Map<string, SlowDriver>();
+    for (const driver of drivers) {
+      driverMap.set(driver.id, {
+        driver,
+        count: 0,
+        totalDelayMinutes: 0,
+        worstDelayMinutes: 0,
+      });
+    }
+    for (const segment of slowSegments) {
+      const driver = driverById.get(segment.driverId) ?? { id: segment.driverId, name: segment.driverName };
+      const existing =
+        driverMap.get(driver.id) ??
+        {
+          driver,
+          count: 0,
+          totalDelayMinutes: 0,
+          worstDelayMinutes: 0,
+        };
+      existing.count += 1;
+      existing.totalDelayMinutes += segment.delayMinutes;
+      existing.worstDelayMinutes = Math.max(existing.worstDelayMinutes, segment.delayMinutes);
+      driverMap.set(driver.id, existing);
+    }
+
+    const slowDrivers = Array.from(driverMap.values())
+      .filter((driver) => driver.count > 0)
+      .sort((a, b) => b.totalDelayMinutes - a.totalDelayMinutes || b.count - a.count);
+
     const overdueOpenSteps = reportSteps
       .filter((step) => step.scheduled_date < todayStr && !isStepDone(step))
       .map((step) => ({
@@ -233,30 +245,27 @@ export function ReportsPage() {
         driverName: driverById.get(step.driver_id)?.name ?? "未绑定司机",
         scheduledDate: step.scheduled_date,
         label: stepLabel(step),
-        location: step.orders?.address || step.location,
+        location: stepAddress(step),
       }));
 
     return {
-      rows: driverRows,
       slowSegments,
+      slowLocations,
+      slowDrivers,
       overdueOpenSteps,
-      totalSteps: reportSteps.length,
-      doneSteps: reportSteps.filter(isStepDone).length,
-      openSteps: reportSteps.filter((step) => !isStepDone(step)).length,
+      totalDelayMinutes: slowSegments.reduce((sum, segment) => sum + segment.delayMinutes, 0),
     };
   }, [drivers, driverById, reportSteps, todayStr]);
 
-  const completionRate = supervision.totalSteps
-    ? supervision.doneSteps / supervision.totalSteps
-    : 0;
+  const worstLocation = slowReport.slowLocations[0];
 
   return (
     <div className="p-6 space-y-5">
       <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">司机监督报表</h1>
+          <h1 className="text-2xl font-bold">司机慢点分析</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            查看司机任务完成率、任务间隔偏慢、历史未完成和执行异常
+            重点看哪些地点、哪段任务、哪个司机出现明显偏慢
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -276,116 +285,65 @@ export function ReportsPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
-          icon={<CheckCircle2 className="h-4 w-4" />}
-          label="完成任务"
-          value={`${supervision.doneSteps}/${supervision.totalSteps}`}
-          sub={`完成率 ${(completionRate * 100).toFixed(0)}%`}
-          tone="text-status-done"
+          icon={<TimerReset className="h-4 w-4" />}
+          label="偏慢记录"
+          value={slowReport.slowSegments.length.toString()}
+          sub={`超过预估 +${SLOW_BUFFER_MINUTES} 分钟才算`}
+          tone={slowReport.slowSegments.length ? "text-amber-600" : "text-status-done"}
         />
         <StatCard
-          icon={<TimerReset className="h-4 w-4" />}
-          label="偏慢段"
-          value={supervision.slowSegments.length.toString()}
-          sub={`超过预估 +${SLOW_BUFFER_MINUTES} 分钟`}
-          tone={supervision.slowSegments.length ? "text-amber-600" : "text-status-done"}
+          icon={<Clock3 className="h-4 w-4" />}
+          label="累计偏慢"
+          value={`${Math.round(slowReport.totalDelayMinutes)} 分钟`}
+          sub="所有偏慢段合计"
+          tone={slowReport.totalDelayMinutes ? "text-amber-600" : "text-status-done"}
+        />
+        <StatCard
+          icon={<MapPin className="h-4 w-4" />}
+          label="最慢地点"
+          value={worstLocation ? `${Math.round(worstLocation.totalDelayMinutes)} 分钟` : "-"}
+          sub={worstLocation ? worstLocation.label : "暂无慢点"}
+          tone={worstLocation ? "text-destructive" : "text-status-done"}
         />
         <StatCard
           icon={<AlertTriangle className="h-4 w-4" />}
-          label="历史未完成"
-          value={supervision.overdueOpenSteps.length.toString()}
-          sub="昨天以前还未完成"
-          tone={supervision.overdueOpenSteps.length ? "text-destructive" : "text-status-done"}
-        />
-        <StatCard
-          icon={<UsersIcon className="h-4 w-4" />}
-          label="有任务司机"
-          value={supervision.rows.length.toString()}
-          sub={`${supervision.openSteps} 个任务进行中`}
-          tone="text-primary"
+          label="未处理异常"
+          value={slowReport.overdueOpenSteps.length.toString()}
+          sub="历史任务未打卡"
+          tone={slowReport.overdueOpenSteps.length ? "text-destructive" : "text-status-done"}
         />
       </div>
 
-      <Card className="p-4">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div>
-            <div className="text-sm font-semibold flex items-center gap-2">
-              <UsersIcon className="h-4 w-4" /> 司机监督汇总
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              偏慢按相邻两个已完成打卡之间的实际间隔计算
-            </div>
-          </div>
-        </div>
-
-        {supervision.rows.length === 0 ? (
-          <EmptyState text="当前时间范围暂无司机任务" />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-xs text-muted-foreground">
-                  <th className="text-left font-medium py-2 pr-3">司机</th>
-                  <th className="text-left font-medium py-2 pr-3">完成</th>
-                  <th className="text-left font-medium py-2 pr-3">完成率</th>
-                  <th className="text-left font-medium py-2 pr-3">平均偏慢</th>
-                  <th className="text-left font-medium py-2 pr-3">偏慢段</th>
-                  <th className="text-left font-medium py-2 pr-3">未完成</th>
-                  <th className="text-left font-medium py-2">最近完成</th>
-                </tr>
-              </thead>
-              <tbody>
-                {supervision.rows.map((row) => (
-                  <tr key={row.driver.id} className="border-b last:border-0">
-                    <td className="py-3 pr-3 font-medium">{row.driver.name}</td>
-                    <td className="py-3 pr-3">
-                      {row.doneSteps}/{row.totalSteps}
-                    </td>
-                    <td className="py-3 pr-3">
-                      <CompletionBar value={row.completionRate} />
-                    </td>
-                    <td className="py-3 pr-3">
-                      {row.averageDelayMinutes ? `${Math.round(row.averageDelayMinutes)} 分钟` : "-"}
-                    </td>
-                    <td className="py-3 pr-3">
-                      <Badge variant={row.slowSegments.length ? "destructive" : "outline"}>
-                        {row.slowSegments.length}
-                      </Badge>
-                    </td>
-                    <td className="py-3 pr-3">{row.openSteps}</td>
-                    <td className="py-3 text-muted-foreground">{formatDateTime(row.lastCompletedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Card className="p-4">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <Card className="p-4 xl:col-span-2">
           <div className="text-sm font-semibold flex items-center gap-2 mb-3">
-            <Route className="h-4 w-4" /> 任务间隔偏慢
+            <MapPin className="h-4 w-4" /> 慢点排行
           </div>
-          {supervision.slowSegments.length === 0 ? (
-            <EmptyState text="暂无明显偏慢记录" />
+          {slowReport.slowLocations.length === 0 ? (
+            <EmptyState text="当前时间范围暂无明显慢点" />
           ) : (
             <div className="space-y-2">
-              {supervision.slowSegments.slice(0, 12).map((segment) => (
-                <div key={segment.id} className="border rounded-md p-3">
+              {slowReport.slowLocations.slice(0, 10).map((location, index) => (
+                <div key={location.key} className="border rounded-md p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{segment.driverName}</div>
-                      <div className="text-xs text-muted-foreground mt-1 truncate">
-                        {segment.from} {"->"} {segment.to}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-muted-foreground w-6">#{index + 1}</span>
+                        <div className="text-sm font-semibold truncate">{location.label}</div>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1 truncate">{location.location}</div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {location.count} 次偏慢 · 涉及 {location.drivers.join("、")}
                       </div>
                     </div>
-                    <Badge variant="destructive" className="shrink-0">
-                      +{Math.round(segment.delayMinutes)} 分钟
-                    </Badge>
-                  </div>
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    {segment.scheduledDate} · 实际 {Math.round(segment.actualMinutes)} 分钟 · 预估{" "}
-                    {Math.round(segment.expectedMinutes)} 分钟
+                    <div className="text-right shrink-0">
+                      <div className="text-base font-bold text-destructive">
+                        +{Math.round(location.totalDelayMinutes)}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        最慢 +{Math.round(location.worstDelayMinutes)} 分钟
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -395,22 +353,25 @@ export function ReportsPage() {
 
         <Card className="p-4">
           <div className="text-sm font-semibold flex items-center gap-2 mb-3">
-            <Clock3 className="h-4 w-4" /> 历史未完成
+            <UsersIcon className="h-4 w-4" /> 司机偏慢排行
           </div>
-          {supervision.overdueOpenSteps.length === 0 ? (
-            <EmptyState text="没有历史遗留未完成任务" />
+          {slowReport.slowDrivers.length === 0 ? (
+            <EmptyState text="暂无司机偏慢记录" />
           ) : (
             <div className="space-y-2">
-              {supervision.overdueOpenSteps.slice(0, 12).map((step) => (
-                <div key={step.id} className="border rounded-md p-3">
-                  <div className="flex items-start justify-between gap-3">
+              {slowReport.slowDrivers.map((driver, index) => (
+                <div key={driver.driver.id} className="border rounded-md p-3">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{step.driverName}</div>
-                      <div className="text-xs text-muted-foreground mt-1 truncate">{step.label}</div>
-                      <div className="text-xs text-muted-foreground mt-1 truncate">{step.location}</div>
+                      <div className="text-sm font-semibold">
+                        #{index + 1} {driver.driver.name}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {driver.count} 段偏慢 · 最慢 +{Math.round(driver.worstDelayMinutes)} 分钟
+                      </div>
                     </div>
-                    <Badge variant="outline" className="shrink-0">
-                      {step.scheduledDate}
+                    <Badge variant="destructive" className="shrink-0">
+                      +{Math.round(driver.totalDelayMinutes)}
                     </Badge>
                   </div>
                 </div>
@@ -422,36 +383,69 @@ export function ReportsPage() {
 
       <Card className="p-4">
         <div className="text-sm font-semibold flex items-center gap-2 mb-3">
-          <BarChart3 className="h-4 w-4" /> 最近任务明细
+          <Route className="h-4 w-4" /> 偏慢明细
         </div>
-        {reportSteps.length === 0 ? (
-          <EmptyState text="暂无任务明细" />
+        {slowReport.slowSegments.length === 0 ? (
+          <EmptyState text="暂无明显偏慢明细" />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-            {reportSteps.slice(0, 18).map((step) => (
-              <div key={step.id} className="border rounded-md p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-medium truncate">{stepLabel(step)}</div>
-                  <Badge variant={isStepDone(step) ? "outline" : "secondary"} className="shrink-0">
-                    {isStepDone(step) ? "已完成" : "未完成"}
-                  </Badge>
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {driverById.get(step.driver_id)?.name ?? "未绑定司机"} · {step.scheduled_date}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1 truncate">
-                  {step.orders?.address || step.location}
-                </div>
-                {step.completed_at && (
-                  <div className="text-xs text-muted-foreground mt-1">
-                    完成时间 {formatDateTime(step.completed_at)}
-                  </div>
-                )}
-              </div>
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-xs text-muted-foreground">
+                  <th className="text-left font-medium py-2 pr-3">日期</th>
+                  <th className="text-left font-medium py-2 pr-3">司机</th>
+                  <th className="text-left font-medium py-2 pr-3">从哪里</th>
+                  <th className="text-left font-medium py-2 pr-3">慢在哪</th>
+                  <th className="text-left font-medium py-2 pr-3">地址</th>
+                  <th className="text-left font-medium py-2 pr-3">实际/预估</th>
+                  <th className="text-left font-medium py-2">偏慢</th>
+                </tr>
+              </thead>
+              <tbody>
+                {slowReport.slowSegments.slice(0, 30).map((segment) => (
+                  <tr key={segment.id} className="border-b last:border-0">
+                    <td className="py-3 pr-3 text-muted-foreground">{segment.scheduledDate}</td>
+                    <td className="py-3 pr-3 font-medium">{segment.driverName}</td>
+                    <td className="py-3 pr-3">{segment.from}</td>
+                    <td className="py-3 pr-3">{segment.to}</td>
+                    <td className="py-3 pr-3 max-w-xs truncate text-muted-foreground">{segment.toLocation}</td>
+                    <td className="py-3 pr-3 text-muted-foreground">
+                      {Math.round(segment.actualMinutes)} / {Math.round(segment.expectedMinutes)} 分钟
+                    </td>
+                    <td className="py-3">
+                      <Badge variant="destructive">+{Math.round(segment.delayMinutes)} 分钟</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
+
+      {slowReport.overdueOpenSteps.length > 0 && (
+        <Card className="p-4">
+          <div className="text-sm font-semibold flex items-center gap-2 mb-3">
+            <AlertTriangle className="h-4 w-4" /> 历史未打卡
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {slowReport.overdueOpenSteps.slice(0, 12).map((step) => (
+              <div key={step.id} className="border rounded-md p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium">{step.driverName}</div>
+                    <div className="text-xs text-muted-foreground mt-1 truncate">{step.label}</div>
+                    <div className="text-xs text-muted-foreground mt-1 truncate">{step.location}</div>
+                  </div>
+                  <Badge variant="outline" className="shrink-0">
+                    {step.scheduledDate}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -476,23 +470,8 @@ function StatCard({
         {label}
       </div>
       <div className="text-2xl font-bold mt-1.5">{value}</div>
-      <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>
+      <div className="text-[11px] text-muted-foreground mt-0.5 truncate">{sub}</div>
     </Card>
-  );
-}
-
-function CompletionBar({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  return (
-    <div className="flex items-center gap-2 min-w-32">
-      <div className="h-2 w-24 rounded bg-muted overflow-hidden">
-        <div
-          className={cn("h-full rounded", pct >= 90 ? "bg-status-done" : pct >= 70 ? "bg-amber-500" : "bg-destructive")}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="text-xs text-muted-foreground tabular-nums">{pct}%</span>
-    </div>
   );
 }
 
@@ -506,6 +485,10 @@ function isStepDone(step: ReportStep) {
 
 function stepLabel(step: ReportStep) {
   return step.orders?.order_number || STEP_TYPE_LABELS[step.step_type] || step.step_type;
+}
+
+function stepAddress(step: ReportStep) {
+  return step.orders?.address || step.location;
 }
 
 function serviceMinutesForStep(step: ReportStep) {
@@ -542,16 +525,8 @@ function areaZone(value: string) {
   return "unknown";
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "-";
-  return date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function normalizeLocationKey(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 const STEP_TYPE_LABELS: Record<string, string> = {
