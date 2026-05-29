@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { todayISO, typeMeta } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
@@ -1348,7 +1348,88 @@ export function FleetMapPage() {
                       </div>
                     </div>
 
-                    <div className="mt-1.5 space-y-1 pl-6">
+                    <div className="mt-2 pl-6">
+                      {nextStep ? (
+                        <>
+                          <div className={cn(
+                            "rounded-md border px-2 py-1.5",
+                            isLateRisk
+                              ? "border-destructive/30 bg-destructive/10"
+                              : hasEta
+                              ? "border-blue-200 bg-blue-50/70"
+                              : "border-border bg-muted/30"
+                          )}>
+                            <div className="flex items-start gap-2">
+                              <div className={cn(
+                                "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
+                                isLateRisk ? "bg-destructive text-destructive-foreground" : hasEta ? "bg-blue-600 text-white" : "bg-muted text-muted-foreground"
+                              )}>
+                                {isLateRisk ? <AlertTriangle className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                                      {hasEta ? "下一站" : "待计算 ETA"}
+                                    </div>
+                                    <div className="truncate text-[11px] font-semibold leading-snug">
+                                      {stepActionLabel(nextStep)}
+                                    </div>
+                                  </div>
+                                  {nextEta?.status === "OK" && etaRange && (
+                                    <div className={cn(
+                                      "shrink-0 rounded-md px-1.5 py-1 text-right leading-none",
+                                      isLateRisk ? "bg-destructive text-destructive-foreground" : "bg-blue-600 text-white"
+                                    )}>
+                                      <div className="text-[9px] opacity-85">ETA</div>
+                                      <div className="text-[12px] font-bold tabular-nums">{formatETATime(nextEta.eta)}</div>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={stepLocationLabel(nextStep)}>
+                                  {stepLocationLabel(nextStep)}
+                                </div>
+                                {nextEta?.status === "OK" && etaRange && (
+                                  <div className={cn("mt-1 text-[10px]", isLateRisk ? "text-destructive" : "text-blue-700")}>
+                                    合理范围 {etaRange.label}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {hasEta && (execution?.upcoming?.length || 0) > 1 && (
+                            <div className="mt-1.5 overflow-hidden rounded-md border bg-background">
+                              <div className="flex items-center gap-1 overflow-x-auto px-2 py-1.5">
+                                {execution?.upcoming.map(({ step, eta }, index) => (
+                                  <React.Fragment key={step.id}>
+                                    {index > 0 && <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />}
+                                    <div className="min-w-[54px] shrink-0">
+                                      <div className="truncate text-[8px] text-muted-foreground">
+                                        {stepActionLabel(step)}
+                                      </div>
+                                      <div className={cn(
+                                        "mt-0.5 rounded px-1 py-0.5 text-center text-[10px] font-semibold tabular-nums",
+                                        eta?.status === "OK" ? "bg-slate-100 text-slate-700" : "bg-muted text-muted-foreground"
+                                      )}>
+                                        {eta?.status === "OK" ? formatETATime(eta.eta) : "--:--"}
+                                      </div>
+                                    </div>
+                                  </React.Fragment>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="rounded-md border bg-muted/30 px-2 py-1.5 text-[10px] text-muted-foreground">
+                          今天任务已完成
+                        </div>
+                      )}
+                    </div>
+
+                    {false && (
+                      <>
                       {nextStep ? (
                         <>
                           <div className="flex items-center gap-1 text-[11px] leading-snug">
@@ -1390,7 +1471,8 @@ export function FleetMapPage() {
                       ) : (
                         <div className="text-[10px] text-muted-foreground">今天任务已完成</div>
                       )}
-                    </div>
+                      </>
+                    )}
                   </div>
                   
                   {isExpanded && (
