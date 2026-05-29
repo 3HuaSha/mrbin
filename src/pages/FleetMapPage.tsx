@@ -1071,87 +1071,12 @@ export function FleetMapPage() {
         <BusinessTypeSelector value={businessType} onChange={setBusinessType} />
       </div>
       
-      <div className="border-b bg-muted/20 px-3 py-2">
-        <div className="mb-1 flex items-center justify-between">
-          <div className="text-xs font-semibold flex items-center gap-1.5">
-            <Clock className="h-3.5 w-3.5" />
-            司机执行监督
-          </div>
-          <div className="text-[10px] text-muted-foreground">
-            点司机旁边的时钟计算 ETA；之后用打卡状态和任务顺序显示当前去向
-          </div>
-        </div>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {driverExecutionSummaries.map(({ driver, nextStep, lastDone, nextEta, etaRange, upcoming, driverETA }) => {
-            const hasEta = !!driverETA;
-            const isLateRisk = nextEta?.status === "OK" && etaRange?.risk;
-            return (
-              <div
-                key={driver.id}
-                className={`min-w-[280px] max-w-[340px] rounded-md border bg-background p-2 text-xs shadow-sm ${
-                  isLateRisk ? "border-destructive/50 bg-destructive/5" : hasEta ? "border-blue-200" : ""
-                }`}
-              >
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <div className="font-semibold truncate">{driver.name}</div>
-                  <Badge variant={isLateRisk ? "destructive" : hasEta ? "default" : "outline"} className="h-5 text-[10px]">
-                    {isLateRisk ? "可能晚到" : hasEta ? "已算 ETA" : "未计算"}
-                  </Badge>
-                </div>
-
-                {nextStep ? (
-                  <>
-                    <div className="text-[11px] text-muted-foreground">当前动作</div>
-                    <div className="mt-0.5 leading-snug">
-                      <span className="text-muted-foreground">{lastDone ? stepActionLabel(lastDone) : "车辆当前位置"}</span>
-                      <ChevronRight className="mx-1 inline h-3 w-3 text-muted-foreground" />
-                      <span className="font-medium">{stepActionLabel(nextStep)}</span>
-                    </div>
-                    <div className="mt-1 truncate text-[11px] text-muted-foreground" title={stepLocationLabel(nextStep)}>
-                      {stepLocationLabel(nextStep)}
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      {nextEta?.status === "OK" && etaRange ? (
-                        <>
-                          <Badge variant="secondary" className="h-5 text-[10px]">预计 {formatETATime(nextEta.eta)}</Badge>
-                          <span className="text-[10px] text-muted-foreground">合理 {etaRange.label}</span>
-                        </>
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground">还没有 ETA，点司机行的时钟计算</span>
-                      )}
-                      {isLateRisk && <AlertTriangle className="h-3.5 w-3.5 text-destructive" />}
-                    </div>
-                    {upcoming.length > 1 && (
-                      <div className="mt-2 border-t pt-1.5">
-                        <div className="mb-1 text-[10px] text-muted-foreground">后续动作</div>
-                        <div className="space-y-1">
-                          {upcoming.slice(1).map(({ step, eta }) => (
-                            <div key={step.id} className="flex items-center justify-between gap-2 text-[10px]">
-                              <span className="truncate">{stepActionLabel(step)}</span>
-                              <span className="shrink-0 text-muted-foreground">
-                                {eta?.status === "OK" ? formatETATime(eta.eta) : "无 ETA"}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="py-3 text-center text-xs text-muted-foreground">今天任务已完成</div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       <div className="flex-1 flex min-h-0">
         {/* 左侧司机任务列表 - 缩小宽度 */}
-        <Card className="w-64 flex flex-col overflow-hidden shrink-0 shadow-sm rounded-none border-r border-t-0 border-l-0 border-b-0">
+        <Card className="w-80 flex flex-col overflow-hidden shrink-0 shadow-sm rounded-none border-r border-t-0 border-l-0 border-b-0">
           <div className="p-3 border-b bg-muted/20 font-semibold text-sm flex items-center gap-2 shrink-0">
             <Truck className="h-4 w-4" />
-            司机任务 ({filteredDrivers.length})
+            司机执行与任务 ({filteredDrivers.length})
           </div>
 
           {/* 同步按钮 - 有未保存改动时高亮 */}
@@ -1198,6 +1123,12 @@ export function FleetMapPage() {
             {filteredDrivers.map((d: Driver) => {
               const steps = driverJobSteps[d.id] ?? [];
               const isExpanded = expandedDrivers.has(d.id);
+              const execution = driverExecutionSummaries.find((item) => item.driver.id === d.id);
+              const nextStep = execution?.nextStep ?? null;
+              const nextEta = execution?.nextEta ?? null;
+              const etaRange = execution?.etaRange ?? null;
+              const hasEta = !!execution?.driverETA;
+              const isLateRisk = nextEta?.status === "OK" && etaRange?.risk;
               
               return (
                 <div
@@ -1230,20 +1161,23 @@ export function FleetMapPage() {
                     dropHoverDriverId === d.id
                       ? "ring-2 ring-primary shadow-lg scale-[1.02] border-primary"
                       : ""
-                  }`}
+                  } ${isLateRisk ? "border-destructive/60 bg-destructive/5" : hasEta ? "border-blue-200" : ""}`}
                 >
                   <div 
-                    className="flex items-center justify-between p-2 hover:bg-muted/50 cursor-pointer transition-colors"
+                    className="p-2 hover:bg-muted/50 cursor-pointer transition-colors"
                     onClick={() => toggleDriver(d.id)}
                     onMouseEnter={() => setHoveredDriverId(d.id)}
                     onMouseLeave={() => setHoveredDriverId(null)}
                   >
-                    <div className="font-semibold text-sm flex items-center gap-2">
-                      {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground"/> : <ChevronRight className="h-4 w-4 text-muted-foreground"/>}
-                      {d.name}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <Badge variant="secondary" className="text-xs">{steps.length}</Badge>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-semibold text-sm flex items-center gap-2 min-w-0">
+                        {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0"/> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0"/>}
+                        <span className="truncate">{d.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                      <Badge variant={isLateRisk ? "destructive" : hasEta ? "default" : "secondary"} className="text-[10px]">
+                        {isLateRisk ? "晚到风险" : hasEta ? "ETA" : steps.length}
+                      </Badge>
                       <Button
                         size="sm"
                         variant={showingETADrivers.has(d.id) ? "default" : "ghost"}
@@ -1261,6 +1195,36 @@ export function FleetMapPage() {
                           <Clock className="h-3 w-3" />
                         )}
                       </Button>
+                      </div>
+                    </div>
+
+                    <div className="mt-1.5 space-y-1 pl-6">
+                      {nextStep ? (
+                        <>
+                          <div className="flex items-center gap-1 text-[11px] leading-snug">
+                            <span className="text-muted-foreground">去</span>
+                            <span className="font-medium truncate">{stepActionLabel(nextStep)}</span>
+                            {isLateRisk && <AlertTriangle className="h-3 w-3 shrink-0 text-destructive" />}
+                          </div>
+                          <div className="truncate text-[10px] text-muted-foreground" title={stepLocationLabel(nextStep)}>
+                            {stepLocationLabel(nextStep)}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {nextEta?.status === "OK" && etaRange ? (
+                              <>
+                                <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                                  预计 {formatETATime(nextEta.eta)}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">合理 {etaRange.label}</span>
+                              </>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground">点时钟计算 ETA</span>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-[10px] text-muted-foreground">今天任务已完成</div>
+                      )}
                     </div>
                   </div>
                   
@@ -1392,6 +1356,8 @@ export function FleetMapPage() {
                             } else {
                               // 手动步骤节点卡片
                               const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
+                              const driverETA = driverETAs[d.id];
+                              const stepETA = findStepETA(driverETA, step);
                               const isDraftStep = step.id.startsWith('draft-step-');
                               const isMarkedForDelete = deleteStepIds.includes(step.id);
                               const isStepDone = step.status === 'done';
@@ -1439,7 +1405,14 @@ export function FleetMapPage() {
                                     </div>
                                   )}
                                   <div className="flex flex-col gap-1">
-                                    <div className="text-[11px] font-semibold">{stepLabel}</div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="text-[11px] font-semibold">{stepLabel}</div>
+                                      {driverETA && (
+                                        <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
+                                          {stepETA && stepETA.status === 'OK' ? formatETATime(stepETA.eta) : '无ETA'}
+                                        </div>
+                                      )}
+                                    </div>
                                     {step.location && (
                                       <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
                                         <MapPin className="h-2 w-2 inline mr-0.5" />

@@ -67,7 +67,7 @@ export async function calculateDriverETAWithSamsara(
         longitude: currentLocation.lng
       },
       ...orders.map(order => ({
-        address: order.address + ', Toronto, ON, Canada',
+        address: normalizeRouteAddress(order.address),
         name: order.address
       }))
     ];
@@ -154,6 +154,14 @@ export async function calculateDriverETAWithSamsara(
       lastUpdated: new Date().toISOString(),
     };
   }
+}
+
+function normalizeRouteAddress(address: string): string {
+  const trimmed = address.trim();
+  if (/\b(on|ontario|canada)\b/i.test(trimmed) || trimmed.includes(",")) {
+    return trimmed;
+  }
+  return `${trimmed}, ON, Canada`;
 }
 
 /**

@@ -551,8 +551,12 @@ export function getLocationsForBusinessType(businessType: 'garbage' | 'brick'): 
 
 // 根据shortName查找地点
 export function findLocationByShortName(shortName: string): ManualStepLocation | undefined {
+  const normalized = shortName.trim().toLowerCase();
   return MANUAL_STEP_LOCATIONS.find(loc => 
-    loc.shortName.toLowerCase() === shortName.toLowerCase()
+    loc.id.toLowerCase() === normalized ||
+    loc.shortName.toLowerCase() === normalized ||
+    loc.name.toLowerCase() === normalized ||
+    loc.fullAddress.toLowerCase() === normalized
   );
 }
 
@@ -568,7 +572,7 @@ export function findLocationByAddress(address: string): ManualStepLocation | und
 
 // 获取地点的完整地址（用于ETA计算）
 export function getFullAddress(shortName: string): string {
-  const location = findLocationByShortName(shortName);
+  const location = findLocationByShortName(shortName) || findLocationByAddress(shortName);
   return location ? location.fullAddress : shortName;
 }
 
