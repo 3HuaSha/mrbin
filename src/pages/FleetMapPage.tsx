@@ -313,6 +313,7 @@ export function FleetMapPage() {
           bin_id: originalStep?.bin_id ?? null,
           notes: originalStep?.notes ?? null,
           status: originalStep?.status ?? 'locked',
+          completed_at: originalStep?.completed_at ?? null,
           orders: order,
           created_at: originalStep?.created_at ?? new Date().toISOString(),
         } as JobStep);
