@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 type RouteMatrixInput = {
   addresses: string[];
+  pairs?: Array<{ from: string; to: string }>;
 };
 
 export type RouteMatrixEntry = {
@@ -32,12 +33,14 @@ type CacheRow = {
 export const getCachedRouteMatrix = createServerFn({ method: "POST" })
   .inputValidator((data: RouteMatrixInput) => data)
   .handler(async ({ data }) => {
-    return buildCachedRouteMatrix(data.addresses);
+    return buildCachedRouteMatrix(data.addresses, data.pairs);
   });
 
-async function buildCachedRouteMatrix(addresses: string[]): Promise<RouteMatrixResult> {
+async function buildCachedRouteMatrix(addresses: string[], requestedPairs?: Array<{ from: string; to: string }>): Promise<RouteMatrixResult> {
   const unique = [...new Set(addresses.map((address) => address.trim()).filter(Boolean))];
-  const pairs = unique.flatMap((from) => unique.filter((to) => to !== from).map((to) => ({ from, to })));
+  const pairs = requestedPairs?.length
+    ? dedupePairs(requestedPairs)
+    : unique.flatMap((from) => unique.filter((to) => to !== from).map((to) => ({ from, to })));
 
   const entries = new Map<string, RouteMatrixEntry>();
   let cacheHits = 0;
@@ -132,6 +135,11 @@ async function fetchGoogleMatrixForPairs(pairs: Array<{ from: string; to: string
     addressSet.add(pair.to);
   });
   const allAddresses = [...addressSet];
+  const fullMatrixElements = allAddresses.length * Math.max(0, allAddresses.length - 1);
+  if (pairs.length < fullMatrixElements) {
+    const rows = await Promise.all(pairs.map((pair) => fetchGoogleSinglePair(pair, key)));
+    return rows.filter((row): row is RouteMatrixEntry => !!row);
+  }
 
   // Single API call: all addresses as both origins and destinations
   const response = await fetch("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix", {
@@ -167,6 +175,37 @@ async function fetchGoogleMatrixForPairs(pairs: Array<{ from: string; to: string
   return entries;
 }
 
+async function fetchGoogleSinglePair(pair: { from: string; to: string }, key: string): Promise<RouteMatrixEntry | null> {
+  const response = await fetch("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": key,
+      "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status",
+    },
+    body: JSON.stringify({
+      origins: [{ waypoint: { address: pair.from } }],
+      destinations: [{ waypoint: { address: pair.to } }],
+      travelMode: "DRIVE",
+      routingPreference: "TRAFFIC_UNAWARE",
+    }),
+  });
+
+  if (!response.ok) return null;
+  const data = await response.json();
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row || row.status?.code === 3) return null;
+  const duration = parseDuration(row.duration);
+  if (!duration) return null;
+  return {
+    from: pair.from,
+    to: pair.to,
+    duration,
+    distance: row.distanceMeters || 0,
+    source: "google",
+  };
+}
+
 function parseDuration(value: string | undefined) {
   if (!value) return 0;
   return Number(value.replace("s", "")) || 0;
@@ -174,6 +213,19 @@ function parseDuration(value: string | undefined) {
 
 function pairKey(from: string, to: string) {
   return `${from.trim().toLowerCase()}|||${to.trim().toLowerCase()}`;
+}
+
+function dedupePairs(pairs: Array<{ from: string; to: string }>) {
+  const seen = new Set<string>();
+  return pairs
+    .map((pair) => ({ from: pair.from.trim(), to: pair.to.trim() }))
+    .filter((pair) => pair.from && pair.to && pair.from !== pair.to)
+    .filter((pair) => {
+      const key = pairKey(pair.from, pair.to);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function roughDuration(from: string, to: string) {

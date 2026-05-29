@@ -15,6 +15,8 @@ export interface ETAResult {
   orderAddress: string;
   distance: number; // 米
   duration: number; // 秒
+  fromStepId?: string | null;
+  source?: "matrix" | "route" | "cache" | "google" | "fallback" | "rolling";
   eta: string; // 预计到达时间 (ISO 字符串)
   status: 'OK' | 'ERROR';
 }

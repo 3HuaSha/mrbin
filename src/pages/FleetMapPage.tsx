@@ -7,8 +7,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateCcw, Plus } from "lucide-react";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
-import { calculateDriverETAWithSamsara, formatETATime, type DriverETA } from "@/lib/eta-calculator";
+import { formatETATime, type DriverETA, type ETAResult } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
+import { getCachedRouteMatrix, type RouteMatrixEntry } from "@/actions/route-matrix";
 import { getFullAddress, MANUAL_STEP_LOCATIONS } from "@/lib/manual-step-locations";
 import { toast } from "sonner";
 import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
@@ -45,6 +46,8 @@ const STEP_TYPE_LABELS: Record<string, string> = {
   load_material: '装料',
   unload_material: '卸料',
 };
+
+const STOP_DURATION_SECONDS = 15 * 60;
 
 export function FleetMapPage() {
   const qc = useQueryClient();
@@ -379,11 +382,11 @@ export function FleetMapPage() {
         .filter((step) => step.status === "done")
         .sort((a, b) => b.step_number - a.step_number)[0] ?? null;
       const driverETA = driverETAs[driver.id];
-      const nextEta = nextStep ? findStepETA(driverETA, nextStep) : null;
+      const nextEta = nextStep ? findStepETA(driverETA, nextStep, steps) : null;
       const etaRange = nextEta?.status === "OK" ? formatEtaRange(nextEta.eta, nextStep) : null;
       const upcoming = activeSteps.slice(0, 4).map((step) => ({
         step,
-        eta: findStepETA(driverETA, step),
+        eta: findStepETA(driverETA, step, steps),
       }));
 
       return {
@@ -972,7 +975,7 @@ export function FleetMapPage() {
           vehicles!driver_vehicle_assignments_vehicle_id_fkey(name, samsara_id)
         `);
 
-      const driverSteps = driverJobSteps[driverId] ?? [];
+      const driverSteps = (driverJobSteps[driverId] ?? []).filter((step) => step.status !== 'done');
       
       // 包含所有步骤（订单节点 + 手动步骤节点）
       const allSteps = driverSteps.map(s => {
@@ -1028,17 +1031,28 @@ export function FleetMapPage() {
       // 准备所有步骤数据（包含订单和手动步骤）
       const stepsForETA = allSteps.map(s => ({
         id: s!.id,
-        address: s!.address,
+        address: normalizeEtaAddress(s!.address),
       }));
 
-      const eta = await calculateDriverETAWithSamsara(
+      const currentAddress = `${currentLocation.lat},${currentLocation.lng}`;
+      const routeAddresses = [currentAddress, ...stepsForETA.map((step) => step.address)];
+      const routePairs = routeAddresses.slice(1).map((address, index) => ({
+        from: routeAddresses[index],
+        to: address,
+      }));
+      const matrix = await getCachedRouteMatrix({ data: { addresses: routeAddresses, pairs: routePairs } });
+      if (!matrix.success) throw new Error(matrix.error || "Matrix ETA calculation failed");
+
+      const eta = buildDriverETAFromMatrix({
         driverId,
         driverName,
-        assignment.vehicle_id,
+        vehicleId: assignment.vehicle_id,
         samsaraVehicleId,
         currentLocation,
-        stepsForETA
-      );
+        currentAddress,
+        steps: stepsForETA,
+        entries: matrix.entries,
+      });
 
       console.log('✅ ETA 计算结果:', {
         driverId,
@@ -1264,7 +1278,7 @@ export function FleetMapPage() {
                               const binTypeName = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : '';
                               const timeLabelStr = order.time_window_custom || order.time_window || '';
                               const driverETA = driverETAs[d.id];
-                              const orderETA = driverETA?.orders.find(o => o.orderId === order.id);
+                              const orderETA = findStepETA(driverETA, step, steps);
                               // 这个卡片是否为本地 draft 新增 / 变动
                               const isDraft = !!draft[order.id];
                               // 订单/步骤完成状态
@@ -1313,11 +1327,6 @@ export function FleetMapPage() {
                                       ✓ 完成
                                     </div>
                                   )}
-                                  {isDraft && !isDone && (
-                                    <div className="absolute top-1 right-1 text-[8px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-1">
-                                      待同步
-                                    </div>
-                                  )}
                                   <div className="flex flex-col gap-1.5">
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="text-xs font-semibold leading-tight">
@@ -1333,6 +1342,11 @@ export function FleetMapPage() {
                                       {order.address}
                                     </div>
                                     <div className="text-[10px] text-primary font-medium">{timeLabelStr}</div>
+                                    {isDraft && !isDone && (
+                                      <div className="w-fit rounded border border-amber-300 bg-amber-100 px-1 text-[8px] text-amber-700">
+                                        待同步
+                                      </div>
+                                    )}
                                     {order.customer_notes && (
                                       <div className="text-[9px] text-status-progress truncate">
                                         📝 {order.customer_notes}
@@ -1357,7 +1371,7 @@ export function FleetMapPage() {
                               // 手动步骤节点卡片
                               const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
                               const driverETA = driverETAs[d.id];
-                              const stepETA = findStepETA(driverETA, step);
+                              const stepETA = findStepETA(driverETA, step, steps);
                               const isDraftStep = step.id.startsWith('draft-step-');
                               const isMarkedForDelete = deleteStepIds.includes(step.id);
                               const isStepDone = step.status === 'done';
@@ -1399,11 +1413,6 @@ export function FleetMapPage() {
                                       ✓ 完成
                                     </div>
                                   )}
-                                  {isDraftStep && !isStepDone && (
-                                    <div className="absolute top-1 right-1 text-[8px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-1">
-                                      待同步
-                                    </div>
-                                  )}
                                   <div className="flex flex-col gap-1">
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="text-[11px] font-semibold">{stepLabel}</div>
@@ -1421,6 +1430,11 @@ export function FleetMapPage() {
                                     )}
                                     {step.bin_id && (
                                       <div className="text-[9px] text-primary">桶: {step.bin_id}</div>
+                                    )}
+                                    {isDraftStep && !isStepDone && (
+                                      <div className="w-fit rounded border border-amber-300 bg-amber-100 px-1 text-[8px] text-amber-700">
+                                        待同步
+                                      </div>
                                     )}
                                     {step.notes && (
                                       <div className="text-[8px] text-muted-foreground truncate">
@@ -1576,10 +1590,108 @@ export function FleetMapPage() {
 }
 
 // ============ DropIndicator: 拖拽时显示的"插入位置"指示条 ============
-function findStepETA(driverETA: DriverETA | undefined, step: JobStep) {
+function buildDriverETAFromMatrix(input: {
+  driverId: string;
+  driverName: string;
+  vehicleId: string;
+  samsaraVehicleId: string;
+  currentLocation: { lat: number; lng: number };
+  currentAddress: string;
+  steps: Array<{ id: string; address: string }>;
+  entries: RouteMatrixEntry[];
+}): DriverETA {
+  let cumulativeSeconds = 0;
+  let totalDistance = 0;
+  const now = Date.now();
+
+  const orders: ETAResult[] = input.steps.map((step, index) => {
+    const fromAddress = index === 0 ? input.currentAddress : input.steps[index - 1].address;
+    const leg = findMatrixLeg(input.entries, fromAddress, step.address);
+    const driveSeconds = Math.round((leg?.duration || 0) * 1.2);
+    const distance = leg?.distance || 0;
+    cumulativeSeconds += driveSeconds;
+    totalDistance += distance;
+    const eta = new Date(now + cumulativeSeconds * 1000).toISOString();
+    cumulativeSeconds += STOP_DURATION_SECONDS;
+
+    return {
+      orderId: step.id,
+      orderAddress: step.address,
+      distance,
+      duration: driveSeconds,
+      fromStepId: index === 0 ? null : input.steps[index - 1].id,
+      source: leg?.source || "fallback",
+      eta,
+      status: leg ? "OK" : "ERROR",
+    };
+  });
+
+  return {
+    driverId: input.driverId,
+    driverName: input.driverName,
+    vehicleId: input.vehicleId,
+    samsaraVehicleId: input.samsaraVehicleId,
+    currentLocation: input.currentLocation,
+    orders,
+    totalDistance,
+    totalDuration: orders.reduce((sum, order) => sum + order.duration, 0),
+    lastUpdated: new Date().toISOString(),
+  };
+}
+
+function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: JobStep[]) {
   if (!driverETA) return null;
-  const targetId = step.node_type === "order" && step.order_id ? step.order_id : step.id;
-  return driverETA.orders.find((eta) => eta.orderId === targetId) ?? null;
+  const targetId = stepEtaId(step);
+  const planned = driverETA.orders.find((eta) => eta.orderId === targetId) ?? null;
+  if (!planned || !steps) return planned;
+
+  const sorted = steps.slice().sort((a, b) => a.step_number - b.step_number);
+  const targetIndex = sorted.findIndex((item) => stepEtaId(item) === targetId);
+  if (targetIndex < 0) return planned;
+
+  for (let i = targetIndex - 1; i >= 0; i--) {
+    const completedAt = sorted[i].completed_at;
+    if (!completedAt || sorted[i].status !== "done") continue;
+
+    let rollingTime = new Date(completedAt).getTime();
+    for (let j = i + 1; j <= targetIndex; j++) {
+      if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
+      const leg = driverETA.orders.find((eta) => eta.orderId === stepEtaId(sorted[j]));
+      rollingTime += (leg?.duration || 0) * 1000;
+    }
+
+    return {
+      ...planned,
+      eta: new Date(rollingTime).toISOString(),
+      source: "rolling" as const,
+    };
+  }
+
+  return planned;
+}
+
+function findMatrixLeg(entries: RouteMatrixEntry[], from: string, to: string) {
+  return entries.find((entry) => sameRouteAddress(entry.from, from) && sameRouteAddress(entry.to, to));
+}
+
+function sameRouteAddress(a: string, b: string) {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function stepEtaId(step: JobStep) {
+  return step.node_type === "order" && step.order_id ? step.order_id : step.id;
+}
+
+function serviceSecondsForStep(step: JobStep) {
+  const pallets = Number(step.orders?.pallet_count || 0);
+  if (pallets > 0) return (10 + pallets * 2) * 60;
+  return STOP_DURATION_SECONDS;
+}
+
+function normalizeEtaAddress(address: string) {
+  const trimmed = address.trim();
+  if (/\b(on|ontario|canada)\b/i.test(trimmed) || trimmed.includes(",")) return trimmed;
+  return `${trimmed}, ON, Canada`;
 }
 
 function stepActionLabel(step: JobStep) {
