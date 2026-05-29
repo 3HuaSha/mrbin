@@ -50,6 +50,7 @@ export function DriverHomePage() {
   const nav = useNavigate();
   const [date, setDate] = useState(todayISO());
   const [gpsActive, setGpsActive] = useState(false);
+  const [etaNow, setEtaNow] = useState(Date.now());
   const { session, loading, profile, hasRole } = useCurrentUser();
   const { canInstall, isInstalled, isIOS, promptInstall } = usePWA();
   const [dismissInstallHint, setDismissInstallHint] = useState(false);
@@ -93,6 +94,11 @@ export function DriverHomePage() {
     });
   }, [steps]);
 
+  useEffect(() => {
+    const timer = setInterval(() => setEtaNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const { data: etaRows = [] } = useQuery({
     queryKey: ["saved-driver-etas", driverId, date],
     enabled: !!driverId,
@@ -117,6 +123,7 @@ export function DriverHomePage() {
       if (target.status === "done") return;
       const planned = saved.get(target.id);
       if (!planned) return;
+      let usedCompletedAnchor = false;
 
       for (let i = targetIndex - 1; i >= 0; i -= 1) {
         const completedAt = sorted[i].completed_at;
@@ -135,12 +142,31 @@ export function DriverHomePage() {
           eta_min_at: new Date(rollingTime - 5 * 60_000).toISOString(),
           eta_max_at: new Date(rollingTime + 15 * 60_000).toISOString(),
         });
+        usedCompletedAnchor = true;
         break;
+      }
+
+      if (usedCompletedAnchor) return;
+
+      const firstActiveIndex = sorted.findIndex((step: StepRow) => step.status !== "done");
+      if (firstActiveIndex >= 0 && targetIndex >= firstActiveIndex) {
+        let rollingTime = etaNow;
+        for (let j = firstActiveIndex; j <= targetIndex; j += 1) {
+          if (j > firstActiveIndex) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
+          rollingTime += (saved.get(sorted[j].id)?.duration_seconds || 0) * 1000;
+        }
+
+        adjusted.set(target.id, {
+          ...planned,
+          eta_at: new Date(rollingTime).toISOString(),
+          eta_min_at: new Date(rollingTime - 5 * 60_000).toISOString(),
+          eta_max_at: new Date(rollingTime + 15 * 60_000).toISOString(),
+        });
       }
     });
 
     return adjusted;
-  }, [etaRows, stepsWithLockStatus]);
+  }, [etaNow, etaRows, stepsWithLockStatus]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();

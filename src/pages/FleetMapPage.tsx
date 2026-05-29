@@ -77,6 +77,7 @@ export function FleetMapPage() {
   const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>({});
   const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set());
   const [businessType, setBusinessType] = useBusinessType();
+  const [etaNow, setEtaNow] = useState(Date.now());
   
   // 使用封装的数据钩子
   const {
@@ -87,6 +88,11 @@ export function FleetMapPage() {
     jobSteps,
     commonLocations,
   } = useDispatchData(date, businessType);
+
+  useEffect(() => {
+    const timer = setInterval(() => setEtaNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const { data: savedEtaRows = [], refetch: refetchSavedEtas } = useQuery({
     queryKey: ["driver-eta-snapshots", date],
@@ -459,38 +465,13 @@ export function FleetMapPage() {
         orders: eta.orders.map((orderEta) => {
           const step = steps.find((item) => stepEtaId(item) === orderEta.orderId || item.id === orderEta.stepId);
           if (!step) return orderEta;
-          return findStepETA(eta, step, steps) ?? orderEta;
+          return findStepETA(eta, step, steps, etaNow) ?? orderEta;
         }),
       };
     });
 
     return result;
-  }, [driverETAs, driverJobSteps, savedDriverETAs]);
-
-  const etaPersistKeyRef = useRef("");
-  useEffect(() => {
-    const key = JSON.stringify(
-      Object.entries(displayDriverETAs).map(([driverId, eta]) => [
-        driverId,
-        eta.orders.map((order) => [order.stepId || order.orderId, order.eta]),
-      ]),
-    );
-    if (!key || key === "[]" || key === etaPersistKeyRef.current) return;
-    etaPersistKeyRef.current = key;
-
-    Object.entries(displayDriverETAs).forEach(([driverId, eta]) => {
-      const steps = driverJobSteps[driverId] ?? [];
-      if (!steps.length || !eta.orders.length) return;
-      saveDriverETASnapshot({
-        driverId,
-        scheduledDate: date,
-        eta,
-        steps,
-      }).catch((error) => {
-        console.warn("保存 ETA 快照失败:", error);
-      });
-    });
-  }, [date, displayDriverETAs, driverJobSteps]);
+  }, [driverETAs, driverJobSteps, etaNow, savedDriverETAs]);
 
   const driverExecutionSummaries = useMemo(() => {
     return filteredDrivers.map((driver: Driver) => {
@@ -503,11 +484,11 @@ export function FleetMapPage() {
         .filter((step) => step.status === "done")
         .sort((a, b) => b.step_number - a.step_number)[0] ?? null;
       const driverETA = displayDriverETAs[driver.id];
-      const nextEta = nextStep ? findStepETA(driverETA, nextStep, steps) : null;
+      const nextEta = nextStep ? findStepETA(driverETA, nextStep, steps, etaNow) : null;
       const etaRange = nextEta?.status === "OK" ? formatEtaRange(nextEta.eta, nextStep) : null;
       const upcoming = activeSteps.map((step) => ({
         step,
-        eta: findStepETA(driverETA, step, steps),
+        eta: findStepETA(driverETA, step, steps, etaNow),
       }));
 
       return {
@@ -521,7 +502,7 @@ export function FleetMapPage() {
         upcoming,
       };
     });
-  }, [filteredDrivers, driverJobSteps, displayDriverETAs]);
+  }, [etaNow, filteredDrivers, driverJobSteps, displayDriverETAs]);
 
   // 拖拽预览路线: 当拖拽订单悬停在司机上时, 计算该司机现有任务 + 新订单的路线坐标
   // 使用 localStorage 中的 geocode 缓存 + MANUAL_STEP_LOCATIONS 的固定坐标
@@ -1928,7 +1909,7 @@ async function saveDriverETASnapshot(input: {
   if (error) throw error;
 }
 
-function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: JobStep[]) {
+function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: JobStep[], nowMs = Date.now()) {
   if (!driverETA) return null;
   const targetId = stepEtaId(step);
   const planned = driverETA.orders.find((eta) => eta.orderId === targetId) ?? null;
@@ -1945,6 +1926,22 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
     let rollingTime = new Date(completedAt).getTime();
     for (let j = i + 1; j <= targetIndex; j++) {
       if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
+      const leg = driverETA.orders.find((eta) => eta.orderId === stepEtaId(sorted[j]));
+      rollingTime += (leg?.duration || 0) * 1000;
+    }
+
+    return {
+      ...planned,
+      eta: new Date(rollingTime).toISOString(),
+      source: "rolling" as const,
+    };
+  }
+
+  const firstActiveIndex = sorted.findIndex((item) => item.status !== "done");
+  if (firstActiveIndex >= 0 && targetIndex >= firstActiveIndex) {
+    let rollingTime = nowMs;
+    for (let j = firstActiveIndex; j <= targetIndex; j++) {
+      if (j > firstActiveIndex) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
       const leg = driverETA.orders.find((eta) => eta.orderId === stepEtaId(sorted[j]));
       rollingTime += (leg?.duration || 0) * 1000;
     }
