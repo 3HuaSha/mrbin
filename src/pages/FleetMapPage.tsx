@@ -737,24 +737,23 @@ export function FleetMapPage() {
     setDraft(prev => {
       const next = { ...prev };
 
-      // 需要把统一 index 转换为订单序列中的 index
-      // 因为 merged.assigned 只跟踪订单, 不包含手动步骤
-      let orderIndex = index;
+      // DropIndicator 提供的是统一列表的 index（包含订单和手动步骤，且只数未完成/未删除的可见节点）
+      // 需要把它换算为订单序列中的 index（手动步骤不计入订单序列）
+      let targetIndex = 0;
       if (driverId && index !== undefined) {
-        // 统一列表中 index 位置之前有多少个订单节点 = 订单序列中的 index
-        const steps = driverJobSteps[driverId] ?? [];
+        const visibleSteps = (driverJobSteps[driverId] ?? []).filter(s => {
+          if (s.node_type === 'order') return s.status !== 'done' && s.orders?.status !== 'done';
+          // 手动步骤：过滤掉标记删除或已完成
+          if (s.node_type === 'step') return !deleteStepIds.includes(s.id) && s.status !== 'done';
+          return false;
+        });
         let orderCount = 0;
-        for (let i = 0; i < Math.min(index, steps.length); i++) {
-          if (steps[i].node_type === 'order' && steps[i].order_id !== orderId) {
-            orderCount++;
-          }
+        for (let i = 0; i < Math.min(index, visibleSteps.length); i++) {
+          const node = visibleSteps[i];
+          if (node.node_type === 'order' && node.order_id !== orderId) orderCount++;
         }
-        orderIndex = orderCount;
-      }
-
-      // 计算目标位置: 如果没指定 index 就放末尾
-      let targetIndex = orderIndex ?? 0;
-      if (driverId && index === undefined) {
+        targetIndex = orderCount;
+      } else if (driverId && index === undefined) {
         const currentList = merged.assigned[driverId] ?? [];
         targetIndex = currentList.filter(id => id !== orderId).length;
       }
@@ -1447,221 +1446,196 @@ export function FleetMapPage() {
                   
                   {isExpanded && (
                     <div className="p-2 space-y-1.5 border-t bg-muted/10">
-                      {/* 统一索引: 每个节点 (订单/手动步骤) 之间都有 DropIndicator */}
+                      {/* DropIndicator 使用可见节点(订单+手动步骤)的顺序 index，保持手动步骤和订单的相对顺序 */}
                       {(() => {
-                        let stepIdx = 0; // 统一列表中的位置
-                        let foundCurrentStep = false; // 是否已找到第一个未完成的步骤
+                        let stepIdx = 0; // 仅统计可见节点(未完成/未删除)
+                        let foundCurrentStep = false;
                         const isHovered = dropHoverDriverId === d.id;
 
-                        // 顶部插入点
-                        const topIndicator = (
-                          <DropIndicator
-                            driverId={d.id}
-                            index={0}
-                            active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === 0}
-                            onDrop={(orderId, dId, idx) => stageAssignment(orderId, dId, idx)}
-                          />
+                        const indicator = (idx: number, key: string) => (
+                          <div key={key}>
+                            <DropIndicator
+                              driverId={d.id}
+                              index={idx}
+                              active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === idx}
+                              onDrop={(orderId, dId, i) => stageAssignment(orderId, dId, i)}
+                            />
+                          </div>
                         );
 
                         const items: React.ReactNode[] = [];
                         if (steps.length === 0) {
-                          items.push(topIndicator);
+                          items.push(indicator(0, "ind-top"));
                           items.push(
                             <div key="empty" className="text-xs text-muted-foreground text-center py-3">
                               暂无任务
                             </div>
                           );
-                        } else {
-                          // 顶部
-                          items.push(<div key="top-ind">{topIndicator}</div>);
-                          steps.forEach((step) => {
-                            if (step.node_type === 'order' && step.orders) {
-                              const order = step.orders;
-                              const tm = typeMeta(order.type);
-                              const binTypeName = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : '';
-                              const timeLabelStr = order.time_window_custom || order.time_window || '';
-                              const driverETA = displayDriverETAs[d.id];
-                              const orderETA = findStepETA(driverETA, step, steps);
-                              // 这个卡片是否为本地 draft 新增 / 变动
-                              const isDraft = !!draft[order.id];
-                              // 订单/步骤完成状态
-                              const isDone = step.status === 'done' || order.status === 'done';
-                              const isInProgress = !isDone && (step.status === 'pending' || order.status === 'in_progress');
-
-                              // 已完成的任务不显示
-                              if (isDone) {
-                                stepIdx += 1;
-                                return;
-                              }
-
-                              // 标记第一个未完成的步骤 (用于展开时自动滚动)
-                              const isCurrentStep = !isDone && !foundCurrentStep;
-                              if (isCurrentStep) foundCurrentStep = true;
-
-                              items.push(
-                                <div
-                                  key={step.id}
-                                  data-order-id={order.id}
-                                  {...(isCurrentStep ? { "data-current-step": d.id } : {})}
-                                  draggable={!isDone}
-                                  onDragStart={(e) => {
-                                    if (isDone) { e.preventDefault(); return; }
-                                    e.dataTransfer.setData("text/plain", order.id);
-                                    e.dataTransfer.effectAllowed = "move";
-                                    setSidebarDragOrderId(order.id);
-                                  }}
-                                  onDragEnd={() => {
-                                    setSidebarDragOrderId(null);
-                                    setDropHoverDriverId(null);
-                                    setDropPosition(null);
-                                  }}
-                                  className={`relative rounded-lg border-l-4 ${
-                                    isDone
-                                      ? "border-l-green-500 bg-green-50"
-                                      : isInProgress
-                                      ? "border-l-amber-500 bg-amber-50/30"
-                                      : "border-l-blue-500 bg-card"
-                                  } shadow-md p-2.5 transition-all duration-300 hover:shadow-xl ${
-                                    isDone ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-                                  } ${isDraft ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === order.id ? "opacity-40" : ""} ${highlightedOrderId === order.id ? "ring-2 ring-orange-400 shadow-orange-200 shadow-lg" : ""}`}
-                                >
-                                  {isDone && (
-                                    <div className="absolute top-1 right-1 text-[8px] text-green-700 bg-green-100 border border-green-300 rounded px-1">
-                                      ✓ 完成
-                                    </div>
-                                  )}
-                                  <div className="flex flex-col gap-1.5">
-                                    <div className="flex items-center justify-between gap-2">
-                                      <div className="text-xs font-semibold leading-tight">
-                                        {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
-                                      </div>
-                                      {driverETA && (
-                                        <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
-                                          {orderETA && orderETA.status === 'OK' ? formatETATime(orderETA.eta) : '无ETA'}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div className="text-[10px] text-muted-foreground leading-snug break-words" title={order.address}>
-                                      {order.address}
-                                    </div>
-                                    <div className="text-[10px] text-primary font-medium">{timeLabelStr}</div>
-                                    {isDraft && !isDone && (
-                                      <div className="w-fit rounded border border-amber-300 bg-amber-100 px-1 text-[8px] text-amber-700">
-                                        待同步
-                                      </div>
-                                    )}
-                                    {order.customer_notes && (
-                                      <div className="text-[9px] text-status-progress truncate">
-                                        📝 {order.customer_notes}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                              // 每张卡片后面插入一个 drop point (统一 index)
-                              stepIdx += 1;
-                              items.push(
-                                <div key={`ind-${step.id}`}>
-                                  <DropIndicator
-                                    driverId={d.id}
-                                    index={stepIdx}
-                                    active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === stepIdx}
-                                    onDrop={(orderId, dId, idx) => stageAssignment(orderId, dId, idx)}
-                                  />
-                                </div>
-                              );
-                            } else {
-                              // 手动步骤节点卡片
-                              const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
-                              const driverETA = displayDriverETAs[d.id];
-                              const stepETA = findStepETA(driverETA, step, steps);
-                              const isDraftStep = step.id.startsWith('draft-step-');
-                              const isMarkedForDelete = deleteStepIds.includes(step.id);
-                              const isStepDone = step.status === 'done';
-                              // 已标记删除的或已完成的不显示
-                              if (isMarkedForDelete || isStepDone) {
-                                stepIdx += 1;
-                                return;
-                              }
-                              // 标记第一个未完成的步骤
-                              const isCurrentStep = !isStepDone && !foundCurrentStep;
-                              if (isCurrentStep) foundCurrentStep = true;
-
-                              items.push(
-                                <div
-                                  key={step.id}
-                                  {...(isCurrentStep ? { "data-current-step": d.id } : {})}
-                                  draggable={!isStepDone}
-                                  onDragStart={(e) => {
-                                    if (isStepDone) { e.preventDefault(); return; }
-                                    e.dataTransfer.setData("text/plain", `step:${step.id}`);
-                                    e.dataTransfer.effectAllowed = "move";
-                                    setSidebarDragOrderId(`step:${step.id}`);
-                                  }}
-                                  onDragEnd={() => {
-                                    setSidebarDragOrderId(null);
-                                    setDropHoverDriverId(null);
-                                    setDropPosition(null);
-                                  }}
-                                  className={`relative rounded-lg border-l-4 ${
-                                    isStepDone
-                                      ? "border-l-green-500 bg-green-50"
-                                      : "border-l-gray-400 bg-card/80"
-                                  } shadow-sm p-2 transition-all duration-300 hover:shadow-lg ${
-                                    isStepDone ? "cursor-default" : "cursor-grab active:cursor-grabbing"
-                                  } ${isDraftStep ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === "step:" + step.id ? "opacity-40" : ""}`}
-                                >
-                                  {isStepDone && (
-                                    <div className="absolute top-1 right-1 text-[8px] text-green-700 bg-green-100 border border-green-300 rounded px-1">
-                                      ✓ 完成
-                                    </div>
-                                  )}
-                                  <div className="flex flex-col gap-1">
-                                    <div className="flex items-center justify-between gap-2">
-                                      <div className="text-[11px] font-semibold">{stepLabel}</div>
-                                      {driverETA && (
-                                        <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
-                                          {stepETA && stepETA.status === 'OK' ? formatETATime(stepETA.eta) : '无ETA'}
-                                        </div>
-                                      )}
-                                    </div>
-                                    {step.location && (
-                                      <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
-                                        <MapPin className="h-2 w-2 inline mr-0.5" />
-                                        {step.location}
-                                      </div>
-                                    )}
-                                    {step.bin_id && (
-                                      <div className="text-[9px] text-primary">桶: {step.bin_id}</div>
-                                    )}
-                                    {isDraftStep && !isStepDone && (
-                                      <div className="w-fit rounded border border-amber-300 bg-amber-100 px-1 text-[8px] text-amber-700">
-                                        待同步
-                                      </div>
-                                    )}
-                                    {step.notes && (
-                                      <div className="text-[8px] text-muted-foreground truncate">
-                                        📝 {step.notes}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                              // 手动步骤后面也插入 drop point
-                              stepIdx += 1;
-                              items.push(
-                                <div key={`ind-step-${step.id}`}>
-                                  <DropIndicator
-                                    driverId={d.id}
-                                    index={stepIdx}
-                                    active={isHovered && dropPosition?.driverId === d.id && dropPosition?.index === stepIdx}
-                                    onDrop={(orderId, dId, idx) => stageAssignment(orderId, dId, idx)}
-                                  />
-                                </div>
-                              );
-                            }
-                          });
+                          return items;
                         }
+
+                        // 顶部插入点 (index=0)
+                        items.push(indicator(0, "ind-top"));
+
+                        steps.forEach((step, idx) => {
+                          if (step.node_type === 'order' && step.orders) {
+                            const order = step.orders;
+                            const tm = typeMeta(order.type);
+                            const binTypeName = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : '';
+                            const timeLabelStr = order.time_window_custom || order.time_window || '';
+                            const driverETA = displayDriverETAs[d.id];
+                            const orderETA = findStepETA(driverETA, step, steps);
+                            const isDraft = !!draft[order.id];
+                            const isDone = step.status === 'done' || order.status === 'done';
+                            const isInProgress = !isDone && (step.status === 'pending' || order.status === 'in_progress');
+
+                            if (isDone) return; // 完成的订单不显示也不占插入位
+
+                            const isCurrentStep = !isDone && !foundCurrentStep;
+                            if (isCurrentStep) foundCurrentStep = true;
+
+                            items.push(
+                              <div
+                                key={step.id}
+                                data-order-id={order.id}
+                                {...(isCurrentStep ? { "data-current-step": d.id } : {})}
+                                draggable={!isDone}
+                                onDragStart={(e) => {
+                                  if (isDone) { e.preventDefault(); return; }
+                                  e.dataTransfer.setData("text/plain", order.id);
+                                  e.dataTransfer.effectAllowed = "move";
+                                  setSidebarDragOrderId(order.id);
+                                }}
+                                onDragEnd={() => {
+                                  setSidebarDragOrderId(null);
+                                  setDropHoverDriverId(null);
+                                  setDropPosition(null);
+                                }}
+                                className={`relative rounded-lg border-l-4 ${
+                                  isDone
+                                    ? "border-l-green-500 bg-green-50"
+                                    : isInProgress
+                                    ? "border-l-amber-500 bg-amber-50/30"
+                                    : "border-l-blue-500 bg-card"
+                                } shadow-md p-2.5 transition-all duration-300 hover:shadow-xl ${
+                                  isDone ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+                                } ${isDraft ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === order.id ? "opacity-40" : ""} ${highlightedOrderId === order.id ? "ring-2 ring-orange-400 shadow-orange-200 shadow-lg" : ""}`}
+                              >
+                                {isDone && (
+                                  <div className="absolute top-1 right-1 text-[8px] text-green-700 bg-green-100 border border-green-300 rounded px-1">
+                                    ✓ 完成
+                                  </div>
+                                )}
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="text-xs font-semibold leading-tight">
+                                      {tm.emoji} {tm.label} {order.bin_size ? `${order.bin_size}yd` : ""} {binTypeName}
+                                    </div>
+                                    {driverETA && (
+                                      <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
+                                        {orderETA && orderETA.status === 'OK' ? formatETATime(orderETA.eta) : '无ETA'}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground leading-snug break-words" title={order.address}>
+                                    {order.address}
+                                  </div>
+                                  <div className="text-[10px] text-primary font-medium">{timeLabelStr}</div>
+                                  {isDraft && !isDone && (
+                                    <div className="w-fit rounded border border-amber-300 bg-amber-100 px-1 text-[8px] text-amber-700">
+                                      待同步
+                                    </div>
+                                  )}
+                                  {order.customer_notes && (
+                                    <div className="text-[9px] text-status-progress truncate">
+                                      📝 {order.customer_notes}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+
+                            stepIdx += 1;
+                            items.push(indicator(stepIdx, `ind-${step.id}-${stepIdx}`));
+                          } else {
+                            const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
+                            const driverETA = displayDriverETAs[d.id];
+                            const stepETA = findStepETA(driverETA, step, steps);
+                            const isDraftStep = step.id.startsWith('draft-step-');
+                            const isMarkedForDelete = deleteStepIds.includes(step.id);
+                            const isStepDone = step.status === 'done';
+                            if (isMarkedForDelete || isStepDone) return;
+
+                            const isCurrentStep = !isStepDone && !foundCurrentStep;
+                            if (isCurrentStep) foundCurrentStep = true;
+
+                            items.push(
+                              <div
+                                key={step.id}
+                                {...(isCurrentStep ? { "data-current-step": d.id } : {})}
+                                draggable={!isStepDone}
+                                onDragStart={(e) => {
+                                  if (isStepDone) { e.preventDefault(); return; }
+                                  e.dataTransfer.setData("text/plain", `step:${step.id}`);
+                                  e.dataTransfer.effectAllowed = "move";
+                                  setSidebarDragOrderId(`step:${step.id}`);
+                                }}
+                                onDragEnd={() => {
+                                  setSidebarDragOrderId(null);
+                                  setDropHoverDriverId(null);
+                                  setDropPosition(null);
+                                }}
+                                className={`relative rounded-lg border-l-4 ${
+                                  isStepDone
+                                    ? "border-l-green-500 bg-green-50"
+                                    : "border-l-gray-400 bg-card/80"
+                                } shadow-sm p-2 transition-all duration-300 hover:shadow-lg ${
+                                  isStepDone ? "cursor-default" : "cursor-grab active:cursor-grabbing"
+                                } ${isDraftStep ? "ring-1 ring-amber-400" : ""} ${sidebarDragOrderId === "step:" + step.id ? "opacity-40" : ""}`}
+                              >
+                                {isStepDone && (
+                                  <div className="absolute top-1 right-1 text-[8px] text-green-700 bg-green-100 border border-green-300 rounded px-1">
+                                    ✓ 完成
+                                  </div>
+                                )}
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="text-[11px] font-semibold">{stepLabel}</div>
+                                    {driverETA && (
+                                      <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
+                                        {stepETA && stepETA.status === 'OK' ? formatETATime(stepETA.eta) : '无ETA'}
+                                      </div>
+                                    )}
+                                  </div>
+                                  {step.location && (
+                                    <div className="text-[9px] text-muted-foreground leading-snug break-words" title={step.location}>
+                                      <MapPin className="h-2 w-2 inline mr-0.5" />
+                                      {step.location}
+                                    </div>
+                                  )}
+                                  {step.bin_id && (
+                                    <div className="text-[9px] text-primary">桶: {step.bin_id}</div>
+                                  )}
+                                  {isDraftStep && !isStepDone && (
+                                    <div className="w-fit rounded border border-amber-300 bg-amber-100 px-1 text-[8px] text-amber-700">
+                                      待同步
+                                    </div>
+                                  )}
+                                  {step.notes && (
+                                    <div className="text-[8px] text-muted-foreground truncate">
+                                      📝 {step.notes}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+
+                            // 手动步骤占用一个可见节点 index
+                            stepIdx += 1;
+                            items.push(indicator(stepIdx, `ind-step-${step.id}-${stepIdx}-${idx}`));
+                          }
+                        });
+
                         return items;
                       })()}
                     </div>
@@ -1924,11 +1898,14 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
     };
   }
 
-  const firstActiveIndex = sorted.findIndex((item) => item.status !== "done");
-  if (firstActiveIndex >= 0 && targetIndex >= firstActiveIndex) {
-    let rollingTime = nowMs;
-    for (let j = firstActiveIndex; j <= targetIndex; j++) {
-      if (j > firstActiveIndex) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
+  // 如果前面有已完成的步骤，用该完成时间作为起点，重新计算后续的 ETA（只重算一次，不随当前时间漂移）
+  for (let i = targetIndex - 1; i >= 0; i--) {
+    const completedAt = sorted[i].completed_at;
+    if (!completedAt || sorted[i].status !== "done") continue;
+
+    let rollingTime = new Date(completedAt).getTime();
+    for (let j = i + 1; j <= targetIndex; j++) {
+      if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
       const leg = driverETA.orders.find((eta) => eta.orderId === stepEtaId(sorted[j]));
       rollingTime += (leg?.duration || 0) * 1000;
     }
