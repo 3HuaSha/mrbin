@@ -1391,6 +1391,7 @@ export function FleetMapPage() {
                                     )}>
                                       <div className="text-[9px] opacity-85">ETA</div>
                                       <div className="text-[12px] font-bold tabular-nums">{formatETATime(nextEta.eta)}</div>
+                                      <div className="mt-0.5 text-[8px] opacity-85">完 {formatStepFinishTime(nextEta.eta, nextStep)}</div>
                                     </div>
                                   )}
                                 </div>
@@ -1422,6 +1423,11 @@ export function FleetMapPage() {
                                       )}>
                                         {eta?.status === "OK" ? formatETATime(eta.eta) : "--:--"}
                                       </div>
+                                      {eta?.status === "OK" && (
+                                        <div className="mt-0.5 text-center text-[8px] text-muted-foreground">
+                                          完 {formatStepFinishTime(eta.eta, step)}
+                                        </div>
+                                      )}
                                     </div>
                                   </React.Fragment>
                                 ))}
@@ -1572,7 +1578,9 @@ export function FleetMapPage() {
                                     </div>
                                     {driverETA && (
                                       <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
-                                        {orderETA && orderETA.status === 'OK' ? formatETATime(orderETA.eta) : '无ETA'}
+                                        {orderETA && orderETA.status === 'OK'
+                                          ? `${formatETATime(orderETA.eta)} / 完 ${formatStepFinishTime(orderETA.eta, step)}`
+                                          : '无ETA'}
                                       </div>
                                     )}
                                   </div>
@@ -1642,7 +1650,9 @@ export function FleetMapPage() {
                                     <div className="text-[11px] font-semibold">{stepLabel}</div>
                                     {driverETA && (
                                       <div className="text-[9px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium border border-blue-200">
-                                        {stepETA && stepETA.status === 'OK' ? formatETATime(stepETA.eta) : '无ETA'}
+                                        {stepETA && stepETA.status === 'OK'
+                                          ? `${formatETATime(stepETA.eta)} / 完 ${formatStepFinishTime(stepETA.eta, step)}`
+                                          : '无ETA'}
                                       </div>
                                     )}
                                   </div>
@@ -2019,6 +2029,10 @@ function serviceSecondsForStep(step: JobStep) {
   const pallets = Number(step.orders?.pallet_count || 0);
   if (pallets > 0) return (10 + pallets * 2) * 60;
   return STOP_DURATION_SECONDS;
+}
+
+function formatStepFinishTime(etaIso: string, step: JobStep) {
+  return formatETATime(new Date(new Date(etaIso).getTime() + serviceSecondsForStep(step) * 1000).toISOString());
 }
 
 function normalizeEtaAddress(address: string) {

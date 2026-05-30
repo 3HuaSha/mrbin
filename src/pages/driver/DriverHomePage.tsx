@@ -385,6 +385,7 @@ export function DriverHomePage() {
                                   <Clock className={cn("shrink-0", isCurrent ? "h-4 w-4" : "h-3.5 w-3.5")} />
                                   <span>
                                     ETA: {formatETATime(stepEta.eta_at)}
+                                    <span className="opacity-80 font-medium"> / 完 {formatStepFinishTime(stepEta.eta_at, s)}</span>
                                     {stepEta.eta_min_at && stepEta.eta_max_at && (
                                       <span className="opacity-80 font-medium"> · {formatETATime(stepEta.eta_min_at)}-{formatETATime(stepEta.eta_max_at)}</span>
                                     )}
@@ -423,6 +424,7 @@ export function DriverHomePage() {
                                   <Clock className={cn("shrink-0", isCurrent ? "h-4 w-4" : "h-3.5 w-3.5")} />
                                   <span>
                                     ETA: {formatETATime(stepEta.eta_at)}
+                                    <span className="opacity-80 font-medium"> / 完 {formatStepFinishTime(stepEta.eta_at, s)}</span>
                                     {stepEta.eta_min_at && stepEta.eta_max_at && (
                                       <span className="opacity-80 font-medium"> · {formatETATime(stepEta.eta_min_at)}-{formatETATime(stepEta.eta_max_at)}</span>
                                     )}
@@ -468,4 +470,8 @@ function serviceSecondsForStep(step: StepRow) {
   const pallets = Number(step.orders?.pallet_count || 0);
   if (pallets > 0) return (10 + pallets * 2) * 60;
   return 15 * 60;
+}
+
+function formatStepFinishTime(etaIso: string, step: StepRow) {
+  return formatETATime(new Date(new Date(etaIso).getTime() + serviceSecondsForStep(step) * 1000).toISOString());
 }
