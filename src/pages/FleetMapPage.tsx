@@ -2004,17 +2004,20 @@ function etaCoversActiveSteps(driverETA: DriverETA | undefined, steps: JobStep[]
   if (!driverETA) return false;
   const activeSteps = steps.filter((step) => step.status !== "done");
   if (!activeSteps.length) return true;
-  return activeSteps.length === driverETA.orders.length &&
-    activeSteps.every((step, index) => etaMatchesStep(driverETA.orders[index], step));
+  return activeSteps.every((step) => !!findEtaForStep(driverETA, step, steps));
 }
 
 function findEtaForStep(driverETA: DriverETA, step: JobStep, steps?: JobStep[]): ETAResult | null {
+  const direct = driverETA.orders.find((eta) => eta.stepId === step.id || eta.orderId === stepEtaId(step));
+  if (direct) return direct;
+
   if (steps) {
-    const activeSteps = steps.filter((item) => item.status !== "done");
-    const index = activeSteps.findIndex((item) => item.id === step.id || stepEtaId(item) === stepEtaId(step));
+    const sorted = steps.slice().sort((a, b) => a.step_number - b.step_number);
+    const index = sorted.findIndex((item) => item.id === step.id || stepEtaId(item) === stepEtaId(step));
     const etaAtSamePosition = index >= 0 ? driverETA.orders[index] : null;
     if (etaAtSamePosition && etaMatchesStep(etaAtSamePosition, step)) return etaAtSamePosition;
   }
+
   return driverETA.orders.find((eta) => etaMatchesStep(eta, step)) ?? null;
 }
 

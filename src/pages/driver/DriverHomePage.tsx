@@ -116,13 +116,6 @@ export function DriverHomePage() {
       .reduce((latest, value) => Math.max(latest, value), 0);
     const activeSteps = sorted.filter((step: StepRow) => step.status !== "done");
     if (activeSteps.some((step: StepRow) => !saved.has(step.id))) return new Map<string, SavedEtaRow>();
-    const activeIds = activeSteps.map((step: StepRow) => step.id);
-    const savedActiveIds = etaRows
-      .map((row) => row.step_id)
-      .filter((stepId) => activeIds.includes(stepId));
-    if (savedActiveIds.length !== activeIds.length || savedActiveIds.some((stepId, index) => stepId !== activeIds[index])) {
-      return new Map<string, SavedEtaRow>();
-    }
 
     const adjusted = new Map(saved);
 
