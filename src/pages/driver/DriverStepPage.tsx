@@ -101,7 +101,7 @@ export function DriverStepPage() {
 
   const complete = useMutation({
     mutationFn: async () => {
-      const update: Record<string, unknown> = { status: "done" };
+      const update: Record<string, unknown> = { status: "done", completed_at: new Date().toISOString() };
       if (photoUrl) update.photo_url = photoUrl;
       if (pickupPhotoUrl) update.pickup_photo_url = pickupPhotoUrl;
       if (binNumber) update.bin_number_reported = binNumber.trim();
