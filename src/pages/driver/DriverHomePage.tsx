@@ -116,8 +116,18 @@ export function DriverHomePage() {
 
   const etaByStepId = useMemo(() => {
     const saved = new Map(etaRows.map((row) => [row.step_id, row]));
-    const adjusted = new Map(saved);
     const sorted = stepsWithLockStatus.slice().sort((a: StepRow, b: StepRow) => a.step_number - b.step_number);
+    const activeSteps = sorted.filter((step: StepRow) => step.status !== "done");
+    if (activeSteps.some((step: StepRow) => !saved.has(step.id))) return new Map<string, SavedEtaRow>();
+    const activeIds = activeSteps.map((step: StepRow) => step.id);
+    const savedActiveIds = etaRows
+      .map((row) => row.step_id)
+      .filter((stepId) => activeIds.includes(stepId));
+    if (savedActiveIds.length !== activeIds.length || savedActiveIds.some((stepId, index) => stepId !== activeIds[index])) {
+      return new Map<string, SavedEtaRow>();
+    }
+
+    const adjusted = new Map(saved);
 
     sorted.forEach((target: StepRow, targetIndex: number) => {
       if (target.status === "done") return;
@@ -129,10 +139,12 @@ export function DriverHomePage() {
         const completedAt = sorted[i].completed_at;
         if (!completedAt || sorted[i].status !== "done") continue;
 
-        let rollingTime = new Date(completedAt).getTime();
+        let rollingTime = Math.max(etaNow, new Date(completedAt).getTime());
         for (let j = i + 1; j <= targetIndex; j += 1) {
           if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
-          rollingTime += (saved.get(sorted[j].id)?.duration_seconds || 0) * 1000;
+          const leg = saved.get(sorted[j].id);
+          if (!leg) return;
+          rollingTime += (leg.duration_seconds || 0) * 1000;
         }
 
         const etaAt = new Date(rollingTime).toISOString();
@@ -148,7 +160,22 @@ export function DriverHomePage() {
 
       if (usedCompletedAnchor) return;
 
-      // 没有已完成的步骤作为锚点时，直接使用快照中的原始 planned ETA，不从当前时间重算，避免不停漂移
+      let rollingTime = etaNow;
+      const firstActiveIndex = sorted.findIndex((step: StepRow) => step.status !== "done");
+      for (let j = firstActiveIndex; j <= targetIndex; j += 1) {
+        if (j > firstActiveIndex) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
+        const leg = saved.get(sorted[j].id);
+        if (!leg) return;
+        rollingTime += (leg.duration_seconds || 0) * 1000;
+      }
+
+      adjusted.set(target.id, {
+        ...planned,
+        eta_at: new Date(rollingTime).toISOString(),
+        eta_min_at: new Date(rollingTime - 5 * 60_000).toISOString(),
+        eta_max_at: new Date(rollingTime + 15 * 60_000).toISOString(),
+      });
+
     });
 
     return adjusted;

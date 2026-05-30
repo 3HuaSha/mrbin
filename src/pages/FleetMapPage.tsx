@@ -461,6 +461,7 @@ export function FleetMapPage() {
         result[driverId] = eta;
         return;
       }
+      if (!etaCoversActiveSteps(eta, steps)) return;
 
       result[driverId] = {
         ...eta,
@@ -1514,7 +1515,7 @@ export function FleetMapPage() {
                             const binTypeName = order.bin_type ? BIN_TYPE_NAMES[order.bin_type] || order.bin_type : '';
                             const timeLabelStr = order.time_window_custom || order.time_window || '';
                             const driverETA = displayDriverETAs[d.id];
-                            const orderETA = findStepETA(driverETA, step, steps);
+                            const orderETA = findStepETA(driverETA, step, steps, etaNow);
                             const isDraft = !!draft[order.id];
                             const isDone = step.status === 'done' || order.status === 'done';
                             const isInProgress = !isDone && (step.status === 'pending' || order.status === 'in_progress');
@@ -1590,7 +1591,7 @@ export function FleetMapPage() {
                           } else {
                             const stepLabel = STEP_TYPE_LABELS[step.step_type] || step.step_type;
                             const driverETA = displayDriverETAs[d.id];
-                            const stepETA = findStepETA(driverETA, step, steps);
+                            const stepETA = findStepETA(driverETA, step, steps, etaNow);
                             const isDraftStep = step.id.startsWith('draft-step-');
                             const isMarkedForDelete = deleteStepIds.includes(step.id);
                             const isStepDone = step.status === 'done';
@@ -1903,11 +1904,11 @@ async function saveDriverETASnapshot(input: {
 function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: JobStep[], nowMs = Date.now()) {
   if (!driverETA) return null;
   const targetId = stepEtaId(step);
-  const planned = driverETA.orders.find((eta) => eta.orderId === targetId) ?? null;
+  const planned = findEtaForStep(driverETA, step);
   if (!planned || !steps) return planned;
 
   const sorted = steps.slice().sort((a, b) => a.step_number - b.step_number);
-  const targetIndex = sorted.findIndex((item) => stepEtaId(item) === targetId);
+  const targetIndex = sorted.findIndex((item) => item.id === step.id || stepEtaId(item) === targetId);
   if (targetIndex < 0) return planned;
 
   // 用最近一个已完成步骤的完成时间作为锚点，重算后续 ETA（不随当前时间漂移）
@@ -1915,11 +1916,12 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
     const completedAt = sorted[i].completed_at;
     if (!completedAt || sorted[i].status !== "done") continue;
 
-    let rollingTime = new Date(completedAt).getTime();
+    let rollingTime = Math.max(nowMs, new Date(completedAt).getTime());
     for (let j = i + 1; j <= targetIndex; j++) {
       if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
-      const leg = driverETA.orders.find((eta) => eta.orderId === stepEtaId(sorted[j]));
-      rollingTime += (leg?.duration || 0) * 1000;
+      const leg = findEtaForStep(driverETA, sorted[j]);
+      if (!leg) return null;
+      rollingTime += (leg.duration || 0) * 1000;
     }
 
     return {
@@ -1929,7 +1931,24 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
     };
   }
 
-  // 没有已完成的步骤作为锚点时，直接返回原始 planned ETA，不从当前时间重算
+  // 没有已完成步骤时，从当前时间开始按已保存的每段车程往后推。
+  const firstActiveIndex = sorted.findIndex((item) => item.status !== "done");
+  if (firstActiveIndex >= 0 && targetIndex >= firstActiveIndex) {
+    let rollingTime = nowMs;
+    for (let j = firstActiveIndex; j <= targetIndex; j++) {
+      if (j > firstActiveIndex) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
+      const leg = findEtaForStep(driverETA, sorted[j]);
+      if (!leg) return null;
+      rollingTime += (leg.duration || 0) * 1000;
+    }
+
+    return {
+      ...planned,
+      eta: new Date(rollingTime).toISOString(),
+      source: "rolling" as const,
+    };
+  }
+
   return planned;
 }
 
@@ -1943,6 +1962,25 @@ function sameRouteAddress(a: string, b: string) {
 
 function stepEtaId(step: JobStep) {
   return step.node_type === "order" && step.order_id ? step.order_id : step.id;
+}
+
+function etaCoversActiveSteps(driverETA: DriverETA | undefined, steps: JobStep[]) {
+  if (!driverETA) return false;
+  const activeSteps = steps.filter((step) => step.status !== "done");
+  if (!activeSteps.length) return true;
+  const activeKeys = activeSteps.map((step) => `${step.id}|${stepEtaId(step)}`);
+  const etaKeys = driverETA.orders
+    .map((eta) => {
+      const step = activeSteps.find((item) => eta.stepId === item.id || eta.orderId === stepEtaId(item));
+      return step ? `${step.id}|${stepEtaId(step)}` : null;
+    })
+    .filter((key): key is string => !!key);
+  return etaKeys.length === activeKeys.length && etaKeys.every((key, index) => key === activeKeys[index]);
+}
+
+function findEtaForStep(driverETA: DriverETA, step: JobStep): ETAResult | null {
+  const targetId = stepEtaId(step);
+  return driverETA.orders.find((eta) => eta.stepId === step.id || eta.orderId === targetId) ?? null;
 }
 
 function serviceSecondsForStep(step: JobStep) {
