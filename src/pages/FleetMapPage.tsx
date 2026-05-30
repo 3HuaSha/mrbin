@@ -1747,8 +1747,9 @@ export function FleetMapPage() {
                stageAssignment(orderId, null);
              }}
              onLocationDrop={handleLocationDrop}
-             previewRoute={previewRoute}
-             hoverRoute={hoverRoute}
+             previewRoute={null}
+             hoverRoute={null}
+             showDriverEtaRoutes={false}
              activeBrickFactoryIds={activeBrickFactoryIds}
              onOrderClick={setHighlightedOrderId}
              onMapDragOrder={setMapDragOrderId}

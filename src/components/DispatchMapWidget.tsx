@@ -17,6 +17,7 @@ export function DispatchMapWidget({
   onLocationDrop,
   previewRoute,
   hoverRoute,
+  showDriverEtaRoutes = true,
   activeBrickFactoryIds,
   onOrderClick,
   onMapDragOrder,
@@ -46,6 +47,8 @@ export function DispatchMapWidget({
   previewRoute?: { lat: number; lng: number }[] | null,
   /** 悬停司机时的路线高亮: 该司机所有任务点连线 */
   hoverRoute?: { lat: number; lng: number }[] | null,
+  /** 是否在地图上绘制 ETA 路线线条 */
+  showDriverEtaRoutes?: boolean,
   /** 当天有取货单的砖厂 id 集合 (砖业务时只显示这些砖厂标记) */
   activeBrickFactoryIds?: Set<string>,
   /** 地图上点击订单标记时的回调 */
@@ -831,6 +834,7 @@ export function DispatchMapWidget({
     // 清除旧的路线
     routeLinesRef.current.forEach(line => line.setMap(null));
     routeLinesRef.current = [];
+    if (!showDriverEtaRoutes) return;
     
     // 延迟绘制，确保标记已经创建
     const drawRoutes = () => {
@@ -927,7 +931,7 @@ export function DispatchMapWidget({
     const timeoutId = setTimeout(drawRoutes, 500);
     
     return () => clearTimeout(timeoutId);
-  }, [driverETAs, mapLoaded]);
+  }, [driverETAs, mapLoaded, showDriverEtaRoutes]);
 
   // 6. 绘制拖拽预览路线 (虚线, 拖拽订单悬停在司机上时显示)
   useEffect(() => {
