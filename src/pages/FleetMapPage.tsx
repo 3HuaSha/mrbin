@@ -1825,7 +1825,8 @@ function buildDriverETAFromMatrix(input: {
   const orders: ETAResult[] = input.steps.map((step, index) => {
     const fromAddress = index === 0 ? input.currentAddress : input.steps[index - 1].address;
     const leg = findMatrixLeg(input.entries, fromAddress, step.address);
-    const driveSeconds = Math.round((leg?.duration || 0) * 1.2);
+    const sameStop = sameRouteAddress(fromAddress, step.address);
+    const driveSeconds = sameStop ? 0 : Math.round((leg?.duration || 0) * 1.2);
     const distance = leg?.distance || 0;
     cumulativeSeconds += driveSeconds;
     totalDistance += distance;
@@ -1841,7 +1842,7 @@ function buildDriverETAFromMatrix(input: {
       fromStepId: index === 0 ? null : input.steps[index - 1].id,
       source: leg?.source || "fallback",
       eta,
-      status: leg ? "OK" : "ERROR",
+      status: leg || sameStop ? "OK" : "ERROR",
     };
   });
 
