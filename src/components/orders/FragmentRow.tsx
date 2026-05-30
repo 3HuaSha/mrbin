@@ -90,7 +90,7 @@ export function FragmentRow({
               {order.pallet_count} PLT
             </span>
           )}
-          {order.priority && (
+          {order.priority && order.bin_type === "brick" && (
             <span className="ml-1 inline-flex rounded bg-blue-100 px-1 py-0.5 text-[9px] font-semibold text-blue-800">
               {order.priority}
             </span>

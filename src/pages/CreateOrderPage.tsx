@@ -39,7 +39,7 @@ const empty = (preserveType?: OrderType) => ({
   customer_notes: "",
   pallet_count: "",
   can_split: true,
-  priority: "P3" as "P1" | "P2" | "P3" | "P4",
+  priority: null as "P1" | "P2" | "P3" | "P4" | null,
   // 订单号：空字符串时由数据库触发器自动生成 KD-YYYYMMDD-XXX
   use_manual_order_number: false,
   manual_order_number: "",
@@ -143,7 +143,7 @@ export function CreateOrderPage() {
         customer_notes: payload.customer_notes.trim() || null,
         pallet_count: payload.pallet_count.trim() ? Number(payload.pallet_count) : null,
         can_split: payload.can_split,
-        priority: payload.priority,
+        priority: payload.bin_type === "brick" ? payload.priority : null,
         netsuite_order_id: null,
         business_type: payload.type === "material" ? "material" : undefined,
         bin_type: payload.type === "material" ? (payload.material_description.trim() || null) : payload.bin_type,
@@ -699,10 +699,11 @@ export function CreateOrderPage() {
                     className={cn("h-10 text-sm rounded-lg border-2", errors.pallet_count && "border-red-500")}
                   />
                 </div>
+                {form.bin_type === "brick" && form.type !== "material" && (
                 <div>
                   <Label className="text-sm font-bold text-gray-700 mb-1 block">优先级</Label>
                   <select
-                    value={form.priority}
+                    value={form.priority ?? "P3"}
                     onChange={(e) => setForm({ ...form, priority: e.target.value as "P1" | "P2" | "P3" | "P4" })}
                     className="h-10 w-full rounded-lg border-2 bg-white px-3 text-sm font-semibold"
                   >
@@ -712,6 +713,7 @@ export function CreateOrderPage() {
                     <option value="P4">P4 顺路/可延后</option>
                   </select>
                 </div>
+                )}
                 <label className="flex h-10 items-center gap-2 rounded-lg border-2 bg-white px-3 text-sm font-bold text-gray-700">
                   <input
                     type="checkbox"
