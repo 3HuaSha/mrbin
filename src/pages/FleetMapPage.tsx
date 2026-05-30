@@ -1015,6 +1015,34 @@ export function FleetMapPage() {
         if (delErr) throw delErr;
       }
 
+      // 6. 最终重编号: 遍历每位涉及的司机，构建完整时间轴（订单+手动步骤），
+      //    统一重写所有 job_steps 的 step_number，确保插入/删除/重排后顺序正确
+      const allAffectedDriverIds = new Set<string>();
+      entries.forEach(e => { if (e.driverId) allAffectedDriverIds.add(e.driverId); });
+      draftManualSteps.forEach(ms => allAffectedDriverIds.add(ms.driverId));
+      deleteStepIds.forEach(sid => {
+        const step = jobSteps.find((s: JobStep) => s.id === sid);
+        if (step) allAffectedDriverIds.add(step.driver_id);
+      });
+
+      for (const driverId of allAffectedDriverIds) {
+        const { data: dbSteps } = await supabase
+          .from("job_steps")
+          .select("id, step_number, node_type, assignment_id")
+          .eq("driver_id", driverId)
+          .eq("scheduled_date", date)
+          .order("step_number", { ascending: true });
+
+        const allSteps = dbSteps || [];
+        // 按 step_number 排列（已经是），统一重编号为连续值
+        for (let i = 0; i < allSteps.length; i++) {
+          const newNum = i + 1;
+          if (allSteps[i].step_number !== newNum) {
+            await supabase.from("job_steps").update({ step_number: newNum }).eq("id", allSteps[i].id);
+          }
+        }
+      }
+
       return { created: toInsert.length, deleted: toDelete.length, reordered: toReorder.length, manualSteps: draftManualSteps.length, deletedSteps: deleteStepIds.length };
     },
     onSuccess: (res) => {

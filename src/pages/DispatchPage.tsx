@@ -231,17 +231,36 @@ export function DispatchPage() {
         }
       }
       
-      if (localJobSteps) {
-        for (const localStep of localJobSteps) {
-          if (localStep.node_type === 'step' && !localStep.id.startsWith('temp-')) {
-            const originalStep = jobSteps.find(s => s.id === localStep.id);
-            if (originalStep && (originalStep.step_number !== localStep.step_number || originalStep.driver_id !== localStep.driver_id || originalStep.location !== localStep.location)) {
-              await supabase.from("job_steps").update({
-                step_number: localStep.step_number,
-                driver_id: localStep.driver_id,
-                location: localStep.location,
-              }).eq("id", localStep.id);
-            }
+      // 最终重编号: 遍历每位涉及的司机，构建完整时间轴（订单+手动步骤），
+      // 统一重写所有 job_steps 的 step_number，确保插入新订单后顺序正确
+      const affectedDriverIds = new Set<string>();
+      inserts.forEach(i => affectedDriverIds.add(i.driver_id));
+      updates.forEach(u => affectedDriverIds.add(u.driver_id));
+      deletes.forEach(d => affectedDriverIds.add(d.driver_id));
+
+      for (const driverId of affectedDriverIds) {
+        const driverAsgs = (localAssignments ?? []).filter(a => a.driver_id === driverId).sort((a, b) => a.sequence - b.sequence);
+        const stepsSource = localJobSteps ?? jobSteps;
+        const driverManualSteps = stepsSource.filter(s => s.driver_id === driverId && s.node_type === 'step').sort((a, b) => a.step_number - b.step_number);
+
+        type TLItem = { kind: 'order'; assignmentId: string; stepNum: number } | { kind: 'step'; stepId: string; stepNum: number };
+        const timeline: TLItem[] = [];
+        driverAsgs.forEach(a => {
+          const js = stepsSource.find(s => s.assignment_id === a.id && s.node_type === 'order');
+          timeline.push({ kind: 'order', assignmentId: a.id, stepNum: js ? js.step_number : a.sequence });
+        });
+        driverManualSteps.forEach(s => {
+          timeline.push({ kind: 'step', stepId: s.id, stepNum: s.step_number });
+        });
+        timeline.sort((a, b) => a.stepNum - b.stepNum);
+
+        for (let i = 0; i < timeline.length; i++) {
+          const newNum = i + 1;
+          const item = timeline[i];
+          if (item.kind === 'order') {
+            await supabase.from("job_steps").update({ step_number: newNum }).eq("assignment_id", item.assignmentId).eq("node_type", "order");
+          } else {
+            await supabase.from("job_steps").update({ step_number: newNum }).eq("id", item.stepId);
           }
         }
       }
