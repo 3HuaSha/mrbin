@@ -48,6 +48,7 @@ const STEP_TYPE_LABELS: Record<string, string> = {
 };
 
 const STOP_DURATION_SECONDS = 15 * 60;
+const DRIVER_ETA_STORAGE_PREFIX = "fleet-driver-etas:";
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -70,11 +71,12 @@ type SavedEtaRow = {
 };
 
 export function FleetMapPage() {
+  const initialDate = todayISO();
   const qc = useQueryClient();
-  const [date, setDate] = useState(todayISO());
+  const [date, setDate] = useState(initialDate);
   const [expandedDrivers, setExpandedDrivers] = useState<Set<string>>(new Set());
   const [calculatingDriverId, setCalculatingDriverId] = useState<string | null>(null);
-  const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>({});
+  const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>(() => loadLocalDriverETAs(initialDate));
   const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set());
   const [businessType, setBusinessType] = useBusinessType();
   
@@ -87,6 +89,10 @@ export function FleetMapPage() {
     jobSteps,
     commonLocations,
   } = useDispatchData(date, businessType);
+
+  useEffect(() => {
+    setDriverETAs(loadLocalDriverETAs(date));
+  }, [date]);
 
   const { data: savedEtaRows = [], refetch: refetchSavedEtas } = useQuery({
     queryKey: ["driver-eta-snapshots", date],
@@ -439,7 +445,7 @@ export function FleetMapPage() {
           })),
         totalDistance: rows.reduce((sum, row) => sum + (row.distance_meters || 0), 0),
         totalDuration: rows.reduce((sum, row) => sum + (row.duration_seconds || 0), 0),
-        lastUpdated: rows[0]?.computed_at || new Date().toISOString(),
+        lastUpdated: latestComputedAt(rows) || new Date().toISOString(),
       };
     });
     return result;
@@ -1183,7 +1189,11 @@ export function FleetMapPage() {
         }))
       });
 
-      setDriverETAs(prev => ({ ...prev, [driverId]: eta }));
+      setDriverETAs(prev => {
+        const next = { ...prev, [driverId]: eta };
+        saveLocalDriverETAs(date, next);
+        return next;
+      });
       setShowingETADrivers(prev => new Set(prev).add(driverId)); // 标记为显示
       try {
         await saveDriverETASnapshot({
@@ -1192,7 +1202,8 @@ export function FleetMapPage() {
           eta,
           steps: driverSteps,
         });
-        refetchSavedEtas();
+        await refetchSavedEtas();
+        qc.invalidateQueries({ queryKey: ["driver-eta-snapshots", date] });
       } catch (saveError) {
         console.warn("保存 ETA 快照失败:", saveError);
         toast.warning("ETA 已计算，但保存到数据库失败");
@@ -1892,6 +1903,39 @@ async function saveDriverETASnapshot(input: {
     onConflict: "step_id",
   });
   if (error) throw error;
+}
+
+function etaStorageKey(date: string) {
+  return `${DRIVER_ETA_STORAGE_PREFIX}${date}`;
+}
+
+function loadLocalDriverETAs(date: string): Record<string, DriverETA> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(etaStorageKey(date));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as Record<string, DriverETA>;
+  } catch {
+    return {};
+  }
+}
+
+function saveLocalDriverETAs(date: string, etas: Record<string, DriverETA>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(etaStorageKey(date), JSON.stringify(etas));
+  } catch {
+    // Local cache is only a fast restore path; database persistence is still the source of truth.
+  }
+}
+
+function latestComputedAt(rows: SavedEtaRow[]) {
+  return rows
+    .map((row) => row.computed_at)
+    .filter((value): value is string => !!value)
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? null;
 }
 
 function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: JobStep[]) {
