@@ -172,6 +172,14 @@ export function OrdersPage() {
         }
       }
 
+      // 如果删除的是送桶订单，同时删除关联的收桶子单
+      if (order?.type === "delivery" && order.linked_order_id) {
+        const linked = orders.find(o => o.id === order.linked_order_id);
+        if (linked?.type === "pickup") {
+          idsToDelete.push(linked.id);
+        }
+      }
+
       // 如果删除的是 pickup 子单，同时检查是否有关联的 swap 主单需要解绑
       // （pickup 被删后 swap 主单的 linked_order_id 会在下面的清除逻辑中处理）
 

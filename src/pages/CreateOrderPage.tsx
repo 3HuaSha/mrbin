@@ -206,22 +206,32 @@ export function CreateOrderPage() {
         return newSwap;
       }
 
-      // 收桶订单: 如果选了对应送桶单, 直接把送桶订单改为收桶类型 + 更新日期; 没选则创建无订单号的收桶
+      // 收桶订单: 如果选了对应送桶单, 创建 pickup 子单沿用送桶单号, 双向关联; 没选则创建无订单号的收桶
       if (payload.type === "pickup" && swapLinkedOrderId) {
-        const { data: updated, error: uErr } = await supabase
+        const { data: linkedOrder, error: linkedErr } = await supabase
           .from("orders")
-          .update({
-            type: "pickup",
-            service_date: payload.service_date,
-            time_window: timeWindow,
-            time_window_custom: timeWindowCustom,
-            customer_notes: payload.customer_notes.trim() || undefined,
-          })
+          .select("order_number")
           .eq("id", swapLinkedOrderId)
+          .single();
+        if (linkedErr || !linkedOrder) throw new Error("无法找到关联的送桶订单");
+
+        const { data: pickupRow, error: pErr } = await supabase
+          .from("orders")
+          .insert({
+            ...insertPayload,
+            type: "pickup",
+            order_number: linkedOrder.order_number,
+            linked_order_id: swapLinkedOrderId,
+            status: "pending",
+          })
           .select("id, order_number, type, address, customer_name")
           .single();
-        if (uErr) throw uErr;
-        return updated;
+        if (pErr) throw pErr;
+
+        // 双向关联: 送桶订单的 linked_order_id 指向收桶子单
+        await supabase.from("orders").update({ linked_order_id: pickupRow.id }).eq("id", swapLinkedOrderId);
+
+        return pickupRow;
       }
 
       const { data, error } = await supabase.from("orders").insert(insertPayload).select("id,order_number,type,address,customer_name").single();

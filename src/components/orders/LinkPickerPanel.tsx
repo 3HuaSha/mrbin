@@ -42,15 +42,33 @@ export function LinkPickerPanel({ order, assignments = [] }: LinkPickerPanelProp
 
   const bind = useMutation({
     mutationFn: async (deliveryId: string) => {
-      // 把送桶订单改为收桶类型，沿用原订单号
-      const { error } = await supabase.from("orders").update({ type: "pickup" }).eq("id", deliveryId);
-      if (error) throw error;
-      // 删除当前未关联的 pickup 订单（已不需要了）
-      const { error: delErr } = await supabase.from("orders").delete().eq("id", order.id);
-      if (delErr) throw delErr;
+      // 获取送桶订单号
+      const { data: deliveryOrder, error: fetchErr } = await supabase
+        .from("orders")
+        .select("order_number")
+        .eq("id", deliveryId)
+        .single();
+      if (fetchErr || !deliveryOrder) throw new Error("无法找到送桶订单");
+
+      // 更新当前未关联的 pickup: 沿用送桶单号 + 双向关联
+      const { error: updateErr } = await supabase
+        .from("orders")
+        .update({
+          order_number: deliveryOrder.order_number,
+          linked_order_id: deliveryId,
+        })
+        .eq("id", order.id);
+      if (updateErr) throw updateErr;
+
+      // 送桶订单的 linked_order_id 指向收桶子单
+      const { error: linkErr } = await supabase
+        .from("orders")
+        .update({ linked_order_id: order.id })
+        .eq("id", deliveryId);
+      if (linkErr) throw linkErr;
     },
     onSuccess: () => {
-      toast.success("已关联：送桶订单已改为收桶");
+      toast.success("已关联：收桶订单已绑定送桶单");
       qc.invalidateQueries({ queryKey: ["orders"] });
       qc.invalidateQueries({ queryKey: ["order-chain"] });
       qc.invalidateQueries({ queryKey: ["link-candidates"] });
