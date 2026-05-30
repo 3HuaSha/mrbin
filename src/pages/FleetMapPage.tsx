@@ -465,8 +465,12 @@ export function FleetMapPage() {
 
       result[driverId] = {
         ...eta,
-        orders: eta.orders.map((orderEta) => {
-          const step = steps.find((item) => stepEtaId(item) === orderEta.orderId || item.id === orderEta.stepId);
+        orders: eta.orders.map((orderEta, index) => {
+          const activeSteps = steps.filter((item) => item.status !== "done");
+          const stepAtSamePosition = activeSteps[index];
+          const step = stepAtSamePosition && etaMatchesStep(orderEta, stepAtSamePosition)
+            ? stepAtSamePosition
+            : steps.find((item) => etaMatchesStep(orderEta, item));
           if (!step) return orderEta;
           return findStepETA(eta, step, steps) ?? orderEta;
         }),
@@ -1941,7 +1945,7 @@ function latestComputedAt(rows: SavedEtaRow[]) {
 function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: JobStep[]) {
   if (!driverETA) return null;
   const targetId = stepEtaId(step);
-  const planned = findEtaForStep(driverETA, step);
+  const planned = findEtaForStep(driverETA, step, steps);
   if (!planned || !steps) return planned;
 
   const sorted = steps.slice().sort((a, b) => a.step_number - b.step_number);
@@ -1957,7 +1961,7 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
     let rollingTime = new Date(completedAt).getTime();
     for (let j = i + 1; j <= targetIndex; j++) {
       if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
-      const leg = findEtaForStep(driverETA, sorted[j]);
+      const leg = findEtaForStep(driverETA, sorted[j], sorted);
       if (!leg) return null;
       rollingTime += (leg.duration || 0) * 1000;
     }
@@ -1988,17 +1992,17 @@ function etaCoversActiveSteps(driverETA: DriverETA | undefined, steps: JobStep[]
   if (!driverETA) return false;
   const activeSteps = steps.filter((step) => step.status !== "done");
   if (!activeSteps.length) return true;
-  const activeKeys = activeSteps.map((step) => `${step.id}|${stepEtaId(step)}`);
-  const etaKeys = driverETA.orders
-    .map((eta) => {
-      const step = activeSteps.find((item) => etaMatchesStep(eta, item));
-      return step ? `${step.id}|${stepEtaId(step)}` : null;
-    })
-    .filter((key): key is string => !!key);
-  return etaKeys.length === activeKeys.length && etaKeys.every((key, index) => key === activeKeys[index]);
+  return activeSteps.length === driverETA.orders.length &&
+    activeSteps.every((step, index) => etaMatchesStep(driverETA.orders[index], step));
 }
 
-function findEtaForStep(driverETA: DriverETA, step: JobStep): ETAResult | null {
+function findEtaForStep(driverETA: DriverETA, step: JobStep, steps?: JobStep[]): ETAResult | null {
+  if (steps) {
+    const activeSteps = steps.filter((item) => item.status !== "done");
+    const index = activeSteps.findIndex((item) => item.id === step.id || stepEtaId(item) === stepEtaId(step));
+    const etaAtSamePosition = index >= 0 ? driverETA.orders[index] : null;
+    if (etaAtSamePosition && etaMatchesStep(etaAtSamePosition, step)) return etaAtSamePosition;
+  }
   return driverETA.orders.find((eta) => etaMatchesStep(eta, step)) ?? null;
 }
 
