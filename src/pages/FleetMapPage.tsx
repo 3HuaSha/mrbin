@@ -343,7 +343,7 @@ export function FleetMapPage() {
           id: originalStep?.id ?? `draft-${driverId}-${orderId}`,
           driver_id: driverId,
           scheduled_date: date,
-          step_number: idx + 1,
+          step_number: originalStep?.step_number ?? (idx + 1),
           order_id: orderId,
           assignment_id: originalStep?.assignment_id ?? null,
           node_type: 'order',
@@ -364,12 +364,14 @@ export function FleetMapPage() {
     //    使用 step_number 来确定相对位置
     Object.entries(existingManualSteps).forEach(([driverId, steps]) => {
       const arr = map[driverId] ??= [];
-      steps.forEach(step => {
+      // 按 step_number 升序排列，确保先插入编号小的步骤
+      const sorted = [...steps].sort((a, b) => a.step_number - b.step_number);
+      sorted.forEach(step => {
         // 找到插入位置: step_number 表示它在所有步骤中的位置
-        // 插入到第一个 step_number >= 当前 step 的位置之前
+        // 插入到第一个 step_number > 当前 step 的 order 节点之前
         let insertIdx = arr.length; // 默认放末尾
         for (let i = 0; i < arr.length; i++) {
-          if (arr[i].step_number >= step.step_number && arr[i].node_type === 'order') {
+          if (arr[i].step_number > step.step_number) {
             insertIdx = i;
             break;
           }
