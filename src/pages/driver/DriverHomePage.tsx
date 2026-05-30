@@ -50,7 +50,6 @@ export function DriverHomePage() {
   const nav = useNavigate();
   const [date, setDate] = useState(todayISO());
   const [gpsActive, setGpsActive] = useState(false);
-  const [etaNow, setEtaNow] = useState(Date.now());
   const { session, loading, profile, hasRole } = useCurrentUser();
   const { canInstall, isInstalled, isIOS, promptInstall } = usePWA();
   const [dismissInstallHint, setDismissInstallHint] = useState(false);
@@ -94,11 +93,6 @@ export function DriverHomePage() {
     });
   }, [steps]);
 
-  useEffect(() => {
-    const timer = setInterval(() => setEtaNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
-
   const { data: etaRows = [] } = useQuery({
     queryKey: ["saved-driver-etas", driverId, date],
     enabled: !!driverId,
@@ -139,7 +133,7 @@ export function DriverHomePage() {
         const completedAt = sorted[i].completed_at;
         if (!completedAt || sorted[i].status !== "done") continue;
 
-        let rollingTime = Math.max(etaNow, new Date(completedAt).getTime());
+        let rollingTime = new Date(completedAt).getTime();
         for (let j = i + 1; j <= targetIndex; j += 1) {
           if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
           const leg = saved.get(sorted[j].id);
@@ -160,26 +154,10 @@ export function DriverHomePage() {
 
       if (usedCompletedAnchor) return;
 
-      let rollingTime = etaNow;
-      const firstActiveIndex = sorted.findIndex((step: StepRow) => step.status !== "done");
-      for (let j = firstActiveIndex; j <= targetIndex; j += 1) {
-        if (j > firstActiveIndex) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
-        const leg = saved.get(sorted[j].id);
-        if (!leg) return;
-        rollingTime += (leg.duration_seconds || 0) * 1000;
-      }
-
-      adjusted.set(target.id, {
-        ...planned,
-        eta_at: new Date(rollingTime).toISOString(),
-        eta_min_at: new Date(rollingTime - 5 * 60_000).toISOString(),
-        eta_max_at: new Date(rollingTime + 15 * 60_000).toISOString(),
-      });
-
     });
 
     return adjusted;
-  }, [etaNow, etaRows, stepsWithLockStatus]);
+  }, [etaRows, stepsWithLockStatus]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
