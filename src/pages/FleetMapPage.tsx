@@ -1071,7 +1071,6 @@ export function FleetMapPage() {
 
   // 计算单个司机的 ETA
   const handleCalculateDriverETA = async (driverId: string, driverName: string) => {
-    const calculationStartedAt = Date.now();
     setCalculatingDriverId(driverId);
     try {
       // 获取 Samsara 车辆位置
@@ -1164,6 +1163,7 @@ export function FleetMapPage() {
       }));
       const matrix = await getCachedRouteMatrix({ data: { addresses: routeAddresses, pairs: routePairs } });
       if (!matrix.success) throw new Error(matrix.error || "Matrix ETA calculation failed");
+      const calculationStartedAt = Date.now();
 
       const eta = buildDriverETAFromMatrix({
         driverId,

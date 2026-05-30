@@ -150,8 +150,8 @@ async function fetchGoogleMatrixForPairs(pairs: Array<{ from: string; to: string
       "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status",
     },
     body: JSON.stringify({
-      origins: allAddresses.map((address) => ({ waypoint: { address } })),
-      destinations: allAddresses.map((address) => ({ waypoint: { address } })),
+      origins: allAddresses.map((address) => ({ waypoint: waypointForAddress(address) })),
+      destinations: allAddresses.map((address) => ({ waypoint: waypointForAddress(address) })),
       travelMode: "DRIVE",
       routingPreference: "TRAFFIC_UNAWARE",
     }),
@@ -184,8 +184,8 @@ async function fetchGoogleSinglePair(pair: { from: string; to: string }, key: st
       "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,status",
     },
     body: JSON.stringify({
-      origins: [{ waypoint: { address: pair.from } }],
-      destinations: [{ waypoint: { address: pair.to } }],
+      origins: [{ waypoint: waypointForAddress(pair.from) }],
+      destinations: [{ waypoint: waypointForAddress(pair.to) }],
       travelMode: "DRIVE",
       routingPreference: "TRAFFIC_UNAWARE",
     }),
@@ -211,6 +211,31 @@ function parseDuration(value: string | undefined) {
   return Number(value.replace("s", "")) || 0;
 }
 
+function waypointForAddress(address: string) {
+  const coordinate = parseCoordinateAddress(address);
+  if (coordinate) {
+    return {
+      location: {
+        latLng: {
+          latitude: coordinate.lat,
+          longitude: coordinate.lng,
+        },
+      },
+    };
+  }
+  return { address };
+}
+
+function parseCoordinateAddress(address: string) {
+  const match = address.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
 function pairKey(from: string, to: string) {
   return `${from.trim().toLowerCase()}|||${to.trim().toLowerCase()}`;
 }
@@ -233,6 +258,10 @@ function roughDuration(from: string, to: string) {
 }
 
 function roughDistance(a: string, b: string) {
+  const pointA = parseCoordinateAddress(a) ?? knownPointForAddress(a);
+  const pointB = parseCoordinateAddress(b) ?? knownPointForAddress(b);
+  if (pointA && pointB) return Math.max(1, haversineKm(pointA, pointB) * 1.35);
+
   const text = `${a} ${b}`.toLowerCase();
   const west = ["oakville", "milton", "brampton", "georgetown"];
   const east = ["pickering", "scarborough"];
@@ -246,4 +275,29 @@ function roughDistance(a: string, b: string) {
   if ((aw && bw) || (ae && be) || (an && bn)) return 18;
   if (text.includes("12441")) return 35;
   return 55;
+}
+
+function knownPointForAddress(address: string) {
+  const text = address.toLowerCase();
+  if (text.includes("12441") || text.includes("woodbine")) return { lat: 43.948446, lng: -79.374072 };
+  if (text.includes("3445") || text.includes("kennedy rd, scarborough")) return { lat: 43.821044, lng: -79.304742 };
+  if (text.includes("2967")) return { lat: 43.7756, lng: -79.2621 };
+  if (text.includes("150 clark")) return { lat: 43.7015, lng: -79.7240 };
+  return null;
+}
+
+function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const radiusKm = 6371;
+  const dLat = toRadians(b.lat - a.lat);
+  const dLng = toRadians(b.lng - a.lng);
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * radiusKm * Math.asin(Math.sqrt(h));
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
 }
