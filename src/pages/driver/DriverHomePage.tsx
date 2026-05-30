@@ -129,7 +129,7 @@ export function DriverHomePage() {
         const completedAt = sorted[i].completed_at;
         if (!completedAt || sorted[i].status !== "done") continue;
 
-        let rollingTime = Math.max(etaNow, new Date(completedAt).getTime());
+        let rollingTime = new Date(completedAt).getTime();
         for (let j = i + 1; j <= targetIndex; j += 1) {
           if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
           rollingTime += (saved.get(sorted[j].id)?.duration_seconds || 0) * 1000;
@@ -148,21 +148,7 @@ export function DriverHomePage() {
 
       if (usedCompletedAnchor) return;
 
-      const firstActiveIndex = sorted.findIndex((step: StepRow) => step.status !== "done");
-      if (firstActiveIndex >= 0 && targetIndex >= firstActiveIndex) {
-        let rollingTime = etaNow;
-        for (let j = firstActiveIndex; j <= targetIndex; j += 1) {
-          if (j > firstActiveIndex) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
-          rollingTime += (saved.get(sorted[j].id)?.duration_seconds || 0) * 1000;
-        }
-
-        adjusted.set(target.id, {
-          ...planned,
-          eta_at: new Date(rollingTime).toISOString(),
-          eta_min_at: new Date(rollingTime - 5 * 60_000).toISOString(),
-          eta_max_at: new Date(rollingTime + 15 * 60_000).toISOString(),
-        });
-      }
+      // 没有已完成的步骤作为锚点时，直接使用快照中的原始 planned ETA，不从当前时间重算，避免不停漂移
     });
 
     return adjusted;

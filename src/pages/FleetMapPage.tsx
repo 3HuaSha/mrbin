@@ -1880,25 +1880,7 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
   const targetIndex = sorted.findIndex((item) => stepEtaId(item) === targetId);
   if (targetIndex < 0) return planned;
 
-  for (let i = targetIndex - 1; i >= 0; i--) {
-    const completedAt = sorted[i].completed_at;
-    if (!completedAt || sorted[i].status !== "done") continue;
-
-    let rollingTime = Math.max(nowMs, new Date(completedAt).getTime());
-    for (let j = i + 1; j <= targetIndex; j++) {
-      if (j > i + 1) rollingTime += serviceSecondsForStep(sorted[j - 1]) * 1000;
-      const leg = driverETA.orders.find((eta) => eta.orderId === stepEtaId(sorted[j]));
-      rollingTime += (leg?.duration || 0) * 1000;
-    }
-
-    return {
-      ...planned,
-      eta: new Date(rollingTime).toISOString(),
-      source: "rolling" as const,
-    };
-  }
-
-  // 如果前面有已完成的步骤，用该完成时间作为起点，重新计算后续的 ETA（只重算一次，不随当前时间漂移）
+  // 用最近一个已完成步骤的完成时间作为锚点，重算后续 ETA（不随当前时间漂移）
   for (let i = targetIndex - 1; i >= 0; i--) {
     const completedAt = sorted[i].completed_at;
     if (!completedAt || sorted[i].status !== "done") continue;
@@ -1917,6 +1899,7 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
     };
   }
 
+  // 没有已完成的步骤作为锚点时，直接返回原始 planned ETA，不从当前时间重算
   return planned;
 }
 
