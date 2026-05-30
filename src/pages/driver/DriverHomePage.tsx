@@ -111,6 +111,9 @@ export function DriverHomePage() {
   const etaByStepId = useMemo(() => {
     const saved = new Map(etaRows.map((row) => [row.step_id, row]));
     const sorted = stepsWithLockStatus.slice().sort((a: StepRow, b: StepRow) => a.step_number - b.step_number);
+    const snapshotComputedAt = etaRows
+      .map((row) => row.computed_at ? new Date(row.computed_at).getTime() : 0)
+      .reduce((latest, value) => Math.max(latest, value), 0);
     const activeSteps = sorted.filter((step: StepRow) => step.status !== "done");
     if (activeSteps.some((step: StepRow) => !saved.has(step.id))) return new Map<string, SavedEtaRow>();
     const activeIds = activeSteps.map((step: StepRow) => step.id);
@@ -132,6 +135,7 @@ export function DriverHomePage() {
       for (let i = targetIndex - 1; i >= 0; i -= 1) {
         const completedAt = sorted[i].completed_at;
         if (!completedAt || sorted[i].status !== "done") continue;
+        if (snapshotComputedAt && new Date(completedAt).getTime() <= snapshotComputedAt) continue;
 
         let rollingTime = new Date(completedAt).getTime();
         for (let j = i + 1; j <= targetIndex; j += 1) {

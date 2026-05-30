@@ -1899,6 +1899,7 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
   const targetId = stepEtaId(step);
   const planned = findEtaForStep(driverETA, step);
   if (!planned || !steps) return planned;
+  if (driverETA.currentLocation) return planned;
 
   const sorted = steps.slice().sort((a, b) => a.step_number - b.step_number);
   const targetIndex = sorted.findIndex((item) => item.id === step.id || stepEtaId(item) === targetId);
@@ -1908,6 +1909,7 @@ function findStepETA(driverETA: DriverETA | undefined, step: JobStep, steps?: Jo
   for (let i = targetIndex - 1; i >= 0; i--) {
     const completedAt = sorted[i].completed_at;
     if (!completedAt || sorted[i].status !== "done") continue;
+    if (driverETA.lastUpdated && new Date(completedAt).getTime() <= new Date(driverETA.lastUpdated).getTime()) continue;
 
     let rollingTime = new Date(completedAt).getTime();
     for (let j = i + 1; j <= targetIndex; j++) {
