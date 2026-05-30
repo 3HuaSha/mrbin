@@ -1991,7 +1991,7 @@ function etaCoversActiveSteps(driverETA: DriverETA | undefined, steps: JobStep[]
   const activeKeys = activeSteps.map((step) => `${step.id}|${stepEtaId(step)}`);
   const etaKeys = driverETA.orders
     .map((eta) => {
-      const step = activeSteps.find((item) => eta.stepId === item.id || eta.orderId === stepEtaId(item));
+      const step = activeSteps.find((item) => etaMatchesStep(eta, item));
       return step ? `${step.id}|${stepEtaId(step)}` : null;
     })
     .filter((key): key is string => !!key);
@@ -1999,8 +1999,14 @@ function etaCoversActiveSteps(driverETA: DriverETA | undefined, steps: JobStep[]
 }
 
 function findEtaForStep(driverETA: DriverETA, step: JobStep): ETAResult | null {
+  return driverETA.orders.find((eta) => etaMatchesStep(eta, step)) ?? null;
+}
+
+function etaMatchesStep(eta: ETAResult, step: JobStep) {
   const targetId = stepEtaId(step);
-  return driverETA.orders.find((eta) => eta.stepId === step.id || eta.orderId === targetId) ?? null;
+  if (eta.stepId === step.id || eta.orderId === targetId) return true;
+  if (step.node_type !== "step" || !eta.orderAddress) return false;
+  return sameRouteAddress(normalizeEtaAddress(getFullAddress(step.location || "")), eta.orderAddress);
 }
 
 function serviceSecondsForStep(step: JobStep) {
