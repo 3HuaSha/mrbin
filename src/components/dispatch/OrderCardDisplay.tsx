@@ -43,7 +43,7 @@ export function OrderCardDisplay({ order, binNumber, ghost }: OrderCardDisplayPr
               {order.pallet_count} PLT
             </span>
           )}
-          {order.priority && (
+          {order.priority && order.bin_type === "brick" && (
             <span className="text-[10px] bg-blue-100 text-blue-800 px-1 rounded font-semibold">
               {order.priority}
             </span>

@@ -70,7 +70,7 @@ export function OrderNodeDisplay({
             {order.pallet_count && (
               <span className="rounded bg-orange-100 px-1 text-orange-800">{order.pallet_count} PLT</span>
             )}
-            {order.priority && (
+            {order.priority && order.bin_type === "brick" && (
               <span className="rounded bg-blue-100 px-1 text-blue-800">{order.priority}</span>
             )}
             {order.can_split === false && (

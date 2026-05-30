@@ -143,7 +143,7 @@ export function CreateOrderPage() {
         customer_notes: payload.customer_notes.trim() || null,
         pallet_count: payload.pallet_count.trim() ? Number(payload.pallet_count) : null,
         can_split: payload.can_split,
-        priority: payload.bin_type === "brick" ? payload.priority : null,
+        priority: payload.bin_type === "brick" ? payload.priority : "P3",
         netsuite_order_id: null,
         business_type: payload.type === "material" ? "material" : undefined,
         bin_type: payload.type === "material" ? (payload.material_description.trim() || null) : payload.bin_type,
