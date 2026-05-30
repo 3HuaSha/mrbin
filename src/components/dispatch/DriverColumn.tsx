@@ -6,8 +6,6 @@ import {
   MapPin, 
   CheckCircle2, 
   AlertTriangle, 
-  Save, 
-  Loader2, 
   Trash2,
   ChevronRight,
   MoreVertical
@@ -53,7 +51,6 @@ interface DriverColumnProps {
   swapToPickup: Record<string, string>;
   onCancel: (id: string) => void;
   hasChanges?: boolean;
-  onSave?: () => void;
   isSaving?: boolean;
   onInsertStep: (params: { 
     driverId: string; 
@@ -95,7 +92,6 @@ export function DriverColumn({
   swapToPickup,
   onCancel,
   hasChanges,
-  onSave,
   isSaving,
   onInsertStep,
   onDeleteStep,
@@ -200,19 +196,8 @@ export function DriverColumn({
         </span>
         {hasChanges && (
           <Badge variant="outline" className="text-[9px] h-4 px-1 bg-amber-100 text-amber-700 border-amber-300 animate-pulse">
-            未保存
+            {isSaving ? "同步中" : "待同步"}
           </Badge>
-        )}
-        {hasChanges && onSave && (
-          <Button 
-            size="sm" 
-            onClick={onSave} 
-            disabled={isSaving}
-            className="h-6 px-2 text-[10px] gap-1 bg-amber-600 hover:bg-amber-700 text-white"
-          >
-            {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-            保存
-          </Button>
         )}
       </div>
 

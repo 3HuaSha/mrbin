@@ -5,7 +5,7 @@ import { todayISO, typeMeta } from "@/lib/business";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Save, RotateCcw, Plus } from "lucide-react";
+import { AlertTriangle, Truck, ChevronDown, ChevronRight, MapPin, Clock, Loader2, Plus } from "lucide-react";
 import { DispatchMapWidget } from "@/components/DispatchMapWidget";
 import { formatETATime, type DriverETA, type ETAResult } from "@/lib/eta-calculator";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
@@ -79,6 +79,9 @@ export function FleetMapPage() {
   const [driverETAs, setDriverETAs] = useState<Record<string, DriverETA>>(() => loadLocalDriverETAs(initialDate));
   const [showingETADrivers, setShowingETADrivers] = useState<Set<string>>(new Set());
   const [businessType, setBusinessType] = useBusinessType();
+  const syncPendingRef = useRef(false);
+  const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAutoSyncSignatureRef = useRef("");
   
   // 使用封装的数据钩子
   const {
@@ -700,6 +703,10 @@ export function FleetMapPage() {
   //   driverId = 'xxx' → 放到该司机的 index 位置 (index undefined 时放最后)
   //   index 是统一列表中的位置 (包含订单和手动步骤)
   const stageAssignment = (orderId: string, driverId: string | null, index?: number) => {
+    if (syncPendingRef.current) {
+      toast.message("正在同步上一次调整，请稍等一下");
+      return;
+    }
     // 如果是手动步骤的拖拽重排
     if (orderId.startsWith("step:")) {
       const stepId = orderId.slice(5);
@@ -787,17 +794,12 @@ export function FleetMapPage() {
     });
   };
 
-  // 放弃本地改动
-  const discardDraft = () => {
-    setDraft({});
-    setDraftManualSteps([]);
-    setDeleteStepIds([]);
-    setDropPosition(null);
-    toast.message("已撤销未同步的改动");
-  };
-
   // 地图固定地点拖到司机: 根据地点类型决定是直接创建步骤还是弹窗
   const handleLocationDrop = (locationId: string, driverId: string, index?: number) => {
+    if (syncPendingRef.current) {
+      toast.message("正在同步上一次调整，请稍等一下");
+      return;
+    }
     const loc = MANUAL_STEP_LOCATIONS.find(l => l.id === locationId);
     if (!loc) return;
 
@@ -830,6 +832,10 @@ export function FleetMapPage() {
 
   // 弹窗确认: 创建手动步骤
   const confirmLocationDrop = () => {
+    if (syncPendingRef.current) {
+      toast.message("正在同步上一次调整，请稍等一下");
+      return;
+    }
     if (!locationDropDialog) return;
     if (!dialogStepType) { toast.error("请选择动作"); return; }
     if ((dialogStepType === "pickup_bin" || dialogStepType === "drop_bin") && !dialogBinSize) {
@@ -1073,6 +1079,24 @@ export function FleetMapPage() {
     onError: (e: Error) => toast.error(`同步失败: ${e.message}`),
   });
 
+  useEffect(() => {
+    syncPendingRef.current = syncDraft.isPending;
+  }, [syncDraft.isPending]);
+
+  useEffect(() => {
+    if (!hasDraft || syncDraft.isPending) return;
+    const signature = JSON.stringify({ draft, draftManualSteps, deleteStepIds });
+    if (lastAutoSyncSignatureRef.current === signature) return;
+    if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
+    autoSyncTimerRef.current = setTimeout(() => {
+      lastAutoSyncSignatureRef.current = signature;
+      syncDraft.mutate();
+    }, 500);
+    return () => {
+      if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
+    };
+  }, [deleteStepIds, draft, draftManualSteps, hasDraft, syncDraft.isPending]);
+
   // 计算单个司机的 ETA
   const handleCalculateDriverETA = async (driverId: string, driverName: string) => {
     setCalculatingDriverId(driverId);
@@ -1237,35 +1261,12 @@ export function FleetMapPage() {
             司机执行与任务 ({filteredDrivers.length})
           </div>
 
-          {/* 同步按钮 - 有未保存改动时高亮 */}
-          <div className="p-2 border-b bg-background shrink-0 flex gap-2">
-            <Button
-              size="sm"
-              variant={hasDraft ? "default" : "outline"}
-              onClick={() => syncDraft.mutate()}
-              disabled={!hasDraft || syncDraft.isPending}
-              className="flex-1 h-8 text-xs"
-            >
-              {syncDraft.isPending ? (
-                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-              ) : (
-                <Save className="h-3 w-3 mr-1" />
-              )}
-              {hasDraft ? `同步 (${Object.keys(draft).length})` : "同步"}
-            </Button>
-            {hasDraft && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={discardDraft}
-                disabled={syncDraft.isPending}
-                className="h-8 px-2 text-xs"
-                title="撤销未同步的改动"
-              >
-                <RotateCcw className="h-3 w-3" />
-              </Button>
-            )}
-          </div>
+          {(hasDraft || syncDraft.isPending) && (
+            <div className="px-3 py-2 border-b bg-blue-50 text-[11px] font-medium text-blue-700 shrink-0 flex items-center gap-2">
+              {syncDraft.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+              {syncDraft.isPending ? "正在同步给司机..." : "已调整，马上自动同步"}
+            </div>
+          )}
 
           {/* 日期选择器 */}
           <div className="p-3 border-b bg-background shrink-0">
@@ -1736,7 +1737,7 @@ export function FleetMapPage() {
               : !!serverCurrent;
             if (currentlyAssigned) {
               stageAssignment(orderId, null);
-              toast.message("已标记为取消分配, 点同步保存");
+              toast.message("已标记为取消分配，马上自动同步");
             }
           }}
         >

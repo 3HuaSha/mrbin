@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -66,6 +66,8 @@ export function DispatchPage() {
   const qc = useQueryClient();
   const [date, setDate] = useState(todayISO());
   const [businessType, setBusinessType] = useBusinessType();
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAutoSaveSignatureRef = useRef("");
   
   // 使用封装的数据钩子
   const {
@@ -276,6 +278,26 @@ export function DispatchPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  useEffect(() => {
+    if (!localAssignments || saveAllChanges.isPending) return;
+    const signature = JSON.stringify(localAssignments.map((assignment) => ({
+      id: assignment.id,
+      driver_id: assignment.driver_id,
+      vehicle_id: assignment.vehicle_id,
+      sequence: assignment.sequence,
+      order_id: assignment.order_id,
+    })));
+    if (lastAutoSaveSignatureRef.current === signature) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      lastAutoSaveSignatureRef.current = signature;
+      saveAllChanges.mutate();
+    }, 500);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [localAssignments, saveAllChanges.isPending]);
+
   const insertManualStep = useMutation({
     mutationFn: async (params: {
       driverId: string;
@@ -402,6 +424,10 @@ export function DispatchPage() {
     setActiveId(null);
     const { active, over } = e;
     if (!over) return;
+    if (saveAllChanges.isPending) {
+      toast.message("正在同步上一次调整，请稍等一下");
+      return;
+    }
 
     const activeIdStr = active.id as string;
     const overIdStr = over.id as string;
@@ -766,6 +792,10 @@ export function DispatchPage() {
                     vehicle={getVehicle(d.id)}
                     vehicles={vehicles}
                     onChangeVehicle={(v: string) => {
+                      if (saveAllChanges.isPending) {
+                        toast.message("正在同步上一次调整，请稍等一下");
+                        return;
+                      }
                       setDriverVehicle((prev) => ({ ...prev, [d.id]: v }));
                       if (localAssignments) {
                         setLocalAssignments(localAssignments.map(a => a.driver_id === d.id ? { ...a, vehicle_id: v } : a));
@@ -778,11 +808,14 @@ export function DispatchPage() {
                     bins={bins}
                     swapToPickup={swapToPickup}
                     onCancel={(id: string) => {
+                      if (saveAllChanges.isPending) {
+                        toast.message("正在同步上一次调整，请稍等一下");
+                        return;
+                      }
                       const newAssignments = currentAssignments.filter((x: Assignment) => x.id !== id);
                       setLocalAssignments(newAssignments);
                     }}
                     hasChanges={hasChanges}
-                    onSave={() => saveAllChanges.mutate()}
                     isSaving={saveAllChanges.isPending}
                     onInsertStep={(params: any) => insertManualStep.mutate(params)}
                     onDeleteStep={(stepId: string) => deleteManualStep.mutate(stepId)}
