@@ -64,6 +64,7 @@ export function DispatchMapWidget({
   const mapInstance = useRef<any>(null);
   const markersRef = useRef<Record<string, any>>({});
   const infoWindowRef = useRef<any>(null);
+  const hoverRouteStepMarkersRef = useRef<any[]>([]);
   const routeLinesRef = useRef<any[]>([]); // 存储路线折线
   const previewLineRef = useRef<any>(null); // 拖拽预览路线折线
   const hoverLineRef = useRef<any>(null); // 悬停司机路线折线
@@ -994,6 +995,8 @@ export function DispatchMapWidget({
       hoverLineRef.current.setMap(null);
       hoverLineRef.current = null;
     }
+    hoverRouteStepMarkersRef.current.forEach((marker) => marker.setMap(null));
+    hoverRouteStepMarkersRef.current = [];
 
     if (!mapInstance.current || !(window as any).google || !hoverRoute || hoverRoute.length < 2) {
       return;
@@ -1002,32 +1005,54 @@ export function DispatchMapWidget({
     const line = new (window as any).google.maps.Polyline({
       path: hoverRoute,
       geodesic: true,
-      strokeColor: '#2196F3',
-      strokeOpacity: 0.7,
-      strokeWeight: 3,
+      strokeColor: '#0B63CE',
+      strokeOpacity: 0.92,
+      strokeWeight: 5,
       map: mapInstance.current,
       zIndex: 150,
       icons: [{
         icon: {
           path: (window as any).google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-          scale: 2.5,
-          strokeColor: '#2196F3',
-          strokeWeight: 2,
-          fillColor: '#2196F3',
-          fillOpacity: 0.8,
+          scale: 3.2,
+          strokeColor: '#FFFFFF',
+          strokeWeight: 1.5,
+          fillColor: '#0B63CE',
+          fillOpacity: 1,
         },
-        offset: '100%',
-        repeat: '100px',
+        offset: '42px',
+        repeat: '64px',
       }],
     });
 
     hoverLineRef.current = line;
+    hoverRouteStepMarkersRef.current = hoverRoute.map((point, index) => new (window as any).google.maps.Marker({
+      map: mapInstance.current,
+      position: point,
+      clickable: false,
+      zIndex: 1200 + index,
+      label: {
+        text: String(index + 1),
+        color: '#FFFFFF',
+        fontSize: '12px',
+        fontWeight: '800',
+      },
+      icon: {
+        path: (window as any).google.maps.SymbolPath.CIRCLE,
+        scale: 13,
+        fillColor: index === 0 ? '#0B63CE' : '#2563EB',
+        fillOpacity: 1,
+        strokeColor: '#FFFFFF',
+        strokeWeight: 3,
+      },
+    }));
 
     return () => {
       if (hoverLineRef.current) {
         hoverLineRef.current.setMap(null);
         hoverLineRef.current = null;
       }
+      hoverRouteStepMarkersRef.current.forEach((marker) => marker.setMap(null));
+      hoverRouteStepMarkersRef.current = [];
     };
   }, [hoverRoute, mapLoaded]);
 

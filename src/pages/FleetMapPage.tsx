@@ -636,7 +636,10 @@ export function FleetMapPage() {
       return null;
     };
 
-    const steps = driverJobSteps[hoveredDriverId] ?? [];
+    const steps = (driverJobSteps[hoveredDriverId] ?? [])
+      .filter((step) => step.status !== "done")
+      .sort((a, b) => a.step_number - b.step_number)
+      .slice(0, 3);
     const points: { lat: number; lng: number }[] = [];
     steps.forEach(step => {
       const addr = step.node_type === 'order' && step.orders ? step.orders.address : step.location;
@@ -1321,12 +1324,12 @@ export function FleetMapPage() {
                       ? "ring-2 ring-primary shadow-lg scale-[1.02] border-primary"
                       : ""
                   } ${isLateRisk ? "border-destructive/60 bg-destructive/5" : hasEta ? "border-blue-200" : ""}`}
+                  onMouseEnter={() => setHoveredDriverId(d.id)}
+                  onMouseLeave={() => setHoveredDriverId(null)}
                 >
                   <div 
                     className="p-2 hover:bg-muted/50 cursor-pointer transition-colors"
                     onClick={() => toggleDriver(d.id)}
-                    onMouseEnter={() => setHoveredDriverId(d.id)}
-                    onMouseLeave={() => setHoveredDriverId(null)}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="font-semibold text-sm flex items-center gap-2 min-w-0">
@@ -1759,7 +1762,7 @@ export function FleetMapPage() {
              }}
              onLocationDrop={handleLocationDrop}
              previewRoute={null}
-             hoverRoute={null}
+             hoverRoute={hoverRoute}
              showDriverEtaRoutes={false}
              activeBrickFactoryIds={activeBrickFactoryIds}
              onOrderClick={setHighlightedOrderId}
