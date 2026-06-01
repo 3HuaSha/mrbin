@@ -1,8 +1,9 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -22,6 +23,8 @@ import { todayISO } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { BusinessTypeSelector } from "@/components/BusinessTypeSelector";
 import { useBusinessType } from "@/lib/business-type-storage";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 
 function rangeStart(period: "day" | "week" | "month") {
   const d = new Date();
@@ -69,6 +72,13 @@ type SlowSegment = {
   actualMinutes: number;
   expectedMinutes: number;
   delayMinutes: number;
+  source: "eta_finish" | "rough_segment";
+};
+
+type SlowSegmentNote = {
+  segment_id: string;
+  reason_category: string | null;
+  note: string | null;
 };
 
 type SlowLocation = {
@@ -89,8 +99,21 @@ type SlowDriver = {
 };
 
 const SLOW_BUFFER_MINUTES = 15;
+const ETA_FINISH_BUFFER_MINUTES = 0;
+
+const SLOW_REASON_OPTIONS = [
+  { value: "traffic", label: "堵车/路况" },
+  { value: "site_wait", label: "现场等待" },
+  { value: "unload_slow", label: "卸货/操作慢" },
+  { value: "driver_delay", label: "司机停留过久" },
+  { value: "dispatch_change", label: "临时改派/插单" },
+  { value: "customer_issue", label: "客户原因" },
+  { value: "yard_delay", label: "场地/装车延迟" },
+  { value: "other", label: "其他" },
+];
 
 export function ReportsPage() {
+  const qc = useQueryClient();
   const [period, setPeriod] = useState<"day" | "week" | "month">("week");
   const [businessType, setBusinessType] = useBusinessType();
   const start = rangeStart(period);
@@ -132,11 +155,81 @@ export function ReportsPage() {
     },
   });
 
+  const { data: etaRows = [] } = useQuery({
+    queryKey: ["slow-point-eta-snapshots", startISO, todayStr],
+    queryFn: async () => {
+      const { data, error } = await (supabase.from as any)("driver_eta_snapshots")
+        .select("step_id,driver_id,scheduled_date,eta_at")
+        .gte("scheduled_date", startISO)
+        .lte("scheduled_date", todayStr);
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        step_id: string;
+        driver_id: string;
+        scheduled_date: string;
+        eta_at: string;
+      }>;
+    },
+  });
+
+  const { data: slowNotes = [] } = useQuery({
+    queryKey: ["driver-slow-segment-notes", startISO, todayStr],
+    queryFn: async () => {
+      const { data, error } = await (supabase.from as any)("driver_slow_segment_notes")
+        .select("segment_id,reason_category,note")
+        .gte("scheduled_date", startISO)
+        .lte("scheduled_date", todayStr);
+      if (error?.code === "42P01") return [];
+      if (error) throw error;
+      return (data ?? []) as SlowSegmentNote[];
+    },
+  });
+
+  const slowNoteBySegmentId = useMemo(() => {
+    return new Map(slowNotes.map((note) => [note.segment_id, note]));
+  }, [slowNotes]);
+
+  const saveSlowNote = useMutation({
+    mutationFn: async ({
+      segment,
+      reasonCategory,
+      note,
+    }: {
+      segment: SlowSegment;
+      reasonCategory: string;
+      note: string;
+    }) => {
+      const { error } = await (supabase.from as any)("driver_slow_segment_notes").upsert(
+        {
+          segment_id: segment.id,
+          source: segment.source,
+          driver_id: segment.driverId,
+          scheduled_date: segment.scheduledDate,
+          reason_category: reasonCategory || null,
+          note: note.trim() || null,
+          updated_by: (await supabase.auth.getUser()).data.user?.id ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "segment_id" },
+      );
+      if (error?.code === "42P01") {
+        throw new Error("缺少 driver_slow_segment_notes 表，请先运行新增的 Supabase migration");
+      }
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("已保存原因");
+      qc.invalidateQueries({ queryKey: ["driver-slow-segment-notes", startISO, todayStr] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
   const driverById = useMemo(() => {
     return new Map(drivers.map((driver) => [driver.id, driver]));
   }, [drivers]);
 
   const slowReport = useMemo(() => {
+    const etaByStepId = new Map(etaRows.map((row) => [row.step_id, row]));
     const groups = new Map<string, ReportStep[]>();
     for (const step of reportSteps) {
       const key = `${step.driver_id}|${step.scheduled_date}`;
@@ -154,9 +247,38 @@ export function ReportsPage() {
         .filter((step) => step.completed_at)
         .sort((a, b) => a.step_number - b.step_number);
 
+      for (const step of completed) {
+        const eta = etaByStepId.get(step.id);
+        if (!eta?.eta_at || !step.completed_at) continue;
+
+        const etaArrivalMs = new Date(eta.eta_at).getTime();
+        const completedMs = new Date(step.completed_at).getTime();
+        if (!Number.isFinite(etaArrivalMs) || !Number.isFinite(completedMs)) continue;
+
+        const expectedMinutes = serviceMinutesForStep(step);
+        const actualMinutes = Math.max(0, (completedMs - etaArrivalMs) / 60_000);
+        const delayMinutes = Math.max(0, actualMinutes - expectedMinutes);
+        if (delayMinutes <= ETA_FINISH_BUFFER_MINUTES) continue;
+
+        slowSegments.push({
+          id: `eta-${step.id}`,
+          driverId: driver.id,
+          driverName: driver.name,
+          scheduledDate,
+          from: "ETA 完成时间",
+          to: stepLabel(step),
+          toLocation: stepAddress(step),
+          actualMinutes,
+          expectedMinutes,
+          delayMinutes,
+          source: "eta_finish",
+        });
+      }
+
       for (let i = 1; i < completed.length; i += 1) {
         const previous = completed[i - 1];
         const current = completed[i];
+        if (etaByStepId.has(current.id)) continue;
         const actualMinutes = minutesBetween(previous.completed_at, current.completed_at);
         if (actualMinutes == null) continue;
 
@@ -176,6 +298,7 @@ export function ReportsPage() {
             actualMinutes,
             expectedMinutes,
             delayMinutes,
+            source: "rough_segment",
           });
         }
       }
@@ -255,7 +378,7 @@ export function ReportsPage() {
       overdueOpenSteps,
       totalDelayMinutes: slowSegments.reduce((sum, segment) => sum + segment.delayMinutes, 0),
     };
-  }, [drivers, driverById, reportSteps, todayStr]);
+  }, [drivers, driverById, etaRows, reportSteps, todayStr]);
 
   const worstLocation = slowReport.slowLocations[0];
 
@@ -288,7 +411,7 @@ export function ReportsPage() {
           icon={<TimerReset className="h-4 w-4" />}
           label="偏慢记录"
           value={slowReport.slowSegments.length.toString()}
-          sub={`超过预估 +${SLOW_BUFFER_MINUTES} 分钟才算`}
+          sub={`晚于 ETA 完成，或粗略预估 +${SLOW_BUFFER_MINUTES} 分钟`}
           tone={slowReport.slowSegments.length ? "text-amber-600" : "text-status-done"}
         />
         <StatCard
@@ -397,8 +520,10 @@ export function ReportsPage() {
                   <th className="text-left font-medium py-2 pr-3">从哪里</th>
                   <th className="text-left font-medium py-2 pr-3">慢在哪</th>
                   <th className="text-left font-medium py-2 pr-3">地址</th>
+                  <th className="text-left font-medium py-2 pr-3">类型</th>
                   <th className="text-left font-medium py-2 pr-3">实际/预估</th>
                   <th className="text-left font-medium py-2">偏慢</th>
+                  <th className="text-left font-medium py-2 pl-3">原因/备注</th>
                 </tr>
               </thead>
               <tbody>
@@ -409,11 +534,24 @@ export function ReportsPage() {
                     <td className="py-3 pr-3">{segment.from}</td>
                     <td className="py-3 pr-3">{segment.to}</td>
                     <td className="py-3 pr-3 max-w-xs truncate text-muted-foreground">{segment.toLocation}</td>
+                    <td className="py-3 pr-3">
+                      <Badge variant={segment.source === "eta_finish" ? "destructive" : "secondary"}>
+                        {segment.source === "eta_finish" ? "晚于 ETA 完成" : "路段粗算"}
+                      </Badge>
+                    </td>
                     <td className="py-3 pr-3 text-muted-foreground">
                       {Math.round(segment.actualMinutes)} / {Math.round(segment.expectedMinutes)} 分钟
                     </td>
                     <td className="py-3">
                       <Badge variant="destructive">+{Math.round(segment.delayMinutes)} 分钟</Badge>
+                    </td>
+                    <td className="py-3 pl-3 min-w-[260px]">
+                      <SlowReasonEditor
+                        segment={segment}
+                        savedNote={slowNoteBySegmentId.get(segment.id)}
+                        isSaving={saveSlowNote.isPending}
+                        onSave={(reasonCategory, note) => saveSlowNote.mutate({ segment, reasonCategory, note })}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -477,6 +615,67 @@ function StatCard({
 
 function EmptyState({ text }: { text: string }) {
   return <div className="text-xs text-muted-foreground py-8 text-center">{text}</div>;
+}
+
+function SlowReasonEditor({
+  segment,
+  savedNote,
+  isSaving,
+  onSave,
+}: {
+  segment: SlowSegment;
+  savedNote?: SlowSegmentNote;
+  isSaving: boolean;
+  onSave: (reasonCategory: string, note: string) => void;
+}) {
+  const [reasonCategory, setReasonCategory] = useState(savedNote?.reason_category ?? "");
+  const [note, setNote] = useState(savedNote?.note ?? "");
+
+  useEffect(() => {
+    setReasonCategory(savedNote?.reason_category ?? "");
+    setNote(savedNote?.note ?? "");
+  }, [segment.id, savedNote?.reason_category, savedNote?.note]);
+
+  const isDirty = reasonCategory !== (savedNote?.reason_category ?? "") || note !== (savedNote?.note ?? "");
+
+  return (
+    <div className="space-y-2">
+      <Select value={reasonCategory || "unclassified"} onValueChange={(value) => setReasonCategory(value === "unclassified" ? "" : value)}>
+        <SelectTrigger className="h-8 text-xs">
+          <SelectValue placeholder="选择原因" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="unclassified">未分类</SelectItem>
+          {SLOW_REASON_OPTIONS.map((reason) => (
+            <SelectItem key={reason.value} value={reason.value}>
+              {reason.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Textarea
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        placeholder="补充说明，例如堵车、客户未准备好、现场等太久..."
+        className="min-h-16 text-xs"
+      />
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-muted-foreground">
+          {savedNote?.reason_category || savedNote?.note ? "已记录" : "未记录原因"}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant={isDirty ? "default" : "outline"}
+          className="h-7 px-2 text-xs"
+          disabled={isSaving || !isDirty}
+          onClick={() => onSave(reasonCategory, note)}
+        >
+          {isSaving ? "保存中" : "保存"}
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function isStepDone(step: ReportStep) {
