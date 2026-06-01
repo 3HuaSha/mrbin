@@ -658,9 +658,9 @@ export function DispatchMapWidget({
         if (target?.driverId) {
           onAssignOrder?.(order.id, target.driverId, target.index);
         } else {
-          // 没命中司机 → 如果订单原本是已分配的, 就取消分配
+          // 没命中司机时只弹回原位；取消分配改由左侧任务卡拖到地图完成
           const wasUnassigned = unassignedOrderSet.has(order.id);
-          if (!wasUnassigned) {
+          if (marker._allowMapUnassign && !wasUnassigned) {
             onUnassignOrder?.(order.id);
           }
         }
