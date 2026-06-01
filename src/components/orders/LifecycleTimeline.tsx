@@ -235,11 +235,15 @@ export function LifecycleTimeline({
               <div className="space-y-0.5">
                 {dumpStep.weight_kg != null && <div>{dumpStep.weight_kg} kg</div>}
                 {dumpStep.dump_site && <div className="truncate max-w-[80px] mx-auto">{dumpStep.dump_site}</div>}
-                {dumpStep.photo_url && (
-                  <a href={dumpStep.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">垃圾照片</a>
-                )}
-                {dumpStep.weigh_ticket_url && (
-                  <a href={dumpStep.weigh_ticket_url} target="_blank" rel="noreferrer" className="text-primary underline">垃圾单</a>
+                {(dumpStep.photo_url || dumpStep.weigh_ticket_url) && (
+                  <div className="flex flex-col items-center gap-0.5">
+                    {dumpStep.photo_url && (
+                      <a href={dumpStep.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">垃圾照片</a>
+                    )}
+                    {dumpStep.weigh_ticket_url && (
+                      <a href={dumpStep.weigh_ticket_url} target="_blank" rel="noreferrer" className="text-primary underline">垃圾单照片</a>
+                    )}
+                  </div>
                 )}
               </div>
             ) : undefined}

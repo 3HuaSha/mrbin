@@ -133,6 +133,9 @@ export function useDispatchData(date: string, businessType: BusinessType) {
       if (error) throw error;
       return (data ?? []) as JobStep[];
     },
+    refetchInterval: 10000,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
   });
 
   const { data: commonLocations = [] } = useQuery({

@@ -103,8 +103,8 @@ export function OrderDetailRow({ order, orderId }: OrderDetailRowProps) {
   // pickup: 没有订单号表示待关联送桶单
   // swap: 没有 linked_order_id 表示待关联
   const unlinkedPickupOrSwap = chain.find(o => 
-    (o.type === "pickup" && !o.order_number) || (o.type === "swap" && !o.linked_order_id)
-  ) ?? ((primary.type === "pickup" && !primary.order_number) || (primary.type === "swap" && !primary.linked_order_id) ? primary : null);
+    (o.type === "pickup" && !o.linked_order_id) || (o.type === "swap" && !o.linked_order_id)
+  ) ?? ((primary.type === "pickup" && !primary.linked_order_id) || (primary.type === "swap" && !primary.linked_order_id) ? primary : null);
 
   return (
     <tr className="bg-accent/20 border-t">

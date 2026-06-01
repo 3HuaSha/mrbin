@@ -24,7 +24,7 @@ export function LinkPickerPanel({ order, assignments = [] }: LinkPickerPanelProp
   // 按地址 + 尺寸搜索同地址未回收的 delivery 候选
   const { data: candidates = [] } = useQuery({
     queryKey: ["link-candidates", order.address, order.bin_size, order.id],
-    enabled: (order.type === "pickup" ? !order.order_number : !order.linked_order_id) && !!order.bin_size && order.address.length >= 3,
+    enabled: !order.linked_order_id && !!order.bin_size && order.address.length >= 3,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("orders")
@@ -51,19 +51,52 @@ export function LinkPickerPanel({ order, assignments = [] }: LinkPickerPanelProp
       if (fetchErr || !deliveryOrder) throw new Error("无法找到送桶订单");
 
       // 更新当前未关联的 pickup: 沿用送桶单号 + 双向关联
-      const { error: updateErr } = await supabase
-        .from("orders")
-        .update({
-          order_number: deliveryOrder.order_number,
-          linked_order_id: deliveryId,
-        })
-        .eq("id", order.id);
-      if (updateErr) throw updateErr;
+      let pickupId = order.id;
+
+      if (order.type === "swap") {
+        const { data: pickupRow, error: insertErr } = await supabase
+          .from("orders")
+          .insert({
+            order_number: deliveryOrder.order_number,
+            type: "pickup" as any,
+            bin_size: order.bin_size,
+            bin_type: order.bin_type,
+            service_date: order.service_date,
+            time_window: order.time_window,
+            time_window_custom: order.time_window_custom,
+            address: order.address,
+            customer_name: order.customer_name,
+            customer_phone: order.customer_phone,
+            customer_notes: order.customer_notes,
+            status: "pending" as any,
+            linked_order_id: order.id,
+            business_type: order.business_type,
+          } as any)
+          .select("id")
+          .single();
+        if (insertErr || !pickupRow) throw insertErr ?? new Error("无法创建收桶子单");
+        pickupId = pickupRow.id;
+
+        const { error: swapErr } = await supabase
+          .from("orders")
+          .update({ linked_order_id: pickupId })
+          .eq("id", order.id);
+        if (swapErr) throw swapErr;
+      } else {
+        const { error: updateErr } = await supabase
+          .from("orders")
+          .update({
+            order_number: deliveryOrder.order_number,
+            linked_order_id: deliveryId,
+          })
+          .eq("id", order.id);
+        if (updateErr) throw updateErr;
+      }
 
       // 送桶订单的 linked_order_id 指向收桶子单
       const { error: linkErr } = await supabase
         .from("orders")
-        .update({ linked_order_id: order.id })
+        .update({ linked_order_id: pickupId })
         .eq("id", deliveryId);
       if (linkErr) throw linkErr;
     },

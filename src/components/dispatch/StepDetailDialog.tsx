@@ -74,6 +74,20 @@ export function StepDetailDialog({ step, onClose }: StepDetailDialogProps) {
             </div>
           )}
 
+          {(step as any).weight_kg != null && (
+            <div className="flex items-center justify-between bg-blue-50 border border-blue-200 p-3 rounded-lg">
+              <div className="text-sm font-semibold text-blue-800">称重重量</div>
+              <div className="text-sm font-mono font-bold text-blue-700">{(step as any).weight_kg} kg</div>
+            </div>
+          )}
+
+          {(step as any).dump_site && (
+            <div className="bg-muted/50 p-3 rounded-lg border">
+              <div className="text-xs font-semibold mb-1">垃圾场</div>
+              <div className="text-sm text-muted-foreground">{(step as any).dump_site}</div>
+            </div>
+          )}
+
           {step.photo_url && (
             <div className="space-y-2">
               <div className="text-sm font-semibold flex items-center gap-2">
@@ -85,6 +99,38 @@ export function StepDetailDialog({ step, onClose }: StepDetailDialogProps) {
                   alt="现场照片" 
                   className="w-full h-full object-cover transition-transform group-hover:scale-105"
                   onClick={() => window.open(step.photo_url!, '_blank')}
+                />
+              </div>
+            </div>
+          )}
+
+          {(step as any).weigh_ticket_url && (
+            <div className="space-y-2">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <ImageIcon className="h-4 w-4" /> 垃圾单照片
+              </div>
+              <div className="aspect-video relative rounded-lg overflow-hidden border shadow-sm group">
+                <img
+                  src={(step as any).weigh_ticket_url}
+                  alt="垃圾单照片"
+                  className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                  onClick={() => window.open((step as any).weigh_ticket_url, '_blank')}
+                />
+              </div>
+            </div>
+          )}
+
+          {(step as any).pickup_photo_url && (
+            <div className="space-y-2">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <ImageIcon className="h-4 w-4" /> 收桶照片
+              </div>
+              <div className="aspect-video relative rounded-lg overflow-hidden border shadow-sm group">
+                <img
+                  src={(step as any).pickup_photo_url}
+                  alt="收桶照片"
+                  className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                  onClick={() => window.open((step as any).pickup_photo_url, '_blank')}
                 />
               </div>
             </div>
