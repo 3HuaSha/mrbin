@@ -17,6 +17,7 @@ export function DispatchMapWidget({
   onLocationDrop,
   previewRoute,
   hoverRoute,
+  hoverRouteStartsAtVehicle = false,
   showDriverEtaRoutes = true,
   activeBrickFactoryIds,
   onOrderClick,
@@ -47,6 +48,7 @@ export function DispatchMapWidget({
   previewRoute?: { lat: number; lng: number }[] | null,
   /** 悬停司机时的路线高亮: 该司机所有任务点连线 */
   hoverRoute?: { lat: number; lng: number }[] | null,
+  hoverRouteStartsAtVehicle?: boolean,
   /** 是否在地图上绘制 ETA 路线线条 */
   showDriverEtaRoutes?: boolean,
   /** 当天有取货单的砖厂 id 集合 (砖业务时只显示这些砖厂标记) */
@@ -1031,7 +1033,7 @@ export function DispatchMapWidget({
       clickable: false,
       zIndex: 1200 + index,
       label: {
-        text: String(index + 1),
+        text: hoverRouteStartsAtVehicle && index === 0 ? '车' : String(hoverRouteStartsAtVehicle ? index : index + 1),
         color: '#FFFFFF',
         fontSize: '12px',
         fontWeight: '800',
@@ -1039,7 +1041,7 @@ export function DispatchMapWidget({
       icon: {
         path: (window as any).google.maps.SymbolPath.CIRCLE,
         scale: 13,
-        fillColor: index === 0 ? '#0B63CE' : '#2563EB',
+        fillColor: hoverRouteStartsAtVehicle && index === 0 ? '#111827' : '#2563EB',
         fillOpacity: 1,
         strokeColor: '#FFFFFF',
         strokeWeight: 3,
@@ -1054,7 +1056,7 @@ export function DispatchMapWidget({
       hoverRouteStepMarkersRef.current.forEach((marker) => marker.setMap(null));
       hoverRouteStepMarkersRef.current = [];
     };
-  }, [hoverRoute, mapLoaded]);
+  }, [hoverRoute, hoverRouteStartsAtVehicle, mapLoaded]);
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   if (!apiKey) {

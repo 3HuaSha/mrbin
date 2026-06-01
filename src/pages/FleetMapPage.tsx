@@ -93,6 +93,19 @@ export function FleetMapPage() {
     commonLocations,
   } = useDispatchData(date, businessType);
 
+  const { data: samsaraLocs = [] } = useQuery<any[]>({
+    queryKey: ["samsara-vehicles"],
+    queryFn: async () => {
+      const result = await fetchSamsaraVehicles();
+      if (!result.success) throw new Error(result.error || "Samsara 获取失败");
+      return result.data || [];
+    },
+    refetchInterval: 30000,
+    refetchOnWindowFocus: false,
+    staleTime: 10000,
+    placeholderData: (prev) => prev,
+  });
+
   useEffect(() => {
     setDriverETAs(loadLocalDriverETAs(date));
   }, [date]);
@@ -636,18 +649,31 @@ export function FleetMapPage() {
       return null;
     };
 
+    const vehicleAssignment = vehicleAssignments.find((assignment: any) => assignment.driver_id === hoveredDriverId);
+    const samsaraVehicleId = (vehicleAssignment?.vehicles as any)?.samsara_id;
+    const samsaraVehicle = samsaraLocs.find((vehicle: any) => vehicle.id === samsaraVehicleId);
+    const vehicleLocation = samsaraVehicle?.location
+      ? {
+          lat: Number(samsaraVehicle.location.latitude),
+          lng: Number(samsaraVehicle.location.longitude),
+        }
+      : null;
+
     const steps = (driverJobSteps[hoveredDriverId] ?? [])
       .filter((step) => step.status !== "done")
       .sort((a, b) => a.step_number - b.step_number)
       .slice(0, 3);
     const points: { lat: number; lng: number }[] = [];
+    if (vehicleLocation && Number.isFinite(vehicleLocation.lat) && Number.isFinite(vehicleLocation.lng)) {
+      points.push(vehicleLocation);
+    }
     steps.forEach(step => {
       const addr = step.node_type === 'order' && step.orders ? step.orders.address : step.location;
       const coords = getCoords(addr);
       if (coords) points.push(coords);
     });
     return points.length >= 2 ? points : null;
-  }, [hoveredDriverId, driverJobSteps]);
+  }, [driverJobSteps, hoveredDriverId, samsaraLocs, vehicleAssignments]);
 
   // 当天砖业务订单涉及的砖厂 id 集合 (砖业务时只显示有单的砖厂)
   // 如果没有匹配到任何砖厂, 则显示所有砖厂 (避免空地图)
@@ -1763,6 +1789,12 @@ export function FleetMapPage() {
              onLocationDrop={handleLocationDrop}
              previewRoute={null}
              hoverRoute={hoverRoute}
+             hoverRouteStartsAtVehicle={!!hoverRoute && !!hoveredDriverId && (() => {
+               const vehicleAssignment = vehicleAssignments.find((assignment: any) => assignment.driver_id === hoveredDriverId);
+               const samsaraVehicleId = (vehicleAssignment?.vehicles as any)?.samsara_id;
+               const samsaraVehicle = samsaraLocs.find((vehicle: any) => vehicle.id === samsaraVehicleId);
+               return !!samsaraVehicle?.location;
+             })()}
              showDriverEtaRoutes={false}
              activeBrickFactoryIds={activeBrickFactoryIds}
              onOrderClick={setHighlightedOrderId}
