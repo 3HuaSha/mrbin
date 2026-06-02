@@ -128,20 +128,6 @@ async function fetchGoogleMatrixForPairs(pairs: Array<{ from: string; to: string
   const key = process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
   if (!key || pairs.length === 0) return [];
 
-  // Try to reconstruct a sequential route from the pairs to use Google Routes API
-  const sequence = reconstructSequence(pairs);
-  if (sequence) {
-    console.log('🔄 Reconstructed contiguous sequence of length:', sequence.length, 'calling Routes API');
-    try {
-      const routesEntries = await fetchGoogleRoutesForSequence(sequence, key);
-      if (routesEntries.length > 0) {
-        return routesEntries;
-      }
-    } catch (err) {
-      console.error('❌ Google Routes API failed, falling back to matrix:', err);
-    }
-  }
-
   // Collect all unique addresses from the pairs
   const addressSet = new Set<string>();
   pairs.forEach((pair) => {
@@ -185,104 +171,6 @@ async function fetchGoogleMatrixForPairs(pairs: Array<{ from: string; to: string
       source: "google" as const,
     }))
     .filter((entry) => entry.duration > 0 && entry.from !== entry.to);
-
-  return entries;
-}
-
-function reconstructSequence(pairs: Array<{ from: string; to: string }>): string[] | null {
-  if (pairs.length === 0) return [];
-  
-  const next = new Map<string, string>();
-  const hasIncoming = new Set<string>();
-  
-  for (const pair of pairs) {
-    const f = pair.from.trim();
-    const t = pair.to.trim();
-    if (next.has(f)) return null; // Not a single continuous path (branching)
-    next.set(f, t);
-    hasIncoming.add(t);
-  }
-  
-  const startNodes = pairs.map(p => p.from.trim()).filter(f => !hasIncoming.has(f));
-  const uniqueStartNodes = [...new Set(startNodes)];
-  
-  if (uniqueStartNodes.length !== 1) return null;
-  
-  const start = uniqueStartNodes[0];
-  const sequence: string[] = [start];
-  let curr = start;
-  while (next.has(curr)) {
-    curr = next.get(curr)!;
-    sequence.push(curr);
-  }
-  
-  if (sequence.length !== pairs.length + 1) return null;
-  return sequence;
-}
-
-async function fetchGoogleRoutesForSequence(sequence: string[], key: string): Promise<RouteMatrixEntry[]> {
-  if (sequence.length < 2) return [];
-
-  const origin = sequence[0];
-  const destination = sequence[sequence.length - 1];
-  const intermediates = sequence.slice(1, sequence.length - 1);
-
-  const createWaypoint = (address: string) => {
-    const coordinate = parseCoordinateAddress(address);
-    if (coordinate) {
-      return {
-        location: {
-          latLng: {
-            latitude: coordinate.lat,
-            longitude: coordinate.lng,
-          },
-        },
-      };
-    }
-    return { address };
-  };
-
-  const requestBody = {
-    origin: createWaypoint(origin),
-    destination: createWaypoint(destination),
-    intermediates: intermediates.map(createWaypoint),
-    travelMode: 'DRIVE',
-    routingPreference: 'TRAFFIC_UNAWARE',
-  };
-
-  const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': key,
-      'X-Goog-FieldMask': 'routes.legs.distanceMeters,routes.legs.duration',
-    },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error('[Google Routes API] fetch failed:', errText);
-    return [];
-  }
-
-  const responseData = await response.json();
-  const legs = responseData.routes?.[0]?.legs || [];
-  
-  const entries: RouteMatrixEntry[] = [];
-  legs.forEach((leg: any, index: number) => {
-    const fromAddr = sequence[index];
-    const toAddr = sequence[index + 1];
-    const duration = parseDuration(leg.duration);
-    const distance = leg.distanceMeters || 0;
-    entries.push({
-      from: fromAddr,
-      to: toAddr,
-      duration,
-      distance,
-      source: 'google',
-    });
-  });
 
   return entries;
 }
