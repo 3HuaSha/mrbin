@@ -5,7 +5,7 @@
  *   - API 请求 (supabase, samsara 等): 全部不走缓存，避免看到过期数据。
  * 版本号: 改动时 bump，强制旧 SW 失效。
  */
-const VERSION = 'driver-v1';
+const VERSION = 'driver-v2';
 const SHELL_CACHE = `shell-${VERSION}`;
 const ASSET_CACHE = `assets-${VERSION}`;
 

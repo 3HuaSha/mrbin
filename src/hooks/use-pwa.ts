@@ -45,7 +45,7 @@ export function usePWA() {
     // 注册 Service Worker
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker
-        .register("/driver-sw.js", { scope: "/driver" })
+        .register("/driver-sw.js", { scope: "/driver/" })
         .catch((err) => console.warn("[PWA] SW 注册失败", err));
     }
 
