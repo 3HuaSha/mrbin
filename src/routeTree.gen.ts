@@ -17,6 +17,7 @@ import { Route as DriverLoginRouteImport } from './routes/driver.login'
 import { Route as StaffUsersRouteImport } from './routes/_staff.users'
 import { Route as StaffReportsRouteImport } from './routes/_staff.reports'
 import { Route as StaffOrdersRouteImport } from './routes/_staff.orders'
+import { Route as StaffCementRouteImport } from './routes/_staff.cement'
 import { Route as StaffMapRouteImport } from './routes/_staff.map'
 import { Route as StaffFleetRouteImport } from './routes/_staff.fleet'
 import { Route as StaffDispatchRouteImport } from './routes/_staff.dispatch'
@@ -63,6 +64,11 @@ const StaffOrdersRoute = StaffOrdersRouteImport.update({
   path: '/orders',
   getParentRoute: () => StaffRoute,
 } as any)
+const StaffCementRoute = StaffCementRouteImport.update({
+  id: '/cement',
+  path: '/cement',
+  getParentRoute: () => StaffRoute,
+} as any)
 const StaffMapRoute = StaffMapRouteImport.update({
   id: '/map',
   path: '/map',
@@ -102,6 +108,7 @@ export interface FileRoutesByFullPath {
   '/fleet': typeof StaffFleetRoute
   '/map': typeof StaffMapRoute
   '/orders': typeof StaffOrdersRoute
+  '/cement': typeof StaffCementRoute
   '/reports': typeof StaffReportsRoute
   '/users': typeof StaffUsersRoute
   '/driver/login': typeof DriverLoginRoute
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/fleet': typeof StaffFleetRoute
   '/map': typeof StaffMapRoute
   '/orders': typeof StaffOrdersRoute
+  '/cement': typeof StaffCementRoute
   '/reports': typeof StaffReportsRoute
   '/users': typeof StaffUsersRoute
   '/driver/login': typeof DriverLoginRoute
@@ -133,6 +141,7 @@ export interface FileRoutesById {
   '/_staff/fleet': typeof StaffFleetRoute
   '/_staff/map': typeof StaffMapRoute
   '/_staff/orders': typeof StaffOrdersRoute
+  '/_staff/cement': typeof StaffCementRoute
   '/_staff/reports': typeof StaffReportsRoute
   '/_staff/users': typeof StaffUsersRoute
   '/driver/login': typeof DriverLoginRoute
@@ -151,6 +160,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/map'
     | '/orders'
+    | '/cement'
     | '/reports'
     | '/users'
     | '/driver/login'
@@ -165,6 +175,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/map'
     | '/orders'
+    | '/cement'
     | '/reports'
     | '/users'
     | '/driver/login'
@@ -181,6 +192,7 @@ export interface FileRouteTypes {
     | '/_staff/fleet'
     | '/_staff/map'
     | '/_staff/orders'
+    | '/_staff/cement'
     | '/_staff/reports'
     | '/_staff/users'
     | '/driver/login'
@@ -256,6 +268,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffOrdersRouteImport
       parentRoute: typeof StaffRoute
     }
+    '/_staff/cement': {
+      id: '/_staff/cement'
+      path: '/cement'
+      fullPath: '/cement'
+      preLoaderRoute: typeof StaffCementRouteImport
+      parentRoute: typeof StaffRoute
+    }
     '/_staff/map': {
       id: '/_staff/map'
       path: '/map'
@@ -308,6 +327,7 @@ interface StaffRouteChildren {
   StaffFleetRoute: typeof StaffFleetRoute
   StaffMapRoute: typeof StaffMapRoute
   StaffOrdersRoute: typeof StaffOrdersRoute
+  StaffCementRoute: typeof StaffCementRoute
   StaffReportsRoute: typeof StaffReportsRoute
   StaffUsersRoute: typeof StaffUsersRoute
   StaffIndexRoute: typeof StaffIndexRoute
@@ -320,6 +340,7 @@ const StaffRouteChildren: StaffRouteChildren = {
   StaffFleetRoute: StaffFleetRoute,
   StaffMapRoute: StaffMapRoute,
   StaffOrdersRoute: StaffOrdersRoute,
+  StaffCementRoute: StaffCementRoute,
   StaffReportsRoute: StaffReportsRoute,
   StaffUsersRoute: StaffUsersRoute,
   StaffIndexRoute: StaffIndexRoute,

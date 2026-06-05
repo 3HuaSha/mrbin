@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ClipboardList,
+  Construction,
   LayoutGrid,
   PackageCheck,
   PlusSquare,
@@ -29,6 +30,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { to: "/", label: "下单", icon: PlusSquare, exact: true },
   { to: "/orders", label: "订单", icon: ClipboardList },
+  { to: "/cement", label: "水泥", icon: Construction },
   { to: "/dispatch", label: "排班", icon: LayoutGrid },
   { to: "/map", label: "实时地图", icon: MapIcon },
   { to: "/bins", label: "桶库存", icon: PackageCheck },
