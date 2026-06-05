@@ -69,6 +69,12 @@ type CementMaterialOrder = {
   status: MaterialStatus;
 };
 
+type CementMaterialInventory = {
+  material: CementMaterialName;
+  current_qty: number;
+  unit: string;
+};
+
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 const CEMENT_MATERIAL_DEFAULTS = {
@@ -96,6 +102,14 @@ type CementMaterialName = keyof typeof CEMENT_MATERIAL_DEFAULTS;
 
 const CEMENT_MATERIAL_DELIVER_UNIT = "TON";
 const CEMENT_MATERIAL_DELIVERY_ADDRESS = "3445 KENNEDY RD";
+
+const MATERIAL_USAGE_PER_CBM: Record<CementMaterialName, number> = {
+  Cement: 0.35,
+  "Concrete Sand": 0.73,
+  HL6: 1.1,
+};
+
+const MATERIAL_ORDER: CementMaterialName[] = ["Cement", "Concrete Sand", "HL6"];
 
 const cementStatusMeta: Record<CementStatus, { label: string; className: string }> = {
   pending: { label: "待安排", className: "bg-slate-100 text-slate-700 border-slate-200" },
@@ -174,6 +188,43 @@ export function CementPage() {
     },
   });
 
+  const { data: forecastCementOrders = [] } = useQuery({
+    queryKey: ["cement-forecast-orders"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("cement_orders")
+        .select("id, demand_date, order_qty_cbm, status")
+        .gte("demand_date", todayISO())
+        .not("status", "in", '("completed","cancelled")');
+      if (error) throw error;
+      return (data ?? []) as Pick<CementOrder, "id" | "demand_date" | "order_qty_cbm" | "status">[];
+    },
+  });
+
+  const { data: forecastMaterialOrders = [] } = useQuery({
+    queryKey: ["cement-material-forecast-orders"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("cement_material_orders")
+        .select("id, material, order_qty, status")
+        .gte("demand_date", todayISO())
+        .not("status", "in", '("completed","cancelled")');
+      if (error) throw error;
+      return (data ?? []) as Pick<CementMaterialOrder, "id" | "material" | "order_qty" | "status">[];
+    },
+  });
+
+  const { data: materialInventory = [] } = useQuery({
+    queryKey: ["cement-material-inventory"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("cement_material_inventory")
+        .select("material, current_qty, unit");
+      if (error) throw error;
+      return (data ?? []) as CementMaterialInventory[];
+    },
+  });
+
   const filteredCement = useMemo(() => {
     const s = search.trim().toLowerCase();
     if (!s) return cementOrders;
@@ -200,6 +251,39 @@ export function CementPage() {
     const openMaterials = filteredMaterials.filter((o) => !["completed", "cancelled"].includes(o.status)).length;
     return { concreteQty, deliveredQty, receivable, openConcrete, openMaterials };
   }, [filteredCement, filteredMaterials]);
+
+  const materialForecast = useMemo(() => {
+    const totalCbm = forecastCementOrders.reduce((sum, o) => sum + Number(o.order_qty_cbm ?? 0), 0);
+    return MATERIAL_ORDER.map((material) => {
+      const inventory = materialInventory.find((row) => row.material === material);
+      const currentQty = Number(inventory?.current_qty ?? 0);
+      const orderedQty = forecastMaterialOrders
+        .filter((o) => o.material === material)
+        .reduce((sum, o) => sum + Number(o.order_qty ?? 0), 0);
+      const demandQty = totalCbm * MATERIAL_USAGE_PER_CBM[material];
+      const suggestedQty = Math.max(0, demandQty - currentQty - orderedQty);
+      return {
+        material,
+        totalCbm,
+        demandQty,
+        currentQty,
+        orderedQty,
+        suggestedQty,
+        unit: inventory?.unit ?? "TON",
+      };
+    });
+  }, [forecastCementOrders, forecastMaterialOrders, materialInventory]);
+
+  const updateInventory = useMutation({
+    mutationFn: async ({ material, currentQty }: { material: CementMaterialName; currentQty: number }) => {
+      const { error } = await (supabase as any)
+        .from("cement_material_inventory")
+        .upsert({ material, current_qty: currentQty, unit: "TON" }, { onConflict: "material" });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["cement-material-inventory"] }),
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const createCement = useMutation({
     mutationFn: async (form: FormData) => {
@@ -309,12 +393,10 @@ export function CementPage() {
         </div>
       </div>
 
-      <div className="mb-4 grid gap-3 md:grid-cols-4">
-        <Metric title="未完成水泥单" value={String(totals.openConcrete)} icon={Truck} tone="blue" />
-        <Metric title="未完成材料单" value={String(totals.openMaterials)} icon={Package} tone="violet" />
-        <Metric title="需求数量" value={qty(totals.concreteQty, "CBM")} icon={CalendarDays} tone="amber" />
-        <Metric title="应收金额" value={money(totals.receivable)} icon={DollarSign} tone="emerald" />
-      </div>
+      <MaterialForecastPanel
+        forecasts={materialForecast}
+        onInventoryChange={(material, currentQty) => updateInventory.mutate({ material, currentQty })}
+      />
 
       <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border bg-card p-4">
         <div>
@@ -357,7 +439,7 @@ export function CementPage() {
               <CardTitle className="text-base">水泥订单列表</CardTitle>
             </CardHeader>
             <CardContent>
-              <CementOrderCards
+              <CementOrderCardsV2
                 orders={filteredCement}
                 loading={cementLoading}
                 onUpdate={(id, patch) => updateCement.mutate({ id, patch })}
@@ -372,7 +454,7 @@ export function CementPage() {
               <CardTitle className="text-base">水泥材料列表</CardTitle>
             </CardHeader>
             <CardContent>
-              <MaterialOrderCards
+              <MaterialOrderCardsV2
                 orders={filteredMaterials}
                 loading={materialLoading}
                 onUpdate={(id, patch) => updateMaterial.mutate({ id, patch })}
@@ -399,6 +481,93 @@ function Metric({ title, value, icon: Icon, tone }: { title: string; value: stri
         <div className={cn("rounded-md border p-2", tones[tone])}><Icon className="h-4 w-4" /></div>
       </div>
       <div className="mt-2 text-2xl font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function materialQty(value: number, unit = "TON") {
+  return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${unit}`;
+}
+
+function MaterialForecastPanel({ forecasts, onInventoryChange }: {
+  forecasts: Array<{
+    material: CementMaterialName;
+    totalCbm: number;
+    demandQty: number;
+    currentQty: number;
+    orderedQty: number;
+    suggestedQty: number;
+    unit: string;
+  }>;
+  onInventoryChange: (material: CementMaterialName, currentQty: number) => void;
+}) {
+  const totalCbm = forecasts[0]?.totalCbm ?? 0;
+
+  return (
+    <div className="mb-4 rounded-lg border bg-card p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-base font-semibold">材料预测</div>
+          <div className="text-sm text-muted-foreground">
+            按未来未完成水泥订单 {qty(totalCbm, "CBM")} 估算；库存初始为 0，可手动调整。
+          </div>
+        </div>
+        <Badge variant="outline">Cement 0.35 · Sand 0.73 · HL6 1.10 TON / CBM</Badge>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        {forecasts.map((item) => {
+          const needsOrder = item.suggestedQty > 0;
+          return (
+            <div key={item.material} className={cn(
+              "rounded-lg border p-4",
+              needsOrder ? "border-amber-200 bg-amber-50/60" : "border-emerald-200 bg-emerald-50/50",
+            )}>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold">{item.material}</div>
+                  <div className="text-xs text-muted-foreground">
+                    每 CBM 用 {materialQty(MATERIAL_USAGE_PER_CBM[item.material])}
+                  </div>
+                </div>
+                <Badge className={needsOrder ? "bg-amber-600" : "bg-emerald-600"}>
+                  {needsOrder ? "建议订" : "暂时够"}
+                </Badge>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <ForecastLine label="未来需求" value={materialQty(item.demandQty, item.unit)} />
+                <ForecastLine label="已订未到" value={materialQty(item.orderedQty, item.unit)} />
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">当前库存</span>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      className="h-8 w-24 text-right"
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      defaultValue={item.currentQty}
+                      onBlur={(e) => onInventoryChange(item.material, Number(e.target.value || 0))}
+                    />
+                    <span className="text-xs text-muted-foreground">{item.unit}</span>
+                  </div>
+                </div>
+                <div className="border-t pt-2">
+                  <ForecastLine label="建议订货" value={materialQty(item.suggestedQty, item.unit)} strong />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ForecastLine({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn("text-right", strong && "font-semibold text-foreground")}>{value}</span>
     </div>
   );
 }
@@ -561,6 +730,156 @@ function InfoPill({ label, value, strong = false }: { label: string; value: stri
     <div className="rounded-md border bg-muted/30 px-2.5 py-2">
       <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className={cn("mt-0.5 truncate text-sm", strong && "font-semibold text-foreground")}>{value}</div>
+    </div>
+  );
+}
+
+function CompactFact({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "blue" | "amber" }) {
+  const toneClass = {
+    neutral: "border-slate-200 bg-slate-50 text-slate-800",
+    blue: "border-blue-200 bg-blue-50 text-blue-800",
+    amber: "border-amber-200 bg-amber-50 text-amber-900",
+  }[tone];
+  return (
+    <div className={cn("rounded-md border px-2.5 py-2", toneClass)}>
+      <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function CementOrderCardsV2({ orders, loading, onUpdate }: {
+  orders: CementOrder[];
+  loading: boolean;
+  onUpdate: (id: string, patch: Partial<CementOrder>) => void;
+}) {
+  if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
+  if (orders.length === 0) return <div className="py-10 text-center text-sm text-muted-foreground">没有符合条件的水泥订单</div>;
+
+  return (
+    <div className="space-y-3">
+      {orders.map((o) => {
+        const details = [
+          o.tel ? `TEL ${o.tel}` : null,
+          o.order_number ? `单号 ${o.order_number}` : null,
+          o.order_date ? `下单 ${o.order_date}` : null,
+        ].filter(Boolean);
+
+        return (
+          <div key={o.id} className="rounded-lg border bg-background shadow-sm">
+            <div className="grid gap-0 lg:grid-cols-[170px_minmax(0,1fr)_260px]">
+              <div className="border-b bg-slate-50 p-4 lg:border-b-0 lg:border-r">
+                <div className="text-xs font-medium text-muted-foreground">需求时间</div>
+                <div className="mt-1 text-lg font-semibold">{o.demand_date}</div>
+                {o.demand_time && <div className="mt-1 text-sm font-medium text-blue-700">{o.demand_time}</div>}
+                {o.schedule_sequence != null && <Badge variant="outline" className="mt-3">排班 #{o.schedule_sequence}</Badge>}
+              </div>
+
+              <div className="min-w-0 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-semibold">{o.company || "未填公司"}</div>
+                    {details.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        {details.map((text) => <span key={text}>{text}</span>)}
+                      </div>
+                    )}
+                  </div>
+                  <StatusBadge meta={cementStatusMeta[o.status]} />
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  <CompactFact label="数量" value={qty(o.order_qty_cbm, "CBM")} tone="blue" />
+                  <CompactFact label="MPA" value={o.mpa || "-"} />
+                  <CompactFact label="AIR" value={o.air === "Y" ? "Air" : "No Air"} />
+                  <CompactFact label="泵车" value={o.pump_truck ? "需要" : "不需要"} tone={o.pump_truck ? "amber" : "neutral"} />
+                </div>
+
+                <div className="mt-3 rounded-md border bg-muted/20 px-3 py-2">
+                  <div className="text-sm font-medium leading-snug">{o.delivery_address || "未填地址"}</div>
+                  {o.note && <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{o.note}</div>}
+                </div>
+              </div>
+
+              <div className="border-t p-4 lg:border-l lg:border-t-0">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">调度</div>
+                <div className="grid grid-cols-3 gap-2 lg:grid-cols-1">
+                  <Input className="h-8" defaultValue={o.driver_name ?? ""} placeholder="司机" onBlur={(e) => onUpdate(o.id, { driver_name: toText(e.target.value) })} />
+                  <Input className="h-8" defaultValue={o.vehicle_name ?? ""} placeholder="车辆" onBlur={(e) => onUpdate(o.id, { vehicle_name: toText(e.target.value) })} />
+                  <Input className="h-8" defaultValue={o.schedule_sequence ?? ""} placeholder="序号" type="number" onBlur={(e) => onUpdate(o.id, { schedule_sequence: toNumber(e.target.value) as number | null })} />
+                </div>
+                <Select value={o.status} onValueChange={(value) => onUpdate(o.id, { status: value as CementStatus })}>
+                  <SelectTrigger className="mt-2 h-8"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(cementStatusMeta).map(([value, meta]) => (
+                      <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <details className="border-t px-4 py-3">
+              <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">完成后详情</summary>
+              <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                <Input className="h-8" defaultValue={o.arrival_time ?? ""} placeholder="到达时间" onBlur={(e) => onUpdate(o.id, { arrival_time: toText(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.finish_time ?? ""} placeholder="结束时间" onBlur={(e) => onUpdate(o.id, { finish_time: toText(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.delivered_qty_cbm ?? ""} placeholder="送货CBM" type="number" step="0.1" onBlur={(e) => onUpdate(o.id, { delivered_qty_cbm: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.actual_usage_cbm ?? ""} placeholder="实际CBM" type="number" step="0.1" onBlur={(e) => onUpdate(o.id, { actual_usage_cbm: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.receivable_amount ?? ""} placeholder="应收金额" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { receivable_amount: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.driver_collected ?? ""} placeholder="司机收款" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { driver_collected: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.paid_amount ?? ""} placeholder="已付" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { paid_amount: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.invoice_number ?? ""} placeholder="Invoice" onBlur={(e) => onUpdate(o.id, { invoice_number: toText(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.print_status ?? ""} placeholder="打单" onBlur={(e) => onUpdate(o.id, { print_status: toText(e.target.value) })} />
+              </div>
+            </details>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MaterialOrderCardsV2({ orders, loading }: {
+  orders: CementMaterialOrder[];
+  loading: boolean;
+  onUpdate: (id: string, patch: Partial<CementMaterialOrder>) => void;
+}) {
+  if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
+  if (orders.length === 0) return <div className="py-10 text-center text-sm text-muted-foreground">没有符合条件的材料订单</div>;
+
+  return (
+    <div className="grid gap-3 xl:grid-cols-2">
+      {orders.map((o) => {
+        const supplier = [o.company, o.contact, o.tel].filter(Boolean).join(" · ");
+        return (
+          <div key={o.id} className="rounded-lg border bg-background p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">需求时间</div>
+                <div className="mt-1 font-semibold">{o.demand_date}{o.demand_time ? ` · ${o.demand_time}` : ""}</div>
+              </div>
+              {o.order_number && <Badge variant="outline">{o.order_number}</Badge>}
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_160px]">
+              <div className="min-w-0">
+                <div className="text-lg font-semibold">{o.material || "未填材料"}</div>
+                {supplier && <div className="mt-1 text-sm text-muted-foreground">{supplier}</div>}
+              </div>
+              <div className="rounded-md border bg-violet-50 px-3 py-2 text-violet-900">
+                <div className="text-xs font-medium text-violet-700">订货数量</div>
+                <div className="mt-0.5 font-semibold">{qty(o.order_qty, o.order_unit || "")}</div>
+              </div>
+            </div>
+
+            <div className="mt-3 rounded-md border bg-muted/20 px-3 py-2">
+              <div className="text-sm font-medium">{o.delivery_address || "未填地址"}</div>
+              {o.note && <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{o.note}</div>}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

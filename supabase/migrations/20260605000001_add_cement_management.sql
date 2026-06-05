@@ -94,6 +94,25 @@ CREATE INDEX IF NOT EXISTS idx_cement_material_orders_demand_date
 CREATE INDEX IF NOT EXISTS idx_cement_material_orders_company
   ON public.cement_material_orders(company);
 
+CREATE TABLE IF NOT EXISTS public.cement_material_inventory (
+  material TEXT PRIMARY KEY,
+  current_qty NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  unit TEXT NOT NULL DEFAULT 'TON',
+  note TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT cement_material_inventory_material_check CHECK (
+    material IN ('Cement', 'Concrete Sand', 'HL6')
+  ),
+  CONSTRAINT cement_material_inventory_qty_check CHECK (current_qty >= 0)
+);
+
+INSERT INTO public.cement_material_inventory (material, current_qty, unit)
+VALUES
+  ('Cement', 0, 'TON'),
+  ('Concrete Sand', 0, 'TON'),
+  ('HL6', 0, 'TON')
+ON CONFLICT (material) DO NOTHING;
+
 CREATE OR REPLACE FUNCTION public.set_cement_updated_at()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -116,6 +135,7 @@ FOR EACH ROW EXECUTE FUNCTION public.set_cement_updated_at();
 
 ALTER TABLE public.cement_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cement_material_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cement_material_inventory ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "staff manage cement orders" ON public.cement_orders;
 CREATE POLICY "staff manage cement orders"
@@ -145,5 +165,20 @@ WITH CHECK (
   OR public.has_role((select auth.uid()), 'dispatcher')
 );
 
+DROP POLICY IF EXISTS "staff manage cement material inventory" ON public.cement_material_inventory;
+CREATE POLICY "staff manage cement material inventory"
+ON public.cement_material_inventory
+FOR ALL
+TO authenticated
+USING (
+  public.has_role((select auth.uid()), 'admin')
+  OR public.has_role((select auth.uid()), 'dispatcher')
+)
+WITH CHECK (
+  public.has_role((select auth.uid()), 'admin')
+  OR public.has_role((select auth.uid()), 'dispatcher')
+);
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.cement_orders TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.cement_material_orders TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cement_material_inventory TO authenticated;
