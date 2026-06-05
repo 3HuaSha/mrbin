@@ -71,6 +71,32 @@ type CementMaterialOrder = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+const CEMENT_MATERIAL_DEFAULTS = {
+  "Concrete Sand": {
+    company: "Brock",
+    contact: "JOE",
+    tel: "(416) 891-7263",
+    orderUnit: "LOAD",
+  },
+  HL6: {
+    company: "Brock",
+    contact: "JOE",
+    tel: "(416) 891-7263",
+    orderUnit: "LOAD",
+  },
+  Cement: {
+    company: "STUBBES (St Mary)",
+    contact: "MATT",
+    tel: "(519) 536-3018",
+    orderUnit: "TON",
+  },
+} as const;
+
+type CementMaterialName = keyof typeof CEMENT_MATERIAL_DEFAULTS;
+
+const CEMENT_MATERIAL_DELIVER_UNIT = "TON";
+const CEMENT_MATERIAL_DELIVERY_ADDRESS = "3445 KENNEDY RD";
+
 const cementStatusMeta: Record<CementStatus, { label: string; className: string }> = {
   pending: { label: "待安排", className: "bg-slate-100 text-slate-700 border-slate-200" },
   scheduled: { label: "已排班", className: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -218,6 +244,7 @@ export function CementPage() {
         material: String(form.get("material") || "").trim(),
         order_qty: toNumber(form.get("order_qty")),
         order_unit: toText(form.get("order_unit")) ?? "EA",
+        deliver_unit: CEMENT_MATERIAL_DELIVER_UNIT,
         demand_date: String(form.get("demand_date") || todayISO()),
         demand_time: toText(form.get("demand_time")),
         note: toText(form.get("note")),
@@ -424,6 +451,24 @@ function CementOrderForm({ onSubmit, pending }: { onSubmit: (form: FormData) => 
 }
 
 function MaterialOrderForm({ onSubmit, pending }: { onSubmit: (form: FormData) => void; pending: boolean }) {
+  const [material, setMaterial] = useState<CementMaterialName>("Concrete Sand");
+  const [company, setCompany] = useState(CEMENT_MATERIAL_DEFAULTS["Concrete Sand"].company);
+  const [contact, setContact] = useState(CEMENT_MATERIAL_DEFAULTS["Concrete Sand"].contact);
+  const [tel, setTel] = useState(CEMENT_MATERIAL_DEFAULTS["Concrete Sand"].tel);
+  const [orderUnit, setOrderUnit] = useState(CEMENT_MATERIAL_DEFAULTS["Concrete Sand"].orderUnit);
+  const [deliveryAddress, setDeliveryAddress] = useState(CEMENT_MATERIAL_DELIVERY_ADDRESS);
+
+  const handleMaterialChange = (value: string) => {
+    const next = value as CementMaterialName;
+    const defaults = CEMENT_MATERIAL_DEFAULTS[next];
+    setMaterial(next);
+    setCompany(defaults.company);
+    setContact(defaults.contact);
+    setTel(defaults.tel);
+    setOrderUnit(defaults.orderUnit);
+    setDeliveryAddress(CEMENT_MATERIAL_DELIVERY_ADDRESS);
+  };
+
   return (
     <form action={onSubmit} className="space-y-4">
       <div className="grid gap-3 md:grid-cols-4">
@@ -433,16 +478,26 @@ function MaterialOrderForm({ onSubmit, pending }: { onSubmit: (form: FormData) =
         <Field label="需求时间"><Input name="demand_time" placeholder="AM / 12点左右" /></Field>
       </div>
       <div className="grid gap-3 md:grid-cols-4">
-        <Field label="公司"><Input name="company" required /></Field>
-        <Field label="CONTACT"><Input name="contact" /></Field>
-        <Field label="TEL"><Input name="tel" /></Field>
-        <Field label="MATERIAL"><Input name="material" required placeholder="Cement / Color / Additive" /></Field>
+        <Field label="MATERIAL">
+          <Select name="material" value={material} onValueChange={handleMaterialChange}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Concrete Sand">Concrete Sand</SelectItem>
+              <SelectItem value="HL6">HL6</SelectItem>
+              <SelectItem value="Cement">Cement</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="公司"><Input name="company" value={company} onChange={(e) => setCompany(e.target.value)} required /></Field>
+        <Field label="CONTACT"><Input name="contact" value={contact} onChange={(e) => setContact(e.target.value)} /></Field>
+        <Field label="TEL"><Input name="tel" value={tel} onChange={(e) => setTel(e.target.value)} /></Field>
       </div>
       <div className="grid gap-3 md:grid-cols-4">
         <Field label="需求数量"><Input name="order_qty" type="number" min="0" step="0.1" /></Field>
-        <Field label="ORDER UNIT"><Input name="order_unit" defaultValue="EA" /></Field>
+        <Field label="ORDER UNIT"><Input name="order_unit" value={orderUnit} onChange={(e) => setOrderUnit(e.target.value)} /></Field>
+        <Field label="DELIVER UNIT"><Input value={CEMENT_MATERIAL_DELIVER_UNIT} disabled /></Field>
       </div>
-      <Field label="送货地址"><Input name="delivery_address" required /></Field>
+      <Field label="送货地址"><Input name="delivery_address" value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} required /></Field>
       <Field label="Note"><Textarea name="note" rows={3} /></Field>
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>{pending ? "保存中..." : "保存材料订单"}</Button>
