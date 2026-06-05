@@ -134,20 +134,18 @@ function toText(value: FormDataEntryValue | null) {
 export function CementPage() {
   const qc = useQueryClient();
   const [from, setFrom] = useState(todayISO());
-  const [to, setTo] = useState(todayISO());
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [cementOpen, setCementOpen] = useState(false);
   const [materialOpen, setMaterialOpen] = useState(false);
 
   const { data: cementOrders = [], isLoading: cementLoading } = useQuery({
-    queryKey: ["cement-orders", from, to, statusFilter],
+    queryKey: ["cement-orders", from, statusFilter],
     queryFn: async () => {
       let q = (supabase as any)
         .from("cement_orders")
         .select("*")
         .gte("demand_date", from)
-        .lte("demand_date", to)
         .order("demand_date", { ascending: true })
         .order("schedule_sequence", { ascending: true, nullsFirst: false })
         .order("created_at", { ascending: false });
@@ -160,13 +158,12 @@ export function CementPage() {
   });
 
   const { data: materialOrders = [], isLoading: materialLoading } = useQuery({
-    queryKey: ["cement-material-orders", from, to, statusFilter],
+    queryKey: ["cement-material-orders", from, statusFilter],
     queryFn: async () => {
       let q = (supabase as any)
         .from("cement_material_orders")
         .select("*")
         .gte("demand_date", from)
-        .lte("demand_date", to)
         .order("demand_date", { ascending: true })
         .order("created_at", { ascending: false });
       if (statusFilter !== "all" && statusFilter !== "active") q = q.eq("status", statusFilter);
@@ -321,12 +318,8 @@ export function CementPage() {
 
       <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border bg-card p-4">
         <div>
-          <Label>开始日期</Label>
+          <Label>从日期</Label>
           <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" />
-        </div>
-        <div>
-          <Label>结束日期</Label>
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40" />
         </div>
         <div>
           <Label>状态</Label>
@@ -364,7 +357,7 @@ export function CementPage() {
               <CardTitle className="text-base">水泥订单列表</CardTitle>
             </CardHeader>
             <CardContent>
-              <CementTable
+              <CementOrderCards
                 orders={filteredCement}
                 loading={cementLoading}
                 onUpdate={(id, patch) => updateCement.mutate({ id, patch })}
@@ -379,7 +372,7 @@ export function CementPage() {
               <CardTitle className="text-base">水泥材料列表</CardTitle>
             </CardHeader>
             <CardContent>
-              <MaterialTable
+              <MaterialOrderCards
                 orders={filteredMaterials}
                 loading={materialLoading}
                 onUpdate={(id, patch) => updateMaterial.mutate({ id, patch })}
@@ -416,33 +409,66 @@ function StatusBadge({ meta }: { meta: { label: string; className: string } }) {
 
 function CementOrderForm({ onSubmit, pending }: { onSubmit: (form: FormData) => void; pending: boolean }) {
   return (
-    <form action={onSubmit} className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-4">
-        <Field label="需求日期"><Input name="demand_date" type="date" defaultValue={todayISO()} required /></Field>
-        <Field label="时间"><Input name="demand_time" placeholder="9-11AM / NOON" /></Field>
-        <Field label="下单日期"><Input name="order_date" type="date" defaultValue={todayISO()} /></Field>
-        <Field label="单号"><Input name="order_number" placeholder="可空" /></Field>
-      </div>
-      <div className="grid gap-3 md:grid-cols-4">
-        <Field label="公司"><Input name="company" required /></Field>
-        <Field label="TEL"><Input name="tel" /></Field>
-        <Field label="MPA"><Input name="mpa" placeholder="25 / 32" /></Field>
-        <Field label="AIR"><Input name="air" placeholder="Y / N" /></Field>
-      </div>
-      <div className="grid gap-3 md:grid-cols-4">
-        <Field label="泵车">
-          <Select name="pump_truck" defaultValue="no">
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="no">不需要</SelectItem>
-              <SelectItem value="yes">需要</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field label="需求数量 (CBM)"><Input name="order_qty_cbm" type="number" min="0" step="0.1" /></Field>
-      </div>
-      <Field label="送货地址"><Input name="delivery_address" required /></Field>
-      <Field label="Note"><Textarea name="note" rows={3} /></Field>
+    <form action={onSubmit} className="space-y-5">
+      <FormSection title="订单时间">
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label="需求日期"><Input name="demand_date" type="date" defaultValue={todayISO()} required /></Field>
+          <Field label="需求时间"><Input name="demand_time" placeholder="9-11AM / NOON" /></Field>
+          <Field label="下单日期"><Input name="order_date" type="date" defaultValue={todayISO()} /></Field>
+          <Field label="单号"><Input name="order_number" placeholder="可空" /></Field>
+        </div>
+      </FormSection>
+
+      <FormSection title="客户信息">
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label="公司"><Input name="company" required /></Field>
+          <Field label="TEL"><Input name="tel" /></Field>
+        </div>
+      </FormSection>
+
+      <FormSection title="水泥规格">
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label="MPA">
+            <Select name="mpa" defaultValue="32">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10 MPA</SelectItem>
+                <SelectItem value="15">15 MPA</SelectItem>
+                <SelectItem value="20">20 MPA</SelectItem>
+                <SelectItem value="25">25 MPA</SelectItem>
+                <SelectItem value="30">30 MPA</SelectItem>
+                <SelectItem value="32">32 MPA</SelectItem>
+                <SelectItem value="35">35 MPA</SelectItem>
+                <SelectItem value="40">40 MPA</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="AIR">
+            <Select name="air" defaultValue="N">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="N">No Air</SelectItem>
+                <SelectItem value="Y">Air</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="泵车">
+            <Select name="pump_truck" defaultValue="no">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="no">不需要</SelectItem>
+                <SelectItem value="yes">需要</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="需求数量 (CBM)"><Input name="order_qty_cbm" type="number" min="0" step="0.1" /></Field>
+        </div>
+      </FormSection>
+
+      <FormSection title="地址备注">
+        <Field label="送货地址"><Input name="delivery_address" required /></Field>
+        <Field label="Note"><Textarea name="note" rows={3} /></Field>
+      </FormSection>
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>{pending ? "保存中..." : "保存水泥订单"}</Button>
       </div>
@@ -470,13 +496,16 @@ function MaterialOrderForm({ onSubmit, pending }: { onSubmit: (form: FormData) =
   };
 
   return (
-    <form action={onSubmit} className="space-y-4">
+    <form action={onSubmit} className="space-y-5">
+      <FormSection title="订单时间">
       <div className="grid gap-3 md:grid-cols-4">
         <Field label="下单日期"><Input name="order_date" type="date" defaultValue={todayISO()} /></Field>
         <Field label="单号"><Input name="order_number" placeholder="可空" /></Field>
         <Field label="需求日期"><Input name="demand_date" type="date" defaultValue={todayISO()} required /></Field>
         <Field label="需求时间"><Input name="demand_time" placeholder="AM / 12点左右" /></Field>
       </div>
+      </FormSection>
+      <FormSection title="材料供应商">
       <div className="grid gap-3 md:grid-cols-4">
         <Field label="MATERIAL">
           <Select name="material" value={material} onValueChange={handleMaterialChange}>
@@ -492,6 +521,8 @@ function MaterialOrderForm({ onSubmit, pending }: { onSubmit: (form: FormData) =
         <Field label="CONTACT"><Input name="contact" value={contact} onChange={(e) => setContact(e.target.value)} /></Field>
         <Field label="TEL"><Input name="tel" value={tel} onChange={(e) => setTel(e.target.value)} /></Field>
       </div>
+      </FormSection>
+      <FormSection title="数量和地址">
       <div className="grid gap-3 md:grid-cols-4">
         <Field label="需求数量"><Input name="order_qty" type="number" min="0" step="0.1" /></Field>
         <Field label="ORDER UNIT"><Input name="order_unit" value={orderUnit} onChange={(e) => setOrderUnit(e.target.value)} /></Field>
@@ -499,10 +530,20 @@ function MaterialOrderForm({ onSubmit, pending }: { onSubmit: (form: FormData) =
       </div>
       <Field label="送货地址"><Input name="delivery_address" value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} required /></Field>
       <Field label="Note"><Textarea name="note" rows={3} /></Field>
+      </FormSection>
       <div className="flex justify-end">
         <Button type="submit" disabled={pending}>{pending ? "保存中..." : "保存材料订单"}</Button>
       </div>
     </form>
+  );
+}
+
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-lg border bg-muted/20 p-4">
+      <div className="mb-3 text-sm font-semibold text-foreground">{title}</div>
+      <div className="space-y-3">{children}</div>
+    </section>
   );
 }
 
@@ -511,6 +552,92 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1.5">
       <Label>{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function InfoPill({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="rounded-md border bg-muted/30 px-2.5 py-2">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={cn("mt-0.5 truncate text-sm", strong && "font-semibold text-foreground")}>{value}</div>
+    </div>
+  );
+}
+
+function CementOrderCards({ orders, loading, onUpdate }: {
+  orders: CementOrder[];
+  loading: boolean;
+  onUpdate: (id: string, patch: Partial<CementOrder>) => void;
+}) {
+  if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
+  if (orders.length === 0) return <div className="py-10 text-center text-sm text-muted-foreground">没有符合条件的水泥订单</div>;
+
+  return (
+    <div className="space-y-3">
+      {orders.map((o) => (
+        <div key={o.id} className="rounded-lg border bg-background p-4 shadow-sm transition-colors hover:bg-muted/20">
+          <div className="grid gap-4 xl:grid-cols-[180px_minmax(260px,1fr)_220px_260px_140px]">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="rounded-md bg-blue-50 px-2.5 py-1 text-sm font-semibold text-blue-700">
+                  {o.demand_date}
+                </div>
+                {o.schedule_sequence != null && <Badge variant="outline">#{o.schedule_sequence}</Badge>}
+              </div>
+              <div className="text-sm font-medium">{o.demand_time || "时间未定"}</div>
+              <div className="text-xs text-muted-foreground">{o.order_number || "无单号"}</div>
+            </div>
+
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="truncate text-base font-semibold">{o.company}</div>
+                <StatusBadge meta={cementStatusMeta[o.status]} />
+              </div>
+              <div className="text-sm text-muted-foreground">{o.tel || "无电话"}</div>
+              <div className="truncate text-sm font-medium">{o.delivery_address}</div>
+              {o.note && <div className="line-clamp-2 text-xs text-muted-foreground">{o.note}</div>}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <InfoPill label="数量" value={qty(o.order_qty_cbm, "CBM")} strong />
+              <InfoPill label="MPA" value={o.mpa || "-"} />
+              <InfoPill label="AIR" value={o.air === "Y" ? "Air" : "No Air"} />
+              <InfoPill label="泵车" value={o.pump_truck ? "需要" : "不需要"} />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <Input className="h-8" defaultValue={o.driver_name ?? ""} placeholder="司机" onBlur={(e) => onUpdate(o.id, { driver_name: toText(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.vehicle_name ?? ""} placeholder="车辆" onBlur={(e) => onUpdate(o.id, { vehicle_name: toText(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.schedule_sequence ?? ""} placeholder="序号" type="number" onBlur={(e) => onUpdate(o.id, { schedule_sequence: toNumber(e.target.value) as number | null })} />
+            </div>
+
+            <Select value={o.status} onValueChange={(value) => onUpdate(o.id, { status: value as CementStatus })}>
+              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(cementStatusMeta).map(([value, meta]) => (
+                  <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <details className="mt-3 border-t pt-3">
+            <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">完成后详情</summary>
+            <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+              <Input className="h-8" defaultValue={o.arrival_time ?? ""} placeholder="到达时间" onBlur={(e) => onUpdate(o.id, { arrival_time: toText(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.finish_time ?? ""} placeholder="结束时间" onBlur={(e) => onUpdate(o.id, { finish_time: toText(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.delivered_qty_cbm ?? ""} placeholder="送货CBM" type="number" step="0.1" onBlur={(e) => onUpdate(o.id, { delivered_qty_cbm: toNumber(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.actual_usage_cbm ?? ""} placeholder="实际CBM" type="number" step="0.1" onBlur={(e) => onUpdate(o.id, { actual_usage_cbm: toNumber(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.receivable_amount ?? ""} placeholder="应收金额" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { receivable_amount: toNumber(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.driver_collected ?? ""} placeholder="司机收款" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { driver_collected: toNumber(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.paid_amount ?? ""} placeholder="已付" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { paid_amount: toNumber(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.invoice_number ?? ""} placeholder="Invoice" onBlur={(e) => onUpdate(o.id, { invoice_number: toText(e.target.value) })} />
+              <Input className="h-8" defaultValue={o.print_status ?? ""} placeholder="打单" onBlur={(e) => onUpdate(o.id, { print_status: toText(e.target.value) })} />
+            </div>
+          </details>
+        </div>
+      ))}
     </div>
   );
 }
@@ -603,6 +730,49 @@ function CementTable({ orders, loading, onUpdate }: {
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+function MaterialOrderCards({ orders, loading }: {
+  orders: CementMaterialOrder[];
+  loading: boolean;
+  onUpdate: (id: string, patch: Partial<CementMaterialOrder>) => void;
+}) {
+  if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
+  if (orders.length === 0) return <div className="py-10 text-center text-sm text-muted-foreground">没有符合条件的材料订单</div>;
+
+  return (
+    <div className="space-y-3">
+      {orders.map((o) => (
+        <div key={o.id} className="rounded-lg border bg-background p-4 shadow-sm transition-colors hover:bg-muted/20">
+          <div className="grid gap-4 lg:grid-cols-[180px_minmax(240px,1fr)_220px_minmax(260px,1.2fr)]">
+            <div className="space-y-2">
+              <div className="rounded-md bg-violet-50 px-2.5 py-1 text-sm font-semibold text-violet-700">
+                {o.demand_date}
+              </div>
+              <div className="text-sm font-medium">{o.demand_time || "时间未定"}</div>
+              <div className="text-xs text-muted-foreground">{o.order_number || "无单号"}</div>
+            </div>
+
+            <div className="min-w-0 space-y-1">
+              <div className="truncate text-base font-semibold">{o.company}</div>
+              <div className="text-sm text-muted-foreground">{o.contact || "无联系人"}</div>
+              <div className="text-sm text-muted-foreground">{o.tel || "无电话"}</div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <InfoPill label="材料" value={o.material || "-"} strong />
+              <InfoPill label="数量" value={qty(o.order_qty, o.order_unit || "")} />
+            </div>
+
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{o.delivery_address}</div>
+              {o.note && <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{o.note}</div>}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
