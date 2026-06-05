@@ -75,6 +75,12 @@ type CementMaterialInventory = {
   unit: string;
 };
 
+type CementVehicle = {
+  id: string;
+  name: string;
+  plate: string | null;
+};
+
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 const CEMENT_MATERIAL_DEFAULTS = {
@@ -149,22 +155,20 @@ export function CementPage() {
   const qc = useQueryClient();
   const [from, setFrom] = useState(todayISO());
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
   const [cementOpen, setCementOpen] = useState(false);
   const [materialOpen, setMaterialOpen] = useState(false);
 
   const { data: cementOrders = [], isLoading: cementLoading } = useQuery({
-    queryKey: ["cement-orders", from, statusFilter],
+    queryKey: ["cement-orders", from],
     queryFn: async () => {
       let q = (supabase as any)
         .from("cement_orders")
         .select("*")
         .gte("demand_date", from)
+        .not("status", "in", '("completed","cancelled")')
         .order("demand_date", { ascending: true })
         .order("schedule_sequence", { ascending: true, nullsFirst: false })
         .order("created_at", { ascending: false });
-      if (statusFilter !== "all" && statusFilter !== "active") q = q.eq("status", statusFilter);
-      if (statusFilter === "active") q = q.not("status", "in", '("completed","cancelled")');
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as CementOrder[];
@@ -172,16 +176,15 @@ export function CementPage() {
   });
 
   const { data: materialOrders = [], isLoading: materialLoading } = useQuery({
-    queryKey: ["cement-material-orders", from, statusFilter],
+    queryKey: ["cement-material-orders", from],
     queryFn: async () => {
       let q = (supabase as any)
         .from("cement_material_orders")
         .select("*")
         .gte("demand_date", from)
+        .not("status", "in", '("delivered","completed","cancelled")')
         .order("demand_date", { ascending: true })
         .order("created_at", { ascending: false });
-      if (statusFilter !== "all" && statusFilter !== "active") q = q.eq("status", statusFilter);
-      if (statusFilter === "active") q = q.not("status", "in", '("delivered","completed","cancelled")');
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as CementMaterialOrder[];
@@ -222,6 +225,22 @@ export function CementPage() {
         .select("material, current_qty, unit");
       if (error) throw error;
       return (data ?? []) as CementMaterialInventory[];
+    },
+  });
+
+  const { data: cementVehicles = [] } = useQuery({
+    queryKey: ["cement-proall-vehicles"],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("vehicles")
+        .select("id, name, plate")
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return ((data ?? []) as CementVehicle[]).filter((vehicle) => {
+        const name = (vehicle.name ?? "").toUpperCase();
+        const plate = (vehicle.plate ?? "").toUpperCase();
+        return name.startsWith("PROALL") || plate.startsWith("PROALL");
+      });
     },
   });
 
@@ -310,6 +329,7 @@ export function CementPage() {
       toast.success("水泥订单已新增");
       setCementOpen(false);
       qc.invalidateQueries({ queryKey: ["cement-orders"] });
+      qc.invalidateQueries({ queryKey: ["cement-forecast-orders"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -352,18 +372,60 @@ export function CementPage() {
       const { error } = await (supabase as any).from("cement_orders").update(patch).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["cement-orders"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cement-orders"] });
+      qc.invalidateQueries({ queryKey: ["cement-forecast-orders"] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const updateMaterial = useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<CementMaterialOrder> }) => {
+      let inventoryDelta: { material: CementMaterialName; delta: number } | null = null;
+
+      if ("status" in patch || "is_completed" in patch) {
+        const { data: existing, error: fetchError } = await (supabase as any)
+          .from("cement_material_orders")
+          .select("material, order_qty, delivered_qty, status, is_completed")
+          .eq("id", id)
+          .single();
+        if (fetchError) throw fetchError;
+
+        const material = existing?.material as CementMaterialName;
+        const isTrackedMaterial = MATERIAL_ORDER.includes(material);
+        const wasDelivered = existing?.status === "delivered" || existing?.is_completed === true;
+        const willBeDelivered = patch.status === "delivered" || patch.is_completed === true;
+        const willBeUndelivered = patch.status === "pending" || patch.is_completed === false;
+        const deliveredQty = Number(existing?.delivered_qty ?? existing?.order_qty ?? 0);
+
+        if (isTrackedMaterial && deliveredQty > 0) {
+          if (!wasDelivered && willBeDelivered) inventoryDelta = { material, delta: deliveredQty };
+          if (wasDelivered && willBeUndelivered) inventoryDelta = { material, delta: -deliveredQty };
+        }
+      }
+
       const { error } = await (supabase as any).from("cement_material_orders").update(patch).eq("id", id);
       if (error) throw error;
+
+      if (inventoryDelta) {
+        const { data: current, error: inventoryFetchError } = await (supabase as any)
+          .from("cement_material_inventory")
+          .select("material, current_qty, unit")
+          .eq("material", inventoryDelta.material)
+          .maybeSingle();
+        if (inventoryFetchError) throw inventoryFetchError;
+
+        const nextQty = Math.max(0, Number(current?.current_qty ?? 0) + inventoryDelta.delta);
+        const { error: inventoryError } = await (supabase as any)
+          .from("cement_material_inventory")
+          .upsert({ material: inventoryDelta.material, current_qty: nextQty, unit: "TON" }, { onConflict: "material" });
+        if (inventoryError) throw inventoryError;
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cement-material-orders"] });
       qc.invalidateQueries({ queryKey: ["cement-material-forecast-orders"] });
+      qc.invalidateQueries({ queryKey: ["cement-material-inventory"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -401,21 +463,6 @@ export function CementPage() {
           <Label>从日期</Label>
           <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" />
         </div>
-        <div>
-          <Label>状态</Label>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="active">未完成</SelectItem>
-              <SelectItem value="all">全部</SelectItem>
-              <SelectItem value="pending">待安排/待订</SelectItem>
-              <SelectItem value="scheduled">已排班</SelectItem>
-              <SelectItem value="delivered">已送达</SelectItem>
-              <SelectItem value="completed">完成</SelectItem>
-              <SelectItem value="cancelled">取消</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
         <div className="min-w-[260px] flex-1">
           <Label>搜索</Label>
           <div className="relative">
@@ -440,6 +487,7 @@ export function CementPage() {
               <CementOrderCardsCompact
                 orders={filteredCement}
                 loading={cementLoading}
+                vehicles={cementVehicles}
                 onUpdate={(id, patch) => updateCement.mutate({ id, patch })}
               />
             </CardContent>
@@ -721,9 +769,10 @@ function CompactFact({ label, value, tone = "neutral" }: { label: string; value:
   );
 }
 
-function CementOrderCardsCompact({ orders, loading, onUpdate }: {
+function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate }: {
   orders: CementOrder[];
   loading: boolean;
+  vehicles: CementVehicle[];
   onUpdate: (id: string, patch: Partial<CementOrder>) => void;
 }) {
   if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
@@ -735,7 +784,7 @@ function CementOrderCardsCompact({ orders, loading, onUpdate }: {
         const secondary = [o.order_number, o.order_date ? `下单 ${o.order_date}` : null].filter(Boolean);
         return (
           <div key={o.id} className="rounded-lg border bg-background px-3 py-2.5 shadow-sm">
-            <div className="grid gap-3 xl:grid-cols-[150px_180px_145px_minmax(260px,1.15fr)_minmax(180px,0.85fr)_230px_132px] xl:items-center">
+            <div className="grid gap-3 xl:grid-cols-[150px_180px_145px_minmax(260px,1.15fr)_minmax(180px,0.85fr)_230px_112px] xl:items-center">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold">{o.demand_date}</span>
@@ -767,18 +816,33 @@ function CementOrderCardsCompact({ orders, loading, onUpdate }: {
 
               <div className="grid grid-cols-3 gap-1.5">
                 <Input className="h-8" defaultValue={o.driver_name ?? ""} placeholder="司机" onBlur={(e) => onUpdate(o.id, { driver_name: toText(e.target.value) })} />
-                <Input className="h-8" defaultValue={o.vehicle_name ?? ""} placeholder="车辆" onBlur={(e) => onUpdate(o.id, { vehicle_name: toText(e.target.value) })} />
+                <Select
+                  value={o.vehicle_name || "__none"}
+                  onValueChange={(value) => onUpdate(o.id, { vehicle_name: value === "__none" ? null : value })}
+                >
+                  <SelectTrigger className="h-8"><SelectValue placeholder="车辆" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">未选车辆</SelectItem>
+                    {vehicles.map((vehicle) => (
+                      <SelectItem key={vehicle.id} value={vehicle.name}>
+                        {vehicle.name}{vehicle.plate && vehicle.plate !== vehicle.name ? ` · ${vehicle.plate}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input className="h-8" defaultValue={o.schedule_sequence ?? ""} placeholder="序号" type="number" onBlur={(e) => onUpdate(o.id, { schedule_sequence: toNumber(e.target.value) as number | null })} />
               </div>
 
-              <Select value={o.status} onValueChange={(value) => onUpdate(o.id, { status: value as CementStatus })}>
-                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {Object.entries(cementStatusMeta).map(([value, meta]) => (
-                    <SelectItem key={value} value={value}>{meta.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8"
+                onClick={() => onUpdate(o.id, { status: "completed" })}
+              >
+                <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                完成
+              </Button>
             </div>
 
             <details className="mt-2 border-t pt-2">
