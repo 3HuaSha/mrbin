@@ -165,7 +165,7 @@ export function CementPage() {
         .from("cement_orders")
         .select("*")
         .gte("demand_date", from)
-        .not("status", "in", '("completed","cancelled")')
+        .neq("status", "cancelled")
         .order("demand_date", { ascending: true })
         .order("schedule_sequence", { ascending: true, nullsFirst: false })
         .order("created_at", { ascending: false });
@@ -182,7 +182,6 @@ export function CementPage() {
         .from("cement_material_orders")
         .select("*")
         .gte("demand_date", from)
-        .not("status", "in", '("delivered","completed","cancelled")')
         .order("demand_date", { ascending: true })
         .order("created_at", { ascending: false });
       const { data, error } = await q;
@@ -214,6 +213,19 @@ export function CementPage() {
         .not("status", "in", '("delivered","completed","cancelled")');
       if (error) throw error;
       return (data ?? []) as Pick<CementMaterialOrder, "id" | "material" | "order_qty" | "status">[];
+    },
+  });
+
+  const { data: deliveredMaterialOrders = [] } = useQuery({
+    queryKey: ["cement-material-delivered-orders", from],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("cement_material_orders")
+        .select("id, material, order_qty, delivered_qty, status, is_completed")
+        .gte("demand_date", from)
+        .or("status.in.(delivered,completed),is_completed.eq.true");
+      if (error) throw error;
+      return (data ?? []) as Pick<CementMaterialOrder, "id" | "material" | "order_qty" | "delivered_qty" | "status" | "is_completed">[];
     },
   });
 
@@ -275,7 +287,11 @@ export function CementPage() {
     const totalCbm = forecastCementOrders.reduce((sum, o) => sum + Number(o.order_qty_cbm ?? 0), 0);
     return MATERIAL_ORDER.map((material) => {
       const inventory = materialInventory.find((row) => row.material === material);
-      const currentQty = Number(inventory?.current_qty ?? 0);
+      const baseQty = Number(inventory?.current_qty ?? 0);
+      const deliveredQty = deliveredMaterialOrders
+        .filter((o) => o.material === material)
+        .reduce((sum, o) => sum + Number(o.delivered_qty ?? o.order_qty ?? 0), 0);
+      const currentQty = baseQty + deliveredQty;
       const orderedQty = forecastMaterialOrders
         .filter((o) => o.material === material)
         .reduce((sum, o) => sum + Number(o.order_qty ?? 0), 0);
@@ -286,12 +302,13 @@ export function CementPage() {
         totalCbm,
         demandQty,
         currentQty,
+        deliveredQty,
         orderedQty,
         suggestedQty,
         unit: inventory?.unit ?? "TON",
       };
     });
-  }, [forecastCementOrders, forecastMaterialOrders, materialInventory]);
+  }, [forecastCementOrders, forecastMaterialOrders, materialInventory, deliveredMaterialOrders]);
 
   const updateInventory = useMutation({
     mutationFn: async ({ material, currentQty }: { material: CementMaterialName; currentQty: number }) => {
@@ -381,50 +398,13 @@ export function CementPage() {
 
   const updateMaterial = useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<CementMaterialOrder> }) => {
-      let inventoryDelta: { material: CementMaterialName; delta: number } | null = null;
-
-      if ("status" in patch || "is_completed" in patch) {
-        const { data: existing, error: fetchError } = await (supabase as any)
-          .from("cement_material_orders")
-          .select("material, order_qty, delivered_qty, status, is_completed")
-          .eq("id", id)
-          .single();
-        if (fetchError) throw fetchError;
-
-        const material = existing?.material as CementMaterialName;
-        const isTrackedMaterial = MATERIAL_ORDER.includes(material);
-        const wasDelivered = existing?.status === "delivered" || existing?.is_completed === true;
-        const willBeDelivered = patch.status === "delivered" || patch.is_completed === true;
-        const willBeUndelivered = patch.status === "pending" || patch.is_completed === false;
-        const deliveredQty = Number(existing?.delivered_qty ?? existing?.order_qty ?? 0);
-
-        if (isTrackedMaterial && deliveredQty > 0) {
-          if (!wasDelivered && willBeDelivered) inventoryDelta = { material, delta: deliveredQty };
-          if (wasDelivered && willBeUndelivered) inventoryDelta = { material, delta: -deliveredQty };
-        }
-      }
-
       const { error } = await (supabase as any).from("cement_material_orders").update(patch).eq("id", id);
       if (error) throw error;
-
-      if (inventoryDelta) {
-        const { data: current, error: inventoryFetchError } = await (supabase as any)
-          .from("cement_material_inventory")
-          .select("material, current_qty, unit")
-          .eq("material", inventoryDelta.material)
-          .maybeSingle();
-        if (inventoryFetchError) throw inventoryFetchError;
-
-        const nextQty = Math.max(0, Number(current?.current_qty ?? 0) + inventoryDelta.delta);
-        const { error: inventoryError } = await (supabase as any)
-          .from("cement_material_inventory")
-          .upsert({ material: inventoryDelta.material, current_qty: nextQty, unit: "TON" }, { onConflict: "material" });
-        if (inventoryError) throw inventoryError;
-      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cement-material-orders"] });
       qc.invalidateQueries({ queryKey: ["cement-material-forecast-orders"] });
+      qc.invalidateQueries({ queryKey: ["cement-material-delivered-orders"] });
       qc.invalidateQueries({ queryKey: ["cement-material-inventory"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -562,17 +542,7 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
                 </div>
               </div>
               <MiniForecastValue label="需求" value={materialQty(item.demandQty, item.unit)} />
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-muted-foreground">库存</span>
-                <Input
-                  className="h-7 w-20 text-right"
-                  type="number"
-                  min="0"
-                  step="0.1"
-                  defaultValue={item.currentQty}
-                  onBlur={(e) => onInventoryChange(item.material, Number(e.target.value || 0))}
-                />
-              </div>
+              <MiniForecastValue label="库存" value={materialQty(item.currentQty, item.unit)} />
               <Badge className={needsOrder ? "bg-amber-600" : "bg-emerald-600"}>
                 {needsOrder ? "订" : "够"}
               </Badge>
@@ -838,10 +808,11 @@ function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate }: {
                 variant="outline"
                 size="sm"
                 className="h-8"
+                disabled={o.status === "completed"}
                 onClick={() => onUpdate(o.id, { status: "completed" })}
               >
                 <CheckCircle2 className="mr-1.5 h-4 w-4" />
-                完成
+                {o.status === "completed" ? "已完成" : "完成"}
               </Button>
             </div>
 
