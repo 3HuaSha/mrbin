@@ -439,7 +439,7 @@ export function CementPage() {
               <CardTitle className="text-base">水泥订单列表</CardTitle>
             </CardHeader>
             <CardContent>
-              <CementOrderCardsV2
+              <CementOrderCardsCompact
                 orders={filteredCement}
                 loading={cementLoading}
                 onUpdate={(id, patch) => updateCement.mutate({ id, patch })}
@@ -454,7 +454,7 @@ export function CementPage() {
               <CardTitle className="text-base">水泥材料列表</CardTitle>
             </CardHeader>
             <CardContent>
-              <MaterialOrderCardsV2
+              <MaterialOrderCardsCompact
                 orders={filteredMaterials}
                 loading={materialLoading}
                 onUpdate={(id, patch) => updateMaterial.mutate({ id, patch })}
@@ -744,6 +744,133 @@ function CompactFact({ label, value, tone = "neutral" }: { label: string; value:
     <div className={cn("rounded-md border px-2.5 py-2", toneClass)}>
       <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
       <div className="mt-0.5 truncate text-sm font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function CementOrderCardsCompact({ orders, loading, onUpdate }: {
+  orders: CementOrder[];
+  loading: boolean;
+  onUpdate: (id: string, patch: Partial<CementOrder>) => void;
+}) {
+  if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
+  if (orders.length === 0) return <div className="py-10 text-center text-sm text-muted-foreground">没有符合条件的水泥订单</div>;
+
+  return (
+    <div className="space-y-2">
+      {orders.map((o) => {
+        const secondary = [o.tel, o.order_number, o.order_date ? `下单 ${o.order_date}` : null].filter(Boolean);
+        return (
+          <div key={o.id} className="rounded-lg border bg-background px-3 py-2.5 shadow-sm">
+            <div className="grid gap-3 xl:grid-cols-[150px_minmax(260px,1fr)_260px_250px_132px] xl:items-center">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold">{o.demand_date}</span>
+                  {o.schedule_sequence != null && <Badge variant="outline">#{o.schedule_sequence}</Badge>}
+                </div>
+                {o.demand_time && <div className="mt-0.5 text-sm text-blue-700">{o.demand_time}</div>}
+              </div>
+
+              <div className="min-w-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="truncate font-semibold">{o.company || "未填公司"}</span>
+                  <StatusBadge meta={cementStatusMeta[o.status]} />
+                </div>
+                {secondary.length > 0 && (
+                  <div className="mt-0.5 truncate text-xs text-muted-foreground">{secondary.join(" · ")}</div>
+                )}
+                <div className="mt-1 truncate text-sm">{o.delivery_address || "未填地址"}</div>
+                {o.note && <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{o.note}</div>}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                <Badge className="bg-blue-600">{qty(o.order_qty_cbm, "CBM")}</Badge>
+                {o.mpa && <Badge variant="outline">{o.mpa} MPA</Badge>}
+                <Badge variant="outline">{o.air === "Y" ? "Air" : "No Air"}</Badge>
+                {o.pump_truck && <Badge variant="secondary">泵车</Badge>}
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5">
+                <Input className="h-8" defaultValue={o.driver_name ?? ""} placeholder="司机" onBlur={(e) => onUpdate(o.id, { driver_name: toText(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.vehicle_name ?? ""} placeholder="车辆" onBlur={(e) => onUpdate(o.id, { vehicle_name: toText(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.schedule_sequence ?? ""} placeholder="序号" type="number" onBlur={(e) => onUpdate(o.id, { schedule_sequence: toNumber(e.target.value) as number | null })} />
+              </div>
+
+              <Select value={o.status} onValueChange={(value) => onUpdate(o.id, { status: value as CementStatus })}>
+                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(cementStatusMeta).map(([value, meta]) => (
+                    <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <details className="mt-2 border-t pt-2">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">完成后详情</summary>
+              <div className="mt-2 grid gap-1.5 md:grid-cols-3 xl:grid-cols-9">
+                <Input className="h-8" defaultValue={o.arrival_time ?? ""} placeholder="到达" onBlur={(e) => onUpdate(o.id, { arrival_time: toText(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.finish_time ?? ""} placeholder="结束" onBlur={(e) => onUpdate(o.id, { finish_time: toText(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.delivered_qty_cbm ?? ""} placeholder="送货CBM" type="number" step="0.1" onBlur={(e) => onUpdate(o.id, { delivered_qty_cbm: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.actual_usage_cbm ?? ""} placeholder="实际CBM" type="number" step="0.1" onBlur={(e) => onUpdate(o.id, { actual_usage_cbm: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.receivable_amount ?? ""} placeholder="应收" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { receivable_amount: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.driver_collected ?? ""} placeholder="司机收款" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { driver_collected: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.paid_amount ?? ""} placeholder="已付" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { paid_amount: toNumber(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.invoice_number ?? ""} placeholder="Invoice" onBlur={(e) => onUpdate(o.id, { invoice_number: toText(e.target.value) })} />
+                <Input className="h-8" defaultValue={o.print_status ?? ""} placeholder="打单" onBlur={(e) => onUpdate(o.id, { print_status: toText(e.target.value) })} />
+              </div>
+            </details>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MaterialOrderCardsCompact({ orders, loading, onUpdate }: {
+  orders: CementMaterialOrder[];
+  loading: boolean;
+  onUpdate: (id: string, patch: Partial<CementMaterialOrder>) => void;
+}) {
+  if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
+  if (orders.length === 0) return <div className="py-10 text-center text-sm text-muted-foreground">没有符合条件的材料订单</div>;
+
+  return (
+    <div className="space-y-2">
+      {orders.map((o) => {
+        const supplier = [o.company, o.contact, o.tel].filter(Boolean).join(" · ");
+        return (
+          <div key={o.id} className="rounded-lg border bg-background px-3 py-2.5 shadow-sm">
+            <div className="grid gap-3 lg:grid-cols-[150px_200px_minmax(220px,1fr)_minmax(240px,1fr)_132px] lg:items-center">
+              <div>
+                <div className="font-semibold">{o.demand_date}</div>
+                {o.demand_time && <div className="text-sm text-violet-700">{o.demand_time}</div>}
+                {o.order_number && <div className="text-xs text-muted-foreground">{o.order_number}</div>}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <Badge className="bg-violet-600">{o.material || "材料"}</Badge>
+                <Badge variant="outline">{qty(o.order_qty, o.order_unit || "")}</Badge>
+              </div>
+              <div className="truncate text-sm">{supplier || "未填供应商"}</div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{o.delivery_address || "未填地址"}</div>
+                {o.note && <div className="line-clamp-1 text-xs text-muted-foreground">{o.note}</div>}
+              </div>
+              <Select
+                value={o.status}
+                onValueChange={(value) => onUpdate(o.id, { status: value as MaterialStatus, is_completed: value === "completed" })}
+              >
+                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(materialStatusMeta).map(([value, meta]) => (
+                    <SelectItem key={value} value={value}>{meta.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
