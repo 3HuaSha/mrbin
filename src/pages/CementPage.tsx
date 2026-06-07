@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, CheckCircle2, ClipboardPlus, DollarSign, Package, Search, Truck } from "lucide-react";
+import { CalendarDays, CheckCircle2, ClipboardPlus, DollarSign, Package, Pencil, Search, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
@@ -149,6 +149,47 @@ function toNumber(value: FormDataEntryValue | null) {
 function toText(value: FormDataEntryValue | null) {
   const s = String(value ?? "").trim();
   return s === "" ? null : s;
+}
+
+function cementPayloadFromForm(form: FormData) {
+  const payload = {
+    demand_date: String(form.get("demand_date") || todayISO()),
+    demand_time: toText(form.get("demand_time")),
+    order_date: toText(form.get("order_date")),
+    order_number: toText(form.get("order_number")),
+    company: String(form.get("company") || "").trim(),
+    tel: toText(form.get("tel")),
+    mpa: toText(form.get("mpa")),
+    air: toText(form.get("air")),
+    pump_truck: form.get("pump_truck") === "yes",
+    order_qty_cbm: toNumber(form.get("order_qty_cbm")),
+    note: toText(form.get("note")),
+    delivery_address: String(form.get("delivery_address") || "").trim(),
+  };
+  if (!payload.company || !payload.delivery_address) throw new Error("Company and delivery address are required");
+  return payload;
+}
+
+function materialPayloadFromForm(form: FormData) {
+  const payload = {
+    order_date: toText(form.get("order_date")),
+    order_number: toText(form.get("order_number")),
+    company: String(form.get("company") || "").trim(),
+    contact: toText(form.get("contact")),
+    tel: toText(form.get("tel")),
+    material: String(form.get("material") || "").trim(),
+    order_qty: toNumber(form.get("order_qty")),
+    order_unit: toText(form.get("order_unit")) ?? "EA",
+    deliver_unit: CEMENT_MATERIAL_DELIVER_UNIT,
+    demand_date: String(form.get("demand_date") || todayISO()),
+    demand_time: toText(form.get("demand_time")),
+    note: toText(form.get("note")),
+    delivery_address: String(form.get("delivery_address") || "").trim(),
+  };
+  if (!payload.company || !payload.material || !payload.delivery_address) {
+    throw new Error("Company, material and delivery address are required");
+  }
+  return payload;
 }
 
 export function CementPage() {
@@ -323,21 +364,7 @@ export function CementPage() {
 
   const createCement = useMutation({
     mutationFn: async (form: FormData) => {
-      const payload = {
-        demand_date: String(form.get("demand_date") || todayISO()),
-        demand_time: toText(form.get("demand_time")),
-        order_date: toText(form.get("order_date")),
-        order_number: toText(form.get("order_number")),
-        company: String(form.get("company") || "").trim(),
-        tel: toText(form.get("tel")),
-        mpa: toText(form.get("mpa")),
-        air: toText(form.get("air")),
-        pump_truck: form.get("pump_truck") === "yes",
-        order_qty_cbm: toNumber(form.get("order_qty_cbm")),
-        note: toText(form.get("note")),
-        delivery_address: String(form.get("delivery_address") || "").trim(),
-        status: "pending",
-      };
+      const payload = { ...cementPayloadFromForm(form), status: "pending" };
       if (!payload.company || !payload.delivery_address) throw new Error("公司和送货地址必填");
       const { error } = await (supabase as any).from("cement_orders").insert(payload);
       if (error) throw error;
@@ -353,22 +380,7 @@ export function CementPage() {
 
   const createMaterial = useMutation({
     mutationFn: async (form: FormData) => {
-      const payload = {
-        order_date: toText(form.get("order_date")),
-        order_number: toText(form.get("order_number")),
-        company: String(form.get("company") || "").trim(),
-        contact: toText(form.get("contact")),
-        tel: toText(form.get("tel")),
-        material: String(form.get("material") || "").trim(),
-        order_qty: toNumber(form.get("order_qty")),
-        order_unit: toText(form.get("order_unit")) ?? "EA",
-        deliver_unit: CEMENT_MATERIAL_DELIVER_UNIT,
-        demand_date: String(form.get("demand_date") || todayISO()),
-        demand_time: toText(form.get("demand_time")),
-        note: toText(form.get("note")),
-        delivery_address: String(form.get("delivery_address") || "").trim(),
-        status: "pending",
-      };
+      const payload = { ...materialPayloadFromForm(form), status: "pending" };
       if (!payload.company || !payload.material || !payload.delivery_address) {
         throw new Error("公司、材料和送货地址必填");
       }
@@ -469,6 +481,7 @@ export function CementPage() {
                 loading={cementLoading}
                 vehicles={cementVehicles}
                 onUpdate={(id, patch) => updateCement.mutate({ id, patch })}
+                onEdit={(id, form) => updateCement.mutate({ id, patch: cementPayloadFromForm(form) })}
               />
             </CardContent>
           </Card>
@@ -484,6 +497,7 @@ export function CementPage() {
                 orders={filteredMaterials}
                 loading={materialLoading}
                 onUpdate={(id, patch) => updateMaterial.mutate({ id, patch })}
+                onEdit={(id, form) => updateMaterial.mutate({ id, patch: materialPayloadFromForm(form) })}
               />
             </CardContent>
           </Card>
@@ -520,6 +534,7 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
     material: CementMaterialName;
     demandQty: number;
     currentQty: number;
+    deliveredQty: number;
     suggestedQty: number;
     unit: string;
   }>;
@@ -542,8 +557,23 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
                 </div>
               </div>
               <MiniForecastValue label="需求" value={materialQty(item.demandQty, item.unit)} />
-              <MiniForecastValue label="库存" value={materialQty(item.currentQty, item.unit)} />
-              <Badge className={needsOrder ? "bg-amber-600" : "bg-emerald-600"}>
+              <div className="text-right">
+                <div className="text-[11px] text-muted-foreground">库存</div>
+                <Input
+                  key={`${item.material}-${item.currentQty}`}
+                  className="mt-0.5 h-7 w-24 text-right text-xs font-semibold"
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  defaultValue={Number(item.currentQty.toFixed(2))}
+                  onBlur={(event) => {
+                    const nextCurrent = Number(event.target.value);
+                    if (Number.isFinite(nextCurrent)) {
+                      onInventoryChange(item.material, Math.max(0, nextCurrent - item.deliveredQty));
+                    }
+                  }}
+                />
+              </div>              <Badge className={needsOrder ? "bg-amber-600" : "bg-emerald-600"}>
                 {needsOrder ? "订" : "够"}
               </Badge>
             </div>
@@ -565,6 +595,129 @@ function MiniForecastValue({ label, value }: { label: string; value: string }) {
 
 function StatusBadge({ meta }: { meta: { label: string; className: string } }) {
   return <Badge variant="outline" className={cn("whitespace-nowrap", meta.className)}>{meta.label}</Badge>;
+}
+
+function EditCementOrderDialog({
+  order,
+  open,
+  onOpenChange,
+  onSubmit,
+}: {
+  order: CementOrder;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (form: FormData) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogHeader><DialogTitle>编辑水泥订单</DialogTitle></DialogHeader>
+        <form
+          action={(form) => {
+            onSubmit(form);
+            onOpenChange(false);
+          }}
+          className="space-y-4"
+        >
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="需求日期"><Input name="demand_date" type="date" defaultValue={order.demand_date} required /></Field>
+            <Field label="需求时间"><Input name="demand_time" defaultValue={order.demand_time ?? ""} /></Field>
+            <Field label="下单日期"><Input name="order_date" type="date" defaultValue={order.order_date ?? todayISO()} /></Field>
+            <Field label="单号"><Input name="order_number" defaultValue={order.order_number ?? ""} /></Field>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label="公司"><Input name="company" defaultValue={order.company ?? ""} required /></Field>
+            <Field label="TEL"><Input name="tel" defaultValue={order.tel ?? ""} /></Field>
+          </div>
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="MPA"><Input name="mpa" defaultValue={order.mpa ?? ""} /></Field>
+            <Field label="AIR">
+              <Select name="air" defaultValue={order.air ?? "N"}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="N">No Air</SelectItem>
+                  <SelectItem value="Y">Air</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="泵车">
+              <Select name="pump_truck" defaultValue={order.pump_truck ? "yes" : "no"}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="no">不需要</SelectItem>
+                  <SelectItem value="yes">需要</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="数量 CBM"><Input name="order_qty_cbm" type="number" min="0" step="0.1" defaultValue={order.order_qty_cbm ?? ""} /></Field>
+          </div>
+          <Field label="送货地址"><Input name="delivery_address" defaultValue={order.delivery_address ?? ""} required /></Field>
+          <Field label="Note"><Textarea name="note" rows={3} defaultValue={order.note ?? ""} /></Field>
+          <div className="flex justify-end">
+            <Button type="submit">保存修改</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditMaterialOrderDialog({
+  order,
+  open,
+  onOpenChange,
+  onSubmit,
+}: {
+  order: CementMaterialOrder;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (form: FormData) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogHeader><DialogTitle>编辑材料订单</DialogTitle></DialogHeader>
+        <form
+          action={(form) => {
+            onSubmit(form);
+            onOpenChange(false);
+          }}
+          className="space-y-4"
+        >
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="下单日期"><Input name="order_date" type="date" defaultValue={order.order_date ?? todayISO()} /></Field>
+            <Field label="单号"><Input name="order_number" defaultValue={order.order_number ?? ""} /></Field>
+            <Field label="需求日期"><Input name="demand_date" type="date" defaultValue={order.demand_date} required /></Field>
+            <Field label="需求时间"><Input name="demand_time" defaultValue={order.demand_time ?? ""} /></Field>
+          </div>
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="MATERIAL">
+              <Select name="material" defaultValue={order.material || "Concrete Sand"}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Concrete Sand">Concrete Sand</SelectItem>
+                  <SelectItem value="HL6">HL6</SelectItem>
+                  <SelectItem value="Cement">Cement</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="公司"><Input name="company" defaultValue={order.company ?? ""} required /></Field>
+            <Field label="CONTACT"><Input name="contact" defaultValue={order.contact ?? ""} /></Field>
+            <Field label="TEL"><Input name="tel" defaultValue={order.tel ?? ""} /></Field>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <Field label="需求数量"><Input name="order_qty" type="number" min="0" step="0.1" defaultValue={order.order_qty ?? ""} /></Field>
+            <Field label="ORDER UNIT"><Input name="order_unit" defaultValue={order.order_unit ?? ""} /></Field>
+            <Field label="送货地址"><Input name="delivery_address" defaultValue={order.delivery_address ?? ""} required /></Field>
+          </div>
+          <Field label="Note"><Textarea name="note" rows={3} defaultValue={order.note ?? ""} /></Field>
+          <div className="flex justify-end">
+            <Button type="submit">保存修改</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function CementOrderForm({ onSubmit, pending }: { onSubmit: (form: FormData) => void; pending: boolean }) {
@@ -739,12 +892,15 @@ function CompactFact({ label, value, tone = "neutral" }: { label: string; value:
   );
 }
 
-function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate }: {
+function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate, onEdit }: {
   orders: CementOrder[];
   loading: boolean;
   vehicles: CementVehicle[];
   onUpdate: (id: string, patch: Partial<CementOrder>) => void;
+  onEdit: (id: string, form: FormData) => void;
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
   if (orders.length === 0) return <div className="py-10 text-center text-sm text-muted-foreground">没有符合条件的水泥订单</div>;
 
@@ -803,6 +959,15 @@ function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate }: {
                 <Input className="h-8" defaultValue={o.schedule_sequence ?? ""} placeholder="序号" type="number" onBlur={(e) => onUpdate(o.id, { schedule_sequence: toNumber(e.target.value) as number | null })} />
               </div>
 
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingId(o.id)}>
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <EditCementOrderDialog
+                order={o}
+                open={editingId === o.id}
+                onOpenChange={(open) => setEditingId(open ? o.id : null)}
+                onSubmit={(form) => onEdit(o.id, form)}
+              />
               <Button
                 type="button"
                 variant="outline"
@@ -837,11 +1002,14 @@ function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate }: {
   );
 }
 
-function MaterialOrderCardsCompact({ orders, loading, onUpdate }: {
+function MaterialOrderCardsCompact({ orders, loading, onUpdate, onEdit }: {
   orders: CementMaterialOrder[];
   loading: boolean;
   onUpdate: (id: string, patch: Partial<CementMaterialOrder>) => void;
+  onEdit: (id: string, form: FormData) => void;
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
   if (orders.length === 0) return <div className="py-10 text-center text-sm text-muted-foreground">没有符合条件的材料订单</div>;
 
@@ -866,6 +1034,16 @@ function MaterialOrderCardsCompact({ orders, loading, onUpdate }: {
                 <div className="truncate text-sm font-medium">{o.delivery_address || "未填地址"}</div>
                 {o.note && <div className="line-clamp-1 text-xs text-muted-foreground">{o.note}</div>}
               </div>
+              <div className="flex gap-1.5">
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingId(o.id)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <EditMaterialOrderDialog
+                  order={o}
+                  open={editingId === o.id}
+                  onOpenChange={(open) => setEditingId(open ? o.id : null)}
+                  onSubmit={(form) => onEdit(o.id, form)}
+                />
               <Select
                 value={o.status === "delivered" || o.is_completed ? "delivered" : "pending"}
                 onValueChange={(value) => onUpdate(o.id, {
