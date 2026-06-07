@@ -321,28 +321,34 @@ export function CementPage() {
   }, [filteredCement, filteredMaterials]);
 
   const materialForecast = useMemo(() => {
-    const totalCbm = forecastCementOrders.reduce((sum, o) => sum + Number(o.order_qty_cbm ?? 0), 0);
+    const openCementOrders = forecastCementOrders.filter((o) => !["completed", "delivered"].includes(o.status));
+    const completedCementOrders = forecastCementOrders.filter((o) => ["completed", "delivered"].includes(o.status));
+    const totalCbm = openCementOrders.reduce((sum, o) => sum + Number(o.order_qty_cbm ?? 0), 0);
     return MATERIAL_ORDER.map((material) => {
       const inventory = materialInventory.find((row) => row.material === material);
       const baseQty = Number(inventory?.current_qty ?? 0);
       const materialDeliveries = deliveredMaterialOrders.filter((o) => o.material === material);
       const materialOrders = forecastMaterialOrders.filter((o) => o.material === material);
       const deliveredQty = materialDeliveries.reduce((sum, o) => sum + Number(o.delivered_qty ?? o.order_qty ?? 0), 0);
-      const currentQty = baseQty + deliveredQty;
+      const consumedQty = completedCementOrders.reduce(
+        (sum, o) => sum + Number(o.order_qty_cbm ?? 0) * MATERIAL_USAGE_PER_CBM[material],
+        0,
+      );
+      const currentQty = baseQty + deliveredQty - consumedQty;
       const orderedQty = materialOrders.reduce((sum, o) => sum + Number(o.order_qty ?? 0), 0);
       const demandQty = totalCbm * MATERIAL_USAGE_PER_CBM[material];
 
       const inboundByDate = new Map<string, number>();
-      for (const order of [...materialDeliveries, ...materialOrders]) {
+      for (const order of materialOrders) {
         const date = order.demand_date || todayISO();
-        const amount = Number(("delivered_qty" in order ? order.delivered_qty : null) ?? order.order_qty ?? 0);
+        const amount = Number(order.order_qty ?? 0);
         inboundByDate.set(date, (inboundByDate.get(date) ?? 0) + amount);
       }
 
       const demandByDate = new Map<string, number>();
       let next7DaysCbm = 0;
       const todayTime = new Date(`${todayISO()}T00:00:00`).getTime();
-      for (const order of forecastCementOrders) {
+      for (const order of openCementOrders) {
         const date = order.demand_date || todayISO();
         const cbm = Number(order.order_qty_cbm ?? 0);
         const amount = cbm * MATERIAL_USAGE_PER_CBM[material];
@@ -351,8 +357,8 @@ export function CementPage() {
         demandByDate.set(date, (demandByDate.get(date) ?? 0) + amount);
       }
 
-      let balance = baseQty;
-      let minimumBalance = baseQty;
+      let balance = currentQty;
+      let minimumBalance = currentQty;
       const dates = Array.from(new Set([...inboundByDate.keys(), ...demandByDate.keys()])).sort();
       for (const date of dates) {
         balance += inboundByDate.get(date) ?? 0; // Materials normally arrive in the morning.
@@ -367,6 +373,7 @@ export function CementPage() {
         demandQty,
         currentQty,
         deliveredQty,
+        consumedQty,
         orderedQty,
         suggestedQty,
         next7DaysCbm,
@@ -569,6 +576,7 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
     demandQty: number;
     currentQty: number;
     deliveredQty: number;
+    consumedQty: number;
     suggestedQty: number;
     next7DaysCbm: number;
     unit: string;
@@ -606,7 +614,7 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
                   onBlur={(event) => {
                     const nextCurrent = Number(event.target.value);
                     if (Number.isFinite(nextCurrent)) {
-                      onInventoryChange(item.material, Math.max(0, nextCurrent - item.deliveredQty));
+                      onInventoryChange(item.material, Math.max(0, nextCurrent - item.deliveredQty + item.consumedQty));
                     }
                   }}
                 />
