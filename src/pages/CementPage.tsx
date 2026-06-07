@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ClipboardPlus, Package, Pencil, Search, Trash2 } from "lucide-react";
+import { CheckCircle2, ClipboardList, ClipboardPlus, Package, Pencil, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
@@ -234,7 +234,7 @@ export function CementPage() {
         .from("cement_orders")
         .select("id, demand_date, order_qty_cbm, status")
         .gte("demand_date", todayISO())
-        .not("status", "in", '("delivered","completed","cancelled")');
+        .neq("status", "cancelled");
       if (error) throw error;
       return (data ?? []) as Pick<CementOrder, "id" | "demand_date" | "order_qty_cbm" | "status">[];
     },
@@ -245,24 +245,24 @@ export function CementPage() {
     queryFn: async () => {
       const { data, error } = await (supabase as any)
         .from("cement_material_orders")
-        .select("id, material, order_qty, status")
+        .select("id, material, order_qty, demand_date, status")
         .gte("demand_date", todayISO())
         .not("status", "in", '("delivered","completed","cancelled")');
       if (error) throw error;
-      return (data ?? []) as Pick<CementMaterialOrder, "id" | "material" | "order_qty" | "status">[];
+      return (data ?? []) as Pick<CementMaterialOrder, "id" | "material" | "order_qty" | "demand_date" | "status">[];
     },
   });
 
   const { data: deliveredMaterialOrders = [] } = useQuery({
-    queryKey: ["cement-material-delivered-orders", from],
+    queryKey: ["cement-material-delivered-orders"],
     queryFn: async () => {
       const { data, error } = await (supabase as any)
         .from("cement_material_orders")
-        .select("id, material, order_qty, delivered_qty, status, is_completed")
-        .gte("demand_date", from)
+        .select("id, material, order_qty, delivered_qty, demand_date, status, is_completed")
+        .gte("demand_date", todayISO())
         .or("status.in.(delivered,completed),is_completed.eq.true");
       if (error) throw error;
-      return (data ?? []) as Pick<CementMaterialOrder, "id" | "material" | "order_qty" | "delivered_qty" | "status" | "is_completed">[];
+      return (data ?? []) as Pick<CementMaterialOrder, "id" | "material" | "order_qty" | "delivered_qty" | "demand_date" | "status" | "is_completed">[];
     },
   });
 
@@ -325,15 +325,42 @@ export function CementPage() {
     return MATERIAL_ORDER.map((material) => {
       const inventory = materialInventory.find((row) => row.material === material);
       const baseQty = Number(inventory?.current_qty ?? 0);
-      const deliveredQty = deliveredMaterialOrders
-        .filter((o) => o.material === material)
-        .reduce((sum, o) => sum + Number(o.delivered_qty ?? o.order_qty ?? 0), 0);
+      const materialDeliveries = deliveredMaterialOrders.filter((o) => o.material === material);
+      const materialOrders = forecastMaterialOrders.filter((o) => o.material === material);
+      const deliveredQty = materialDeliveries.reduce((sum, o) => sum + Number(o.delivered_qty ?? o.order_qty ?? 0), 0);
       const currentQty = baseQty + deliveredQty;
-      const orderedQty = forecastMaterialOrders
-        .filter((o) => o.material === material)
-        .reduce((sum, o) => sum + Number(o.order_qty ?? 0), 0);
+      const orderedQty = materialOrders.reduce((sum, o) => sum + Number(o.order_qty ?? 0), 0);
       const demandQty = totalCbm * MATERIAL_USAGE_PER_CBM[material];
-      const suggestedQty = Math.max(0, demandQty - currentQty - orderedQty);
+
+      const inboundByDate = new Map<string, number>();
+      for (const order of [...materialDeliveries, ...materialOrders]) {
+        const date = order.demand_date || todayISO();
+        const amount = Number(("delivered_qty" in order ? order.delivered_qty : null) ?? order.order_qty ?? 0);
+        inboundByDate.set(date, (inboundByDate.get(date) ?? 0) + amount);
+      }
+
+      const demandByDate = new Map<string, number>();
+      let next7DaysCbm = 0;
+      const todayTime = new Date(`${todayISO()}T00:00:00`).getTime();
+      for (const order of forecastCementOrders) {
+        const date = order.demand_date || todayISO();
+        const cbm = Number(order.order_qty_cbm ?? 0);
+        const amount = cbm * MATERIAL_USAGE_PER_CBM[material];
+        const dayOffset = Math.floor((new Date(`${date}T00:00:00`).getTime() - todayTime) / 86400000);
+        if (dayOffset >= 0 && dayOffset <= 7) next7DaysCbm += cbm;
+        demandByDate.set(date, (demandByDate.get(date) ?? 0) + amount);
+      }
+
+      let balance = baseQty;
+      let minimumBalance = baseQty;
+      const dates = Array.from(new Set([...inboundByDate.keys(), ...demandByDate.keys()])).sort();
+      for (const date of dates) {
+        balance += inboundByDate.get(date) ?? 0; // Materials normally arrive in the morning.
+        balance -= demandByDate.get(date) ?? 0;
+        minimumBalance = Math.min(minimumBalance, balance);
+      }
+
+      const suggestedQty = Math.max(0, -minimumBalance);
       return {
         material,
         totalCbm,
@@ -342,6 +369,7 @@ export function CementPage() {
         deliveredQty,
         orderedQty,
         suggestedQty,
+        next7DaysCbm,
         unit: inventory?.unit ?? "TON",
       };
     });
@@ -542,6 +570,7 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
     currentQty: number;
     deliveredQty: number;
     suggestedQty: number;
+    next7DaysCbm: number;
     unit: string;
   }>;
   onInventoryChange: (material: CementMaterialName, currentQty: number) => void;
@@ -550,10 +579,12 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
     <div className="mb-3 grid gap-2 lg:grid-cols-3">
       {forecasts.map((item) => {
         const needsOrder = item.suggestedQty > 0;
+        const lowStock = item.currentQty < 10;
+        const heavyUpcoming = item.next7DaysCbm >= 30;
         return (
           <div key={item.material} className={cn(
             "rounded-lg border bg-card px-3 py-2",
-            needsOrder ? "border-amber-200" : "border-emerald-200",
+            needsOrder || lowStock ? "border-amber-200" : "border-emerald-200",
           )}>
             <div className="grid grid-cols-[minmax(92px,1fr)_auto_auto_auto] items-center gap-2">
               <div className="min-w-0">
@@ -584,6 +615,13 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
                 {needsOrder ? "订" : "够"}
               </Badge>
             </div>
+            {(lowStock || needsOrder || heavyUpcoming) && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {lowStock && <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">库存低</Badge>}
+                {needsOrder && <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">提前订</Badge>}
+                {heavyUpcoming && <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">7天 {Number(item.next7DaysCbm.toFixed(1))} CBM</Badge>}
+              </div>
+            )}
           </div>
         );
       })}
@@ -664,6 +702,37 @@ function EditCementOrderDialog({
             <Button type="submit">保存修改</Button>
           </div>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CementCompletionDialog({
+  order,
+  open,
+  onOpenChange,
+  onUpdate,
+}: {
+  order: CementOrder;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onUpdate: (id: string, patch: Partial<CementOrder>) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader><DialogTitle>完成后详情</DialogTitle></DialogHeader>
+        <div className="grid gap-2 md:grid-cols-3">
+          <Input className="h-8" defaultValue={order.arrival_time ?? ""} placeholder="到达" onBlur={(e) => onUpdate(order.id, { arrival_time: toText(e.target.value) })} />
+          <Input className="h-8" defaultValue={order.finish_time ?? ""} placeholder="结束" onBlur={(e) => onUpdate(order.id, { finish_time: toText(e.target.value) })} />
+          <Input className="h-8" defaultValue={order.delivered_qty_cbm ?? ""} placeholder="送货CBM" type="number" step="0.1" onBlur={(e) => onUpdate(order.id, { delivered_qty_cbm: toNumber(e.target.value) })} />
+          <Input className="h-8" defaultValue={order.actual_usage_cbm ?? ""} placeholder="实际CBM" type="number" step="0.1" onBlur={(e) => onUpdate(order.id, { actual_usage_cbm: toNumber(e.target.value) })} />
+          <Input className="h-8" defaultValue={order.receivable_amount ?? ""} placeholder="应收" type="number" step="0.01" onBlur={(e) => onUpdate(order.id, { receivable_amount: toNumber(e.target.value) })} />
+          <Input className="h-8" defaultValue={order.driver_collected ?? ""} placeholder="司机收款" type="number" step="0.01" onBlur={(e) => onUpdate(order.id, { driver_collected: toNumber(e.target.value) })} />
+          <Input className="h-8" defaultValue={order.paid_amount ?? ""} placeholder="已付" type="number" step="0.01" onBlur={(e) => onUpdate(order.id, { paid_amount: toNumber(e.target.value) })} />
+          <Input className="h-8" defaultValue={order.invoice_number ?? ""} placeholder="Invoice" onBlur={(e) => onUpdate(order.id, { invoice_number: toText(e.target.value) })} />
+          <Input className="h-8" defaultValue={order.print_status ?? ""} placeholder="打单" onBlur={(e) => onUpdate(order.id, { print_status: toText(e.target.value) })} />
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -885,6 +954,7 @@ function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate, onEdit, 
   onDelete: (id: string) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [completionId, setCompletionId] = useState<string | null>(null);
 
   if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中...</div>;
   if (orders.length === 0) return <div className="py-10 text-center text-sm text-muted-foreground">没有符合条件的水泥订单</div>;
@@ -895,7 +965,7 @@ function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate, onEdit, 
         const secondary = [o.order_number, o.order_date ? `下单 ${o.order_date}` : null].filter(Boolean);
         return (
           <div key={o.id} className="rounded-lg border bg-background px-3 py-2.5 shadow-sm">
-            <div className="grid gap-3 xl:grid-cols-[150px_180px_145px_minmax(260px,1.15fr)_minmax(180px,0.85fr)_230px_160px] xl:items-center">
+            <div className="grid gap-3 xl:grid-cols-[150px_180px_145px_minmax(260px,1.15fr)_minmax(180px,0.85fr)_230px_200px] xl:items-center">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold">{o.demand_date}</span>
@@ -954,6 +1024,15 @@ function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate, onEdit, 
                 onOpenChange={(open) => setEditingId(open ? o.id : null)}
                 onSubmit={(form) => onEdit(o.id, form)}
               />
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setCompletionId(o.id)}>
+                <ClipboardList className="h-4 w-4" />
+              </Button>
+              <CementCompletionDialog
+                order={o}
+                open={completionId === o.id}
+                onOpenChange={(open) => setCompletionId(open ? o.id : null)}
+                onUpdate={onUpdate}
+              />
               <Button
                 type="button"
                 variant="ghost"
@@ -979,20 +1058,6 @@ function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate, onEdit, 
               </div>
             </div>
 
-            <details className="mt-2 border-t pt-2">
-              <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">完成后详情</summary>
-              <div className="mt-2 grid gap-1.5 md:grid-cols-3 xl:grid-cols-9">
-                <Input className="h-8" defaultValue={o.arrival_time ?? ""} placeholder="到达" onBlur={(e) => onUpdate(o.id, { arrival_time: toText(e.target.value) })} />
-                <Input className="h-8" defaultValue={o.finish_time ?? ""} placeholder="结束" onBlur={(e) => onUpdate(o.id, { finish_time: toText(e.target.value) })} />
-                <Input className="h-8" defaultValue={o.delivered_qty_cbm ?? ""} placeholder="送货CBM" type="number" step="0.1" onBlur={(e) => onUpdate(o.id, { delivered_qty_cbm: toNumber(e.target.value) })} />
-                <Input className="h-8" defaultValue={o.actual_usage_cbm ?? ""} placeholder="实际CBM" type="number" step="0.1" onBlur={(e) => onUpdate(o.id, { actual_usage_cbm: toNumber(e.target.value) })} />
-                <Input className="h-8" defaultValue={o.receivable_amount ?? ""} placeholder="应收" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { receivable_amount: toNumber(e.target.value) })} />
-                <Input className="h-8" defaultValue={o.driver_collected ?? ""} placeholder="司机收款" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { driver_collected: toNumber(e.target.value) })} />
-                <Input className="h-8" defaultValue={o.paid_amount ?? ""} placeholder="已付" type="number" step="0.01" onBlur={(e) => onUpdate(o.id, { paid_amount: toNumber(e.target.value) })} />
-                <Input className="h-8" defaultValue={o.invoice_number ?? ""} placeholder="Invoice" onBlur={(e) => onUpdate(o.id, { invoice_number: toText(e.target.value) })} />
-                <Input className="h-8" defaultValue={o.print_status ?? ""} placeholder="打单" onBlur={(e) => onUpdate(o.id, { print_status: toText(e.target.value) })} />
-              </div>
-            </details>
           </div>
         );
       })}
