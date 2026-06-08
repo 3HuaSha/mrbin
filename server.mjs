@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import handler from './dist/server/server.js';
+import { handleImportBinOrders } from './server/import-bin-orders.mjs';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const port = process.env.PORT || 3000;
@@ -95,6 +96,11 @@ const server = createServer(async (req, res) => {
       chunks.push(chunk);
     }
     const body = chunks.length > 0 ? Buffer.concat(chunks) : null;
+
+    if (pathname === '/api/import-bin-orders') {
+      await handleImportBinOrders(req, res, body);
+      return;
+    }
     
     // 创建 Fetch API Request
     const request = new Request(`http://${req.headers.host}${req.url}`, {

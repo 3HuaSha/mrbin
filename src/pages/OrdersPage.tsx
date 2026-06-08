@@ -16,6 +16,7 @@ import { Order } from "@/types/dispatch";
 // 子组件导入
 import { FragmentRow } from "@/components/orders/FragmentRow";
 import { EditOrderDialog } from "@/components/orders/EditOrderDialog";
+import { BulkBinOrderImportDialog } from "@/components/orders/BulkBinOrderImportDialog";
 
 export function OrdersPage() {
   const nav = useNavigate();
@@ -212,6 +213,7 @@ export function OrdersPage() {
         <h1 className="text-2xl font-bold">订单管理</h1>
         <div className="flex items-center gap-3">
           <BusinessTypeSelector value={businessType} onChange={setBusinessType} />
+          {businessType === "garbage" && <BulkBinOrderImportDialog />}
           <Button onClick={() => nav({ to: "/" })}>+ 新建订单</Button>
         </div>
       </div>
