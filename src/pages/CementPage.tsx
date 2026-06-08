@@ -253,19 +253,6 @@ export function CementPage() {
     },
   });
 
-  const { data: deliveredMaterialOrders = [] } = useQuery({
-    queryKey: ["cement-material-delivered-orders"],
-    queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("cement_material_orders")
-        .select("id, material, order_qty, delivered_qty, demand_date, status, is_completed")
-        .gte("demand_date", todayISO())
-        .or("status.in.(delivered,completed),is_completed.eq.true");
-      if (error) throw error;
-      return (data ?? []) as Pick<CementMaterialOrder, "id" | "material" | "order_qty" | "delivered_qty" | "demand_date" | "status" | "is_completed">[];
-    },
-  });
-
   const { data: materialInventory = [] } = useQuery({
     queryKey: ["cement-material-inventory"],
     queryFn: async () => {
@@ -322,19 +309,12 @@ export function CementPage() {
 
   const materialForecast = useMemo(() => {
     const openCementOrders = forecastCementOrders.filter((o) => !["completed", "delivered"].includes(o.status));
-    const completedCementOrders = forecastCementOrders.filter((o) => ["completed", "delivered"].includes(o.status));
     const totalCbm = openCementOrders.reduce((sum, o) => sum + Number(o.order_qty_cbm ?? 0), 0);
     return MATERIAL_ORDER.map((material) => {
       const inventory = materialInventory.find((row) => row.material === material);
       const baseQty = Number(inventory?.current_qty ?? 0);
-      const materialDeliveries = deliveredMaterialOrders.filter((o) => o.material === material);
       const materialOrders = forecastMaterialOrders.filter((o) => o.material === material);
-      const deliveredQty = materialDeliveries.reduce((sum, o) => sum + Number(o.delivered_qty ?? o.order_qty ?? 0), 0);
-      const consumedQty = completedCementOrders.reduce(
-        (sum, o) => sum + Number(o.order_qty_cbm ?? 0) * MATERIAL_USAGE_PER_CBM[material],
-        0,
-      );
-      const currentQty = baseQty + deliveredQty - consumedQty;
+      const currentQty = baseQty;
       const orderedQty = materialOrders.reduce((sum, o) => sum + Number(o.order_qty ?? 0), 0);
       const demandQty = totalCbm * MATERIAL_USAGE_PER_CBM[material];
 
@@ -372,15 +352,13 @@ export function CementPage() {
         totalCbm,
         demandQty,
         currentQty,
-        deliveredQty,
-        consumedQty,
         orderedQty,
         suggestedQty,
         next7DaysCbm,
         unit: inventory?.unit ?? "TON",
       };
     });
-  }, [forecastCementOrders, forecastMaterialOrders, materialInventory, deliveredMaterialOrders]);
+  }, [forecastCementOrders, forecastMaterialOrders, materialInventory]);
 
   const updateInventory = useMutation({
     mutationFn: async ({ material, currentQty }: { material: CementMaterialName; currentQty: number }) => {
@@ -392,6 +370,29 @@ export function CementPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["cement-material-inventory"] }),
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const adjustInventory = async (deltas: Partial<Record<CementMaterialName, number>>) => {
+    const materials = Object.keys(deltas) as CementMaterialName[];
+    if (materials.length === 0) return;
+
+    const { data, error } = await (supabase as any)
+      .from("cement_material_inventory")
+      .select("material, current_qty, unit")
+      .in("material", materials);
+    if (error) throw error;
+
+    const existing = new Map((data ?? []).map((row: CementMaterialInventory) => [row.material, Number(row.current_qty ?? 0)]));
+    const rows = materials.map((material) => ({
+      material,
+      current_qty: Math.max(0, (existing.get(material) ?? 0) + Number(deltas[material] ?? 0)),
+      unit: "TON",
+    }));
+
+    const { error: upsertError } = await (supabase as any)
+      .from("cement_material_inventory")
+      .upsert(rows, { onConflict: "material" });
+    if (upsertError) throw upsertError;
+  };
 
   const createCement = useMutation({
     mutationFn: async (form: FormData) => {
@@ -442,6 +443,48 @@ export function CementPage() {
   const updateMaterial = useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<CementMaterialOrder> }) => {
       const { error } = await (supabase as any).from("cement_material_orders").update(patch).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cement-material-orders"] });
+      qc.invalidateQueries({ queryKey: ["cement-material-forecast-orders"] });
+      qc.invalidateQueries({ queryKey: ["cement-material-delivered-orders"] });
+      qc.invalidateQueries({ queryKey: ["cement-material-inventory"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const completeCement = useMutation({
+    mutationFn: async (order: CementOrder) => {
+      if (order.status === "completed") return;
+      const cbm = Number(order.actual_usage_cbm ?? order.delivered_qty_cbm ?? order.order_qty_cbm ?? 0);
+      await adjustInventory({
+        Cement: -cbm * MATERIAL_USAGE_PER_CBM.Cement,
+        "Concrete Sand": -cbm * MATERIAL_USAGE_PER_CBM["Concrete Sand"],
+        HL6: -cbm * MATERIAL_USAGE_PER_CBM.HL6,
+      });
+      const { error } = await (supabase as any).from("cement_orders").update({ status: "completed" }).eq("id", order.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cement-orders"] });
+      qc.invalidateQueries({ queryKey: ["cement-forecast-orders"] });
+      qc.invalidateQueries({ queryKey: ["cement-material-inventory"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const markMaterialDelivered = useMutation({
+    mutationFn: async (order: CementMaterialOrder) => {
+      if (order.status === "delivered" || order.is_completed) return;
+      const material = order.material as CementMaterialName;
+      if (!MATERIAL_ORDER.includes(material)) throw new Error("Unsupported material");
+      const amount = Number(order.delivered_qty ?? order.order_qty ?? 0);
+      await adjustInventory({ [material]: amount });
+      const { error } = await (supabase as any)
+        .from("cement_material_orders")
+        .update({ status: "delivered", is_completed: true })
+        .eq("id", order.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -540,6 +583,7 @@ export function CementPage() {
                 onUpdate={(id, patch) => updateCement.mutate({ id, patch })}
                 onEdit={(id, form) => updateCement.mutate({ id, patch: cementPayloadFromForm(form) })}
                 onDelete={(id) => deleteCement.mutate(id)}
+                onComplete={(order) => completeCement.mutate(order)}
               />
             </CardContent>
           </Card>
@@ -557,6 +601,7 @@ export function CementPage() {
                 onUpdate={(id, patch) => updateMaterial.mutate({ id, patch })}
                 onEdit={(id, form) => updateMaterial.mutate({ id, patch: materialPayloadFromForm(form) })}
                 onDelete={(id) => deleteMaterial.mutate(id)}
+                onMarkDelivered={(order) => markMaterialDelivered.mutate(order)}
               />
             </CardContent>
           </Card>
@@ -575,8 +620,6 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
     material: CementMaterialName;
     demandQty: number;
     currentQty: number;
-    deliveredQty: number;
-    consumedQty: number;
     suggestedQty: number;
     next7DaysCbm: number;
     unit: string;
@@ -614,7 +657,7 @@ function MaterialForecastStrip({ forecasts, onInventoryChange }: {
                   onBlur={(event) => {
                     const nextCurrent = Number(event.target.value);
                     if (Number.isFinite(nextCurrent)) {
-                      onInventoryChange(item.material, Math.max(0, nextCurrent - item.deliveredQty + item.consumedQty));
+                      onInventoryChange(item.material, Math.max(0, nextCurrent));
                     }
                   }}
                 />
@@ -953,13 +996,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate, onEdit, onDelete }: {
+function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate, onEdit, onDelete, onComplete }: {
   orders: CementOrder[];
   loading: boolean;
   vehicles: CementVehicle[];
   onUpdate: (id: string, patch: Partial<CementOrder>) => void;
   onEdit: (id: string, form: FormData) => void;
   onDelete: (id: string) => void;
+  onComplete: (order: CementOrder) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [completionId, setCompletionId] = useState<string | null>(null);
@@ -1058,7 +1102,7 @@ function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate, onEdit, 
                 size="sm"
                 className="h-8"
                 disabled={o.status === "completed"}
-                onClick={() => onUpdate(o.id, { status: "completed" })}
+                onClick={() => onComplete(o)}
               >
                 <CheckCircle2 className="mr-1.5 h-4 w-4" />
                 {o.status === "completed" ? "已完成" : "完成"}
@@ -1073,12 +1117,13 @@ function CementOrderCardsCompact({ orders, loading, vehicles, onUpdate, onEdit, 
   );
 }
 
-function MaterialOrderCardsCompact({ orders, loading, onUpdate, onEdit, onDelete }: {
+function MaterialOrderCardsCompact({ orders, loading, onUpdate, onEdit, onDelete, onMarkDelivered }: {
   orders: CementMaterialOrder[];
   loading: boolean;
   onUpdate: (id: string, patch: Partial<CementMaterialOrder>) => void;
   onEdit: (id: string, form: FormData) => void;
   onDelete: (id: string) => void;
+  onMarkDelivered: (order: CementMaterialOrder) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -1129,10 +1174,13 @@ function MaterialOrderCardsCompact({ orders, loading, onUpdate, onEdit, onDelete
                 </Button>
               <Select
                 value={o.status === "delivered" || o.is_completed ? "delivered" : "pending"}
-                onValueChange={(value) => onUpdate(o.id, {
-                  status: value === "delivered" ? "delivered" : "pending",
-                  is_completed: value === "delivered",
-                })}
+                onValueChange={(value) => {
+                  if (value === "delivered") {
+                    onMarkDelivered(o);
+                  } else {
+                    onUpdate(o.id, { status: "pending", is_completed: false });
+                  }
+                }}
               >
                 <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
