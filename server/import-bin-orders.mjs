@@ -16,8 +16,9 @@ export async function handleImportBinOrders(req, res, bodyBuffer) {
       return;
     }
 
+    const sourceLines = text.split(/\r?\n/);
     const parsed = await parseWithAi(text);
-    sendJson(res, 200, { orders: parsed.map(normalizeOrder).filter(Boolean) });
+    sendJson(res, 200, { orders: parsed.map((order) => normalizeOrder(order, sourceLines)).filter(Boolean) });
   } catch (error) {
     sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
   }
@@ -98,7 +99,7 @@ ${text.slice(0, 60000)}`;
   return parsed;
 }
 
-function normalizeOrder(input) {
+function normalizeOrder(input, sourceLines = []) {
   const raw = input || {};
   const orderNumber = String(raw.order_number || "").trim();
   if (!/^(SOT|SOB|SOA|SOM|SOV)/i.test(orderNumber)) return null;
@@ -110,7 +111,8 @@ function normalizeOrder(input) {
   const binSize = raw.bin_size && allowedBinSizes.has(String(raw.bin_size)) ? String(raw.bin_size) : null;
   const issues = Array.isArray(raw.issues) ? raw.issues.map(String) : [];
   const address = String(raw.address || "").trim();
-  const date = normalizeDate(raw.service_date);
+  const rowDate = dateFromSourceRow(raw.source_row, sourceLines);
+  const date = rowDate || normalizeDate(raw.service_date);
 
   if (!address) issues.push("missing_address");
   if (!date) issues.push("missing_date");
@@ -207,12 +209,76 @@ function parseCsvLine(line) {
   return out;
 }
 
+function dateFromSourceRow(sourceRow, sourceLines) {
+  const rowIndex = Number(sourceRow) - 1;
+  const line = Number.isFinite(rowIndex) && rowIndex >= 0 ? sourceLines[rowIndex] : "";
+  if (!line) return null;
+
+  const cells = parseCsvLine(line).map((v) => v.trim()).filter(Boolean);
+  for (const cell of cells.slice(0, 6)) {
+    const parsed = normalizeDate(cell);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 function normalizeDate(value) {
   const text = String(value || "").trim();
   if (!text) return null;
-  const parsed = new Date(text.replace(/-/g, " "));
-  if (Number.isNaN(parsed.getTime())) return null;
-  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+
+  const monthNames = {
+    jan: 1, january: 1,
+    feb: 2, february: 2,
+    mar: 3, march: 3,
+    apr: 4, april: 4,
+    may: 5,
+    jun: 6, june: 6,
+    jul: 7, july: 7,
+    aug: 8, august: 8,
+    sep: 9, sept: 9, september: 9,
+    oct: 10, october: 10,
+    nov: 11, november: 11,
+    dec: 12, december: 12,
+  };
+
+  const dayMonthYear = text.match(/\b(\d{1,2})[-\s]([A-Za-z]{3,9})[-\s](\d{2,4})\b/i);
+  if (dayMonthYear) {
+    const day = Number(dayMonthYear[1]);
+    const month = monthNames[dayMonthYear[2].toLowerCase()];
+    const year = normalizeYear(Number(dayMonthYear[3]));
+    return validDate(year, month, day);
+  }
+
+  const monthDayYear = text.match(/\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{2,4})\b/i);
+  if (monthDayYear) {
+    const month = monthNames[monthDayYear[1].toLowerCase()];
+    const day = Number(monthDayYear[2]);
+    const year = normalizeYear(Number(monthDayYear[3]));
+    return validDate(year, month, day);
+  }
+
+  const slashDate = text.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (slashDate) {
+    const first = Number(slashDate[1]);
+    const second = Number(slashDate[2]);
+    const year = normalizeYear(slashDate[3] ? Number(slashDate[3]) : new Date().getFullYear());
+    const month = first > 12 ? second : first;
+    const day = first > 12 ? first : second;
+    return validDate(year, month, day);
+  }
+
+  return null;
+}
+
+function normalizeYear(year) {
+  return year < 100 ? 2000 + year : year;
+}
+
+function validDate(year, month, day) {
+  if (!year || !month || !day) return null;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function todayISO() {
