@@ -352,11 +352,24 @@ export function BulkBinOrderImportDialog() {
 }
 
 async function parseCsvWithAi(text: string): Promise<ParsedBinOrder[]> {
-  const response = await fetch("/api/import-bin-orders", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 60_000);
+  let response: Response;
+  try {
+    response = await fetch("/api/import-bin-orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if ((error as Error)?.name === "AbortError") {
+      throw new Error("AI 导入超时，请减少一次导入的行数后重试");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data?.error) {
     throw new Error(data?.error || `导入解析失败 (${response.status})`);
