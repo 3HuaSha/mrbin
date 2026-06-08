@@ -25,6 +25,9 @@ export async function handleImportBinOrders(req, res, bodyBuffer) {
 }
 
 async function parseWithAi(text) {
+  const deterministic = fallbackParse(text);
+  if (deterministic.length > 0) return deterministic;
+
   const env = globalThis.process?.env || {};
   const apiKey = env.AI_KEY || env.ALIYUN_MAAS_API_KEY;
   const baseUrl = (env.AI_BASE_URL || "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").replace(/\/$/, "");
