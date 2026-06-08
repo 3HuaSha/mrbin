@@ -32,6 +32,7 @@ const Stage = ({ active, done, label, time, detail, fmtTime }: StageProps) => (
 interface LifecycleTimelineProps {
   order: Order;
   linkedOrder: { id: string; type: string; status: string; service_date: string } | null;
+  chainOrders?: Order[];
   selfAssignments: any[];
   linkedAssignments: any[];
   orphanSteps?: any[];
@@ -40,6 +41,7 @@ interface LifecycleTimelineProps {
 export function LifecycleTimeline({ 
   order, 
   linkedOrder, 
+  chainOrders = [],
   selfAssignments, 
   linkedAssignments, 
   orphanSteps = [] 
@@ -168,9 +170,11 @@ export function LifecycleTimeline({
   const linkedIsDoneDelivery = !!linkedOrder && linkedOrder.type === "delivery" && 
     (linkedOrder.status === "done" || linkedOrder.status === "in_progress");
   const selfIsDoneDelivery = order.type === "delivery" && order.status === "done";
+  const pickupOrder = chainOrders.find(o => o.type === "pickup" && o.status === "done");
+  const pickupOrderDone = !!pickupOrder;
   
   const stage1Done = !!deliveredAt || selfIsDoneDelivery || linkedIsDoneDelivery;
-  const stage3Done = !!pickedUpAt;
+  const stage3Done = !!pickedUpAt || pickupOrderDone;
   const stage4Done = !!dumpedAt;
 
   const showDelivered = order.type !== "pickup" || linkedIsDoneDelivery;
@@ -214,10 +218,13 @@ export function LifecycleTimeline({
             label="回收"
             time={pickedUpAt}
             fmtTime={fmtTime}
-            detail={(pickedUpStep?._assignment?.profiles?.name || swapPickupEvidence?._assignment?.profiles?.name || pickedUpPhotoUrl) ? (
+            detail={(pickedUpStep?._assignment?.profiles?.name || swapPickupEvidence?._assignment?.profiles?.name || pickedUpPhotoUrl || pickupOrderDone) ? (
               <div className="space-y-0.5">
                 {(pickedUpStep?._assignment?.profiles?.name || swapPickupEvidence?._assignment?.profiles?.name) && (
                   <div>司机: {pickedUpStep?._assignment?.profiles?.name ?? swapPickupEvidence?._assignment?.profiles?.name}</div>
+                )}
+                {!pickedUpAt && pickupOrderDone && (
+                  <div>{pickupOrder.service_date ? `收桶单完成 ${pickupOrder.service_date}` : "收桶单已完成"}</div>
                 )}
                 {pickedUpPhotoUrl && (
                   <a href={pickedUpPhotoUrl} target="_blank" rel="noreferrer" className="text-primary underline">照片</a>

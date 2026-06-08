@@ -112,6 +112,7 @@ export function OrderDetailRow({ order, orderId }: OrderDetailRowProps) {
         <LifecycleTimeline
           order={primary}
           linkedOrder={timelineLinkedOrder}
+          chainOrders={chain}
           selfAssignments={assignments}
           linkedAssignments={externalAssignments}
           orphanSteps={orphanSteps}

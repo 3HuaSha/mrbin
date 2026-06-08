@@ -142,19 +142,44 @@ export function OrdersPage() {
   // 换桶: 把 pickup 挂在对应 delivery 下面作为子行, 不单独出现在列表顶层
   const groupedRows = useMemo(() => {
     const pickupByLinked = new Map<string, Order>();
+    const pickupsByOrderNumber = new Map<string, Order[]>();
     filtered.forEach(o => {
       if (o.type === "pickup" && o.linked_order_id) pickupByLinked.set(o.linked_order_id, o);
+      if (o.type === "pickup" && o.order_number) {
+        const list = pickupsByOrderNumber.get(o.order_number) ?? [];
+        list.push(o);
+        pickupsByOrderNumber.set(o.order_number, list);
+      }
     });
     const out: Array<{ main: Order; child?: Order }> = [];
     const consumedIds = new Set<string>();
+    const choosePickup = (main: Order) => {
+      const linked = pickupByLinked.get(main.id);
+      if (linked) return linked;
+      const sameNumberPickups = pickupsByOrderNumber.get(main.order_number) ?? [];
+      return sameNumberPickups
+        .filter(p => p.id !== main.id)
+        .sort((a, b) => {
+          const dateCompare = String(b.service_date).localeCompare(String(a.service_date));
+          if (dateCompare !== 0) return dateCompare;
+          return String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""));
+        })[0];
+    };
     filtered.forEach(o => {
       // 跳过已经作为子行的 pickup
-      if (o.type === "pickup" && o.linked_order_id && filtered.some(x => x.id === o.linked_order_id)) {
+      const pickupMainByLinked = o.type === "pickup" && o.linked_order_id && filtered.some(x => x.id === o.linked_order_id);
+      const pickupMainByNumber = o.type === "pickup" && filtered.some(x =>
+        x.id !== o.id &&
+        x.order_number === o.order_number &&
+        (x.type === "delivery" || x.type === "swap")
+      );
+      if (pickupMainByLinked || pickupMainByNumber) {
         return;
       }
       if (consumedIds.has(o.id)) return;
-      const child = pickupByLinked.get(o.id);
+      const child = choosePickup(o);
       out.push({ main: o, child });
+      consumedIds.add(o.id);
       if (child) consumedIds.add(child.id);
     });
     return out;
