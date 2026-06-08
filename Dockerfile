@@ -53,6 +53,7 @@ RUN npm install --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/scripts ./scripts
+COPY --from=build /app/server ./server
 COPY server.mjs ./server.mjs
 
 EXPOSE 3000
