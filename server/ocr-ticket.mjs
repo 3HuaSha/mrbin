@@ -186,20 +186,20 @@ function typeFromTicket(ticket, upperText) {
 
 function extractWeightKg(ticketType, text) {
   if (ticketType === "MRBIN") {
-    return extractKgNearLabel(text, ["NET"]) ?? parseKg(matchOne(text, [
+    return extractSmallestScaleKg(text) ?? extractKgNearLabel(text, ["NET"]) ?? parseKg(matchOne(text, [
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
     ]));
   }
 
   if (ticketType === "YORK1") {
-    return extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]) ?? parseKg(matchOne(text, [
+    return extractSmallestScaleKg(text) ?? extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]) ?? parseKg(matchOne(text, [
       /\bNET\s+WEIGHT\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
     ]));
   }
 
   if (ticketType === "MAPLEWASTE") {
-    return extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]) ?? parseKg(matchOne(text, [
+    return extractSmallestScaleKg(text) ?? extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]) ?? parseKg(matchOne(text, [
       /\bNET\s+WEIGHT\s*(?:\(\s*kg\s*\))?\s*:?\s*([0-9][0-9,.\s]*)\s*(?:kg)?\b/i,
       /\bNET\s+WT\.?\s*(?:\(\s*kg\s*\))?\s*:?\s*([0-9][0-9,.\s]*)\s*(?:kg)?\b/i,
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
@@ -207,6 +207,9 @@ function extractWeightKg(ticketType, text) {
   }
 
   if (ticketType === "DRAGLAM") {
+    const netKg = extractSmallestScaleKg(text) ?? extractKgNearLabel(text, ["NET"]);
+    if (netKg != null) return netKg;
+
     const ton = parseNumber(matchOne(text, [
       /\bQUANTITY\s*:?\s*([0-9][0-9,.\s]*)\b/i,
       /\bQTY\.?\s*:?\s*([0-9][0-9,.\s]*)\b/i,
@@ -215,6 +218,34 @@ function extractWeightKg(ticketType, text) {
   }
 
   return null;
+}
+
+function extractSmallestScaleKg(text) {
+  const values = extractScaleKgValues(text);
+  return values.length ? Math.min(...values) : null;
+}
+
+function extractScaleKgValues(text) {
+  const normalized = String(text || "").replace(/\r/g, "\n");
+  if (!/\b(?:GROSS|TARE|NET|WEIGHT|WT)\b/i.test(normalized)) return [];
+
+  const values = [];
+  const kgMatches = normalized.matchAll(/\b([0-9][0-9,.\s]{1,12})\s*kg\b/gi);
+  for (const match of kgMatches) {
+    const value = parseKg(match[1]);
+    if (value != null && value >= 50 && value <= 60000) values.push(value);
+  }
+
+  if (values.length >= 2) return [...new Set(values)];
+
+  const lines = normalized.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const labelLineIndex = lines.findIndex((line) => /\b(?:GROSS|TARE|NET)(?:\s+WEIGHT|\s+WT)?\b/i.test(line));
+  if (labelLineIndex >= 0) {
+    const nearby = lines.slice(labelLineIndex, labelLineIndex + 8).join(" ");
+    for (const value of parseReasonableKgList(nearby)) values.push(value);
+  }
+
+  return values.length >= 2 ? [...new Set(values)] : [];
 }
 
 function extractKgNearLabel(text, labels) {
@@ -227,8 +258,9 @@ function extractKgNearLabel(text, labels) {
     const escaped = label.split(/\s+/).map(escapeRegex).join("\\s+");
     const linePattern = new RegExp(`\\b${escaped}\\b`, "i");
     for (let i = 0; i < lines.length; i += 1) {
-      if (!linePattern.test(lines[i])) continue;
-      const sameLine = parseReasonableKg(lines[i].replace(linePattern, ""));
+      const match = lines[i].match(linePattern);
+      if (!match) continue;
+      const sameLine = parseReasonableKg(lines[i].slice((match.index || 0) + match[0].length));
       if (sameLine != null) return sameLine;
 
       for (let offset = 1; offset <= 3 && i + offset < lines.length; offset += 1) {
@@ -253,6 +285,7 @@ function extractKgFromScaleTable(text, labels) {
       weightLabelIndexes.push({
         kind: label.startsWith("GROSS") ? "gross" : label.startsWith("TARE") ? "tare" : "net",
         index: i,
+        end: (match.index || 0) + match[0].length,
       });
     }
   }
@@ -261,6 +294,12 @@ function extractKgFromScaleTable(text, labels) {
   if (netOrdinal < 0 || weightLabelIndexes.length < 2) return null;
 
   const lastLabelIndex = Math.max(...weightLabelIndexes.map((item) => item.index));
+  const sameLineLabels = weightLabelIndexes.filter((item) => item.index === lastLabelIndex);
+  if (sameLineLabels.length >= 2) {
+    const valuesOnSameLine = parseReasonableKgList(lines[lastLabelIndex].slice(Math.max(...sameLineLabels.map((item) => item.end))));
+    if (valuesOnSameLine.length >= weightLabelIndexes.length) return valuesOnSameLine[netOrdinal] ?? null;
+  }
+
   const values = [];
   for (let i = lastLabelIndex + 1; i < Math.min(lines.length, lastLabelIndex + 10); i += 1) {
     if (/\b(?:TICKET|DATE|TIME|PHONE|ADDRESS)\b/i.test(lines[i])) break;
@@ -281,12 +320,17 @@ function parseKg(value) {
 }
 
 function parseReasonableKg(value) {
+  return parseReasonableKgList(value)[0] ?? null;
+}
+
+function parseReasonableKgList(value) {
   const matches = String(value || "").match(/[0-9][0-9,.\s]{1,12}/g) || [];
+  const values = [];
   for (const match of matches) {
     const parsed = parseKg(match);
-    if (parsed != null && parsed >= 50 && parsed <= 60000) return parsed;
+    if (parsed != null && parsed >= 50 && parsed <= 60000) values.push(parsed);
   }
-  return null;
+  return values;
 }
 
 function parseNumber(value) {
