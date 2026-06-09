@@ -4,6 +4,7 @@ import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import handler from './dist/server/server.js';
 import { handleImportBinOrders } from './server/import-bin-orders.mjs';
+import { handleOcrTicket } from './server/ocr-ticket.mjs';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const port = process.env.PORT || 3000;
@@ -99,6 +100,11 @@ const server = createServer(async (req, res) => {
 
     if (pathname === '/api/import-bin-orders') {
       await handleImportBinOrders(req, res, body);
+      return;
+    }
+
+    if (pathname === '/api/ocr-ticket') {
+      await handleOcrTicket(req, res, body);
       return;
     }
     

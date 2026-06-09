@@ -263,6 +263,9 @@ export type Database = {
           location: string
           node_type: 'order' | 'step'
           notes: string | null
+          ocr_checked: boolean
+          ocr_confidence: number | null
+          ocr_raw_text: string | null
           old_bin_number_reported: string | null
           order_id: string | null
           photo_url: string | null
@@ -275,6 +278,8 @@ export type Database = {
           status: Database["public"]["Enums"]["step_status"] | null
           step_number: number
           step_type: Database["public"]["Enums"]["step_type"]
+          ticket_number: string | null
+          ticket_type: string | null
           weigh_ticket_url: string | null
           weight_kg: number | null
         }
@@ -290,6 +295,9 @@ export type Database = {
           location: string
           node_type?: 'order' | 'step'
           notes?: string | null
+          ocr_checked?: boolean
+          ocr_confidence?: number | null
+          ocr_raw_text?: string | null
           old_bin_number_reported?: string | null
           order_id?: string | null
           photo_url?: string | null
@@ -302,6 +310,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["step_status"] | null
           step_number: number
           step_type: Database["public"]["Enums"]["step_type"]
+          ticket_number?: string | null
+          ticket_type?: string | null
           weigh_ticket_url?: string | null
           weight_kg?: number | null
         }
@@ -317,6 +327,9 @@ export type Database = {
           location?: string
           node_type?: 'order' | 'step'
           notes?: string | null
+          ocr_checked?: boolean
+          ocr_confidence?: number | null
+          ocr_raw_text?: string | null
           old_bin_number_reported?: string | null
           order_id?: string | null
           photo_url?: string | null
@@ -329,6 +342,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["step_status"] | null
           step_number?: number
           step_type?: Database["public"]["Enums"]["step_type"]
+          ticket_number?: string | null
+          ticket_type?: string | null
           weigh_ticket_url?: string | null
           weight_kg?: number | null
         }

@@ -81,6 +81,18 @@ export function StepDetailDialog({ step, onClose }: StepDetailDialogProps) {
             </div>
           )}
 
+          {(step as any).ticket_number && (
+            <div className="flex items-center justify-between bg-amber-50 border border-amber-200 p-3 rounded-lg">
+              <div>
+                <div className="text-sm font-semibold text-amber-900">Ticket number</div>
+                {(step as any).ticket_type && (
+                  <div className="text-xs text-amber-700">{(step as any).ticket_type}</div>
+                )}
+              </div>
+              <div className="text-sm font-mono font-bold text-amber-800">{(step as any).ticket_number}</div>
+            </div>
+          )}
+
           {(step as any).dump_site && (
             <div className="bg-muted/50 p-3 rounded-lg border">
               <div className="text-xs font-semibold mb-1">垃圾场</div>
