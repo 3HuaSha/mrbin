@@ -300,11 +300,11 @@ export function DriverStepPage() {
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
-                      <span className="font-medium text-base">点击拍摄垃圾</span>
+                      <span className="font-medium text-base">拍照或上传垃圾照片</span>
                       <span className="text-xs text-muted-foreground">倒垃圾现场照片</span>
                     </div>
                   )}
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                  <input type="file" accept="image/*" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
                 </label>
                 {photoUrl && (
@@ -333,11 +333,11 @@ export function DriverStepPage() {
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
-                      <span className="font-medium text-base">点击拍摄垃圾单</span>
+                      <span className="font-medium text-base">拍照或上传垃圾单</span>
                       <span className="text-xs text-muted-foreground">垃圾场收据（可选）</span>
                     </div>
                   )}
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                  <input type="file" accept="image/*" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "weigh")} />
                 </label>
                 {weighTicketUrl && (
@@ -384,11 +384,11 @@ export function DriverStepPage() {
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
-                      <span className="font-medium text-base">点击拍摄新桶</span>
+                      <span className="font-medium text-base">拍照或上传新桶照片</span>
                       <span className="text-xs text-muted-foreground">送到客户的桶</span>
                     </div>
                   )}
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                  <input type="file" accept="image/*" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
                 </label>
                 {photoUrl && (
@@ -417,11 +417,11 @@ export function DriverStepPage() {
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
-                      <span className="font-medium text-base">点击拍摄旧桶</span>
+                      <span className="font-medium text-base">拍照或上传旧桶照片</span>
                       <span className="text-xs text-muted-foreground">从客户收走的桶</span>
                     </div>
                   )}
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                  <input type="file" accept="image/*" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "pickup_photo")} />
                 </label>
                 {pickupPhotoUrl && (
@@ -451,11 +451,11 @@ export function DriverStepPage() {
                 ) : (
                   <div className="flex flex-col items-center gap-2">
                     <Camera className="h-10 w-10 text-primary" />
-                    <span className="font-medium text-base">点击拍照</span>
+                    <span className="font-medium text-base">拍照或上传照片</span>
                     <span className="text-xs text-muted-foreground">或选择相册图片</span>
                   </div>
                 )}
-                <input type="file" accept="image/*" capture="environment" className="hidden"
+                <input type="file" accept="image/*" className="hidden"
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
               </label>
               {photoUrl && (
@@ -510,11 +510,11 @@ export function DriverStepPage() {
                 ) : (
                   <div className="flex flex-col items-center gap-2">
                     <Camera className="h-10 w-10 text-primary" />
-                    <span className="font-medium text-base">点击拍摄磅单</span>
+                    <span className="font-medium text-base">拍照或上传磅单</span>
                     <span className="text-xs text-muted-foreground">或选择相册图片</span>
                   </div>
                 )}
-                <input type="file" accept="image/*" capture="environment" className="hidden"
+                <input type="file" accept="image/*" className="hidden"
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "weigh")} />
               </label>
               {weighTicketUrl && (
