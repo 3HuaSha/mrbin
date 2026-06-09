@@ -42,6 +42,7 @@ type ProfileRow = {
   phone: string | null;
   role: "staff" | "driver";
   is_active: boolean;
+  driver_language: "zh" | "en";
   auth_user_id: string | null;
   created_at: string;
 };
@@ -173,6 +174,18 @@ export function UsersPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const updateDriverLanguage = useMutation({
+    mutationFn: async (input: { profile_id: string; driver_language: "zh" | "en" }) => {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ driver_language: input.driver_language } as any)
+        .eq("id", input.profile_id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users-profiles"] }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return (
     <div className="p-6 space-y-4">
       <header className="flex items-center justify-between">
@@ -204,6 +217,7 @@ export function UsersPage() {
               <th className="px-3 py-2 font-medium">姓名</th>
               <th className="px-3 py-2 font-medium">邮箱 / 手机</th>
               <th className="px-3 py-2 font-medium">角色</th>
+              <th className="px-3 py-2 font-medium">司机端语言</th>
               <th className="px-3 py-2 font-medium">状态</th>
               <th className="px-3 py-2 font-medium text-right">操作</th>
             </tr>
@@ -255,6 +269,26 @@ export function UsersPage() {
                         );
                       })}
                     </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {p.role === "driver" ? (
+                      <Select
+                        value={p.driver_language || "zh"}
+                        onValueChange={(value) =>
+                          updateDriverLanguage.mutate({ profile_id: p.id, driver_language: value === "en" ? "en" : "zh" })
+                        }
+                      >
+                        <SelectTrigger className="h-8 w-[110px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="zh">中文</SelectItem>
+                          <SelectItem value="en">English</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <Badge

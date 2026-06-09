@@ -172,9 +172,9 @@ function normalizeRouteAddress(address: string): string {
  */
 export function formatDistance(meters: number): string {
   if (meters < 1000) {
-    return `${Math.round(meters)} 米`;
+    return `${Math.round(meters)} m`;
   } else {
-    return `${(meters / 1000).toFixed(1)} 公里`;
+    return `${(meters / 1000).toFixed(1)} km`;
   }
 }
 
@@ -183,13 +183,13 @@ export function formatDistance(meters: number): string {
  */
 export function formatDuration(seconds: number): string {
   if (seconds < 60) {
-    return `${Math.round(seconds)} 秒`;
+    return `${Math.round(seconds)} sec`;
   } else if (seconds < 3600) {
-    return `${Math.round(seconds / 60)} 分钟`;
+    return `${Math.round(seconds / 60)} min`;
   } else {
     const hours = Math.floor(seconds / 3600);
     const mins = Math.round((seconds % 3600) / 60);
-    return `${hours} 小时 ${mins} 分钟`;
+    return `${hours} hr ${mins} min`;
   }
 }
 
@@ -203,13 +203,13 @@ export function formatETA(etaString: string): string {
   const diffMins = Math.round(diffMs / 60000);
 
   if (diffMins < 0) {
-    return '已过期';
+    return 'overdue';
   } else if (diffMins < 60) {
-    return `${diffMins} 分钟`;
+    return `${diffMins} min`;
   } else {
     const hours = Math.floor(diffMins / 60);
     const mins = diffMins % 60;
-    return `${hours} 小时 ${mins} 分钟`;
+    return `${hours} hr ${mins} min`;
   }
 }
 
@@ -218,7 +218,7 @@ export function formatETA(etaString: string): string {
  */
 export function formatETATime(etaString: string): string {
   const eta = new Date(etaString);
-  return eta.toLocaleTimeString('zh-CN', {
+  return eta.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,

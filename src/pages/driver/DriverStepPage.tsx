@@ -9,6 +9,8 @@ import { ArrowLeft, Camera, Navigation, Phone, Loader2, CheckCircle2 } from "luc
 import { STEP_TYPE_EMOJI, STEP_TYPE_LABEL } from "@/lib/business";
 import { toast } from "sonner";
 import { useAudit } from "@/hooks/use-audit";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { driverBinTypeNames, driverText, getDriverLanguage } from "@/lib/driver-language";
 
 type Step = {
   id: string;
@@ -46,6 +48,9 @@ export function DriverStepPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const audit = useAudit();
+  const { profile } = useCurrentUser();
+  const lang = getDriverLanguage(profile);
+  const t = driverText[lang];
   const [photoUrl, setPhotoUrl] = useState("");
   const [pickupPhotoUrl, setPickupPhotoUrl] = useState("");
   const [binNumber, setBinNumber] = useState("");
@@ -103,7 +108,7 @@ export function DriverStepPage() {
     try {
       compressed = await compressImage(file);
     } catch {
-      toast.warning("图片压缩失败，已改用原图上传");
+      toast.warning(t.compressionFailed);
     }
     const shouldOcrTicket = kind === "weigh" || (kind === "photo" && isMaterialTicketStep);
     const imageBase64 = shouldOcrTicket ? await fileToBase64(compressed) : null;
@@ -124,7 +129,7 @@ export function DriverStepPage() {
       setWeighTicketUrl(data.publicUrl);
       void runTicketOcr({ imageBase64: imageBase64 || undefined, imageUrl: data.publicUrl });
     }
-    toast.success(`上传成功 (${Math.round(compressed.size / 1024)} KB)`);
+    toast.success(`${t.uploaded} (${Math.round(compressed.size / 1024)} KB)`);
   };
 
   const runTicketOcr = async (payload: { imageUrl?: string; imageBase64?: string }) => {
@@ -148,10 +153,10 @@ export function DriverStepPage() {
         setTicketType(nextTicketType);
         setWeight(nextWeightKg != null ? String(nextWeightKg) : "");
         setOcrStatus("found");
-        toast.success(`已识别票号 ${nextTicketNumber}`);
+        toast.success(`${t.ticketRecognized}: ${nextTicketNumber}`);
       } else {
         setOcrStatus("missing");
-        toast.warning("未识别到 ticket number，可以后面人工补录");
+        toast.warning(t.ticketMissing);
       }
 
       const { error } = await supabase
@@ -167,7 +172,7 @@ export function DriverStepPage() {
         .eq("id", stepId);
       if (error) {
         if (isTicketSchemaMissing(error)) {
-          toast.warning("OCR 已识别，但数据库还没加 ticket_number 字段，暂时只在页面显示");
+          toast.warning(t.ticketDbMissing);
           return;
         }
         throw error;
@@ -177,7 +182,7 @@ export function DriverStepPage() {
       qc.invalidateQueries({ queryKey: ["driver-steps"] });
     } catch (error) {
       setOcrStatus("error");
-      toast.error(error instanceof Error ? error.message : "OCR 识别失败");
+      toast.error(error instanceof Error ? error.message : "OCR failed");
     }
   };
 
@@ -205,7 +210,7 @@ export function DriverStepPage() {
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("无法处理图片");
+    if (!ctx) throw new Error("Could not process image");
     ctx.drawImage(image, 0, 0, width, height);
 
     let quality = 0.72;
@@ -229,7 +234,7 @@ export function DriverStepPage() {
       };
       image.onerror = () => {
         URL.revokeObjectURL(url);
-        reject(new Error("无法读取图片"));
+        reject(new Error("Could not read image"));
       };
       image.src = url;
     });
@@ -237,7 +242,7 @@ export function DriverStepPage() {
   const canvasToBlob = (canvas: HTMLCanvasElement, quality: number) =>
     new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
-        (blob) => blob ? resolve(blob) : reject(new Error("图片压缩失败")),
+        (blob) => blob ? resolve(blob) : reject(new Error("Image compression failed")),
         "image/jpeg",
         quality
       );
@@ -248,7 +253,7 @@ export function DriverStepPage() {
     return `${base}.jpg`;
   };
 
-  const renderGalleryUpload = (kind: "photo" | "pickup_photo" | "weigh", label = "从相册/文件上传") => (
+  const renderGalleryUpload = (kind: "photo" | "pickup_photo" | "weigh", label = t.uploadFromPhotos) => (
     <label className="mt-2 inline-flex h-10 w-full items-center justify-center rounded-lg border bg-background text-sm font-medium text-foreground shadow-sm cursor-pointer hover:bg-muted">
       {label}
       <input
@@ -263,27 +268,27 @@ export function DriverStepPage() {
   const renderTicketOcrStatus = () => (
     <div className="mt-3 rounded-lg border bg-muted/50 p-3 text-sm">
       <div className="flex items-center justify-between gap-3">
-        <span className="font-semibold">Ticket number</span>
+        <span className="font-semibold">{t.ticketNumber}</span>
         <span className="font-mono font-bold">
-          {ocrStatus === "reading" ? "识别中..." : ticketNumber || "未识别"}
+          {ocrStatus === "reading" ? t.reading : ticketNumber || t.notRecognized}
         </span>
       </div>
       {ticketType && (
-        <div className="mt-1 text-xs text-muted-foreground">类型: {ticketType}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{t.type}: {ticketType}</div>
       )}
       <div className="mt-3 flex items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
-        <span className="text-xs font-semibold text-blue-800">识别重量</span>
+        <span className="text-xs font-semibold text-blue-800">{t.recognizedWeight}</span>
         <span className="font-mono text-sm font-bold text-blue-800">
-          {weight ? `${weight} kg` : "未识别"}
+          {weight ? `${weight} kg` : t.notRecognized}
         </span>
       </div>
       {!weight && ticketNumber && (
         <div className="mt-1 text-xs text-muted-foreground">
-          这张单只识别到了票号，重量可以后面人工填写。
+          {t.ocrWeightMissing}
         </div>
       )}
       {(ocrStatus === "missing" || ocrStatus === "error") && (
-        <div className="mt-2 text-xs text-amber-700">可以先完成任务，后面由管理端人工确认。</div>
+        <div className="mt-2 text-xs text-amber-700">{t.ocrReviewLater}</div>
       )}
     </div>
   );
@@ -315,12 +320,12 @@ export function DriverStepPage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success("步骤已完成 ✅");
+      toast.success(t.stepCompleted);
       audit({
         action: "step_complete",
         entity_type: "job_step",
         entity_id: stepId,
-        entity_label: `${order?.order_number ?? "手动"} 步骤${step?.step_number ?? ""}`,
+        entity_label: `${order?.order_number ?? "Manual"} step ${step?.step_number ?? ""}`,
         details: {
           step_type: step?.step_type,
           bin: binNumber || undefined,
@@ -337,7 +342,7 @@ export function DriverStepPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (isLoading || !step) return <div className="p-6 text-center text-muted-foreground">加载中…</div>;
+  if (isLoading || !step) return <div className="p-6 text-center text-muted-foreground">{t.loading}</div>;
 
   const isCustomerStep = !isManualStep && (
     step.step_type === "customer_delivery" ||
@@ -351,7 +356,7 @@ export function DriverStepPage() {
     <div className="min-h-screen bg-background pb-32">
       <header className="sticky top-0 z-10 bg-sidebar text-sidebar-foreground px-4 py-3 flex items-center gap-3">
         <Link to="/driver" className="-ml-2 p-2"><ArrowLeft className="h-5 w-5" /></Link>
-        <div className="flex-1 text-center text-sm font-semibold">步骤 {step.step_number}</div>
+        <div className="flex-1 text-center text-sm font-semibold">{t.step} {step.step_number}</div>
         <div className="w-9" />
       </header>
 
@@ -361,7 +366,7 @@ export function DriverStepPage() {
             {STEP_TYPE_EMOJI[step.step_type]} {isManualStep
               ? (STEP_TYPE_LABEL[step.step_type] || step.step_type)
               : order
-                ? `${order.type === 'delivery' ? '送' : order.type === 'pickup' ? '收' : order.type === 'swap' ? '换' : ''}${order.bin_size ? order.bin_size + 'yd' : ''}${order.bin_type ? ({'garbage':'垃圾桶','brick':'砖桶','soil':'土桶','cement':'水泥桶','asphalt':'沥青桶'} as Record<string,string>)[order.bin_type] || order.bin_type : '桶'}`
+                ? `${order.type === 'delivery' ? (lang === "en" ? 'Deliver ' : '送 ') : order.type === 'pickup' ? (lang === "en" ? 'Pick up ' : '收 ') : order.type === 'swap' ? (lang === "en" ? 'Swap ' : '换 ') : ''}${order.bin_size ? order.bin_size + 'yd ' : ""}${order.bin_type ? driverBinTypeNames[lang][order.bin_type] || order.bin_type : (lang === "en" ? 'bin' : '桶')}`
                 : (STEP_TYPE_LABEL[step.step_type] || step.step_type)
             }
           </div>
@@ -373,7 +378,7 @@ export function DriverStepPage() {
           target="_blank" rel="noreferrer"
           className="flex items-center justify-center gap-2 bg-primary text-primary-foreground rounded-xl py-4 font-semibold text-base"
         >
-          <Navigation className="h-5 w-5" /> 在 Google Maps 中导航
+          <Navigation className="h-5 w-5" /> {t.navigate}
         </a>
 
         {isCustomerStep && order && (
@@ -392,38 +397,38 @@ export function DriverStepPage() {
 
         {isManualStep && step.notes && (
           <div className="bg-card border rounded-xl p-4">
-            <div className="text-xs text-muted-foreground mb-1">备注</div>
+            <div className="text-xs text-muted-foreground mb-1">{t.notes}</div>
             <div className="text-sm whitespace-pre-wrap">📝 {step.notes}</div>
           </div>
         )}
 
         <div className="bg-card border rounded-xl p-4 space-y-4">
-          <div className="font-semibold text-sm">需要完成</div>
+          <div className="font-semibold text-sm">{t.required}</div>
 
           {/* 拍照上传: dump_waste 需要"垃圾照片"(必填)+"垃圾单照片"(可选); swap 需要"送新桶"+"收旧桶"; 其他一张即可 */}
           {isDumpWaste ? (
             <>
               <div>
-                <Label className="text-base font-semibold">📷 垃圾照片 *</Label>
+                <Label className="text-base font-semibold">📷 {t.wastePhoto} *</Label>
                 <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                   {uploading === "photo" ? (
                     <div className="flex flex-col items-center gap-2">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                      <span className="text-sm text-muted-foreground">上传中...</span>
+                      <span className="text-sm text-muted-foreground">{t.uploading}</span>
                     </div>
                   ) : photoUrl ? (
                     <div className="flex flex-col items-center gap-2 w-full">
                       <div className="text-status-done font-semibold text-base flex items-center gap-2">
                         <CheckCircle2 className="h-5 w-5" />
-                        垃圾照片已上传
+                        {t.wastePhoto} {t.uploaded}
                       </div>
-                      <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                      <span className="text-xs text-muted-foreground">{t.tapRetake}</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
-                      <span className="font-medium text-base">拍照或上传垃圾照片</span>
-                      <span className="text-xs text-muted-foreground">倒垃圾现场照片</span>
+                      <span className="font-medium text-base">{t.takeWastePhoto}</span>
+                      <span className="text-xs text-muted-foreground">Photo at the dump site</span>
                     </div>
                   )}
                   <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -432,32 +437,32 @@ export function DriverStepPage() {
                 {renderGalleryUpload("photo")}
                 {photoUrl && (
                   <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
-                    <img src={photoUrl} alt="垃圾预览" className="w-full h-auto max-h-[300px] object-contain" />
+                    <img src={photoUrl} alt="Waste preview" className="w-full h-auto max-h-[300px] object-contain" />
                   </div>
                 )}
               </div>
 
               <div>
-                <Label className="text-base font-semibold">📋 垃圾单照片 (可选)</Label>
+                <Label className="text-base font-semibold">📋 {t.dumpTicketPhoto}</Label>
                 <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                   {uploading === "weigh" ? (
                     <div className="flex flex-col items-center gap-2">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                      <span className="text-sm text-muted-foreground">上传中...</span>
+                      <span className="text-sm text-muted-foreground">{t.uploading}</span>
                     </div>
                   ) : weighTicketUrl ? (
                     <div className="flex flex-col items-center gap-2 w-full">
                       <div className="text-status-done font-semibold text-base flex items-center gap-2">
                         <CheckCircle2 className="h-5 w-5" />
-                        垃圾单已上传
+                        {t.dumpTicketPhoto} {t.uploaded}
                       </div>
-                      <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                      <span className="text-xs text-muted-foreground">{t.tapRetake}</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
-                      <span className="font-medium text-base">拍照或上传垃圾单</span>
-                      <span className="text-xs text-muted-foreground">垃圾场收据（可选）</span>
+                      <span className="font-medium text-base">{t.takeDumpTicketPhoto}</span>
+                      <span className="text-xs text-muted-foreground">{t.scaleTicketPhoto}</span>
                     </div>
                   )}
                   <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -466,7 +471,7 @@ export function DriverStepPage() {
                 {renderGalleryUpload("weigh")}
                 {weighTicketUrl && (
                   <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
-                    <img src={weighTicketUrl} alt="垃圾单预览" className="w-full h-auto max-h-[300px] object-contain" />
+                    <img src={weighTicketUrl} alt="Dump ticket preview" className="w-full h-auto max-h-[300px] object-contain" />
                   </div>
                 )}
                 {weighTicketUrl && renderTicketOcrStatus()}
@@ -475,26 +480,26 @@ export function DriverStepPage() {
           ) : isSwapDelivery ? (
             <>
               <div>
-                <Label className="text-base font-semibold">📷 送新桶照片 {step.requires_photo && '*'}</Label>
+                <Label className="text-base font-semibold">📷 {t.newBinPhoto} {step.requires_photo && '*'}</Label>
                 <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                   {uploading === "photo" ? (
                     <div className="flex flex-col items-center gap-2">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                      <span className="text-sm text-muted-foreground">上传中...</span>
+                      <span className="text-sm text-muted-foreground">{t.uploading}</span>
                     </div>
                   ) : photoUrl ? (
                     <div className="flex flex-col items-center gap-2 w-full">
                       <div className="text-status-done font-semibold text-base flex items-center gap-2">
                         <CheckCircle2 className="h-5 w-5" />
-                        新桶照片已上传
+                        {t.newBinPhoto} {t.uploaded}
                       </div>
-                      <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                      <span className="text-xs text-muted-foreground">{t.tapRetake}</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
-                      <span className="font-medium text-base">拍照或上传新桶照片</span>
-                      <span className="text-xs text-muted-foreground">送到客户的桶</span>
+                      <span className="font-medium text-base">{t.takeNewBinPhoto}</span>
+                      <span className="text-xs text-muted-foreground">Bin delivered to customer</span>
                     </div>
                   )}
                   <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -503,32 +508,32 @@ export function DriverStepPage() {
                 {renderGalleryUpload("photo")}
                 {photoUrl && (
                   <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
-                    <img src={photoUrl} alt="新桶预览" className="w-full h-auto max-h-[300px] object-contain" />
+                    <img src={photoUrl} alt="New bin preview" className="w-full h-auto max-h-[300px] object-contain" />
                   </div>
                 )}
               </div>
 
               <div>
-                <Label className="text-base font-semibold">📷 收旧桶照片 (可选)</Label>
+                <Label className="text-base font-semibold">📷 {t.oldBinPhoto}</Label>
                 <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                   {uploading === "pickup_photo" ? (
                     <div className="flex flex-col items-center gap-2">
                       <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                      <span className="text-sm text-muted-foreground">上传中...</span>
+                      <span className="text-sm text-muted-foreground">{t.uploading}</span>
                     </div>
                   ) : pickupPhotoUrl ? (
                     <div className="flex flex-col items-center gap-2 w-full">
                       <div className="text-status-done font-semibold text-base flex items-center gap-2">
                         <CheckCircle2 className="h-5 w-5" />
-                        旧桶照片已上传
+                        {t.oldBinPhoto} {t.uploaded}
                       </div>
-                      <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                      <span className="text-xs text-muted-foreground">{t.tapRetake}</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
-                      <span className="font-medium text-base">拍照或上传旧桶照片</span>
-                      <span className="text-xs text-muted-foreground">从客户收走的桶</span>
+                      <span className="font-medium text-base">{t.takeOldBinPhoto}</span>
+                      <span className="text-xs text-muted-foreground">Bin removed from customer</span>
                     </div>
                   )}
                   <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -537,33 +542,33 @@ export function DriverStepPage() {
                 {renderGalleryUpload("pickup_photo")}
                 {pickupPhotoUrl && (
                   <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
-                    <img src={pickupPhotoUrl} alt="旧桶预览" className="w-full h-auto max-h-[300px] object-contain" />
+                    <img src={pickupPhotoUrl} alt="Old bin preview" className="w-full h-auto max-h-[300px] object-contain" />
                   </div>
                 )}
               </div>
             </>
           ) : (
             <div>
-              <Label className="text-base font-semibold">📷 拍照上传 {step.requires_photo && '*'}</Label>
+              <Label className="text-base font-semibold">📷 {t.photoUpload} {step.requires_photo && '*'}</Label>
               <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                 {uploading === "photo" ? (
                   <div className="flex flex-col items-center gap-2">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <span className="text-sm text-muted-foreground">上传中...</span>
+                    <span className="text-sm text-muted-foreground">{t.uploading}</span>
                   </div>
                 ) : photoUrl ? (
                   <div className="flex flex-col items-center gap-2 w-full">
                     <div className="text-status-done font-semibold text-base flex items-center gap-2">
                       <CheckCircle2 className="h-5 w-5" />
-                      照片已上传
+                      {t.photoUploaded}
                     </div>
-                    <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                    <span className="text-xs text-muted-foreground">{t.tapRetake}</span>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-2">
                     <Camera className="h-10 w-10 text-primary" />
-                    <span className="font-medium text-base">拍照或上传照片</span>
-                    <span className="text-xs text-muted-foreground">或选择相册图片</span>
+                    <span className="font-medium text-base">{t.takePhoto}</span>
+                    <span className="text-xs text-muted-foreground">or upload from photos</span>
                   </div>
                 )}
                 <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -574,7 +579,7 @@ export function DriverStepPage() {
                 <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
                   <img
                     src={photoUrl}
-                    alt="预览"
+                    alt="Preview"
                     className="w-full h-auto max-h-[300px] object-contain"
                   />
                 </div>
@@ -585,46 +590,46 @@ export function DriverStepPage() {
 
           {/* 桶号输入 - 所有步骤都可以填 (可选) */}
           <div>
-            <Label>{isSwapDelivery ? "放入的新桶号 (可选)" : "桶号 (可选)"}</Label>
+            <Label>{isSwapDelivery ? t.newBinNumber : t.binNumber}</Label>
             <Input value={binNumber} onChange={(e) => setBinNumber(e.target.value.toUpperCase())} className="h-12 mt-1 text-base" placeholder="B-20-01" />
           </div>
 
           {isSwapDelivery && (
             <div>
-              <Label>取出的旧桶号 (可选)</Label>
+              <Label>{t.oldBinNumber}</Label>
               <Input value={oldBinNumber} onChange={(e) => setOldBinNumber(e.target.value.toUpperCase())} className="h-12 mt-1 text-base" placeholder="B-20-02" />
             </div>
           )}
 
           {(step.step_type === "dump_site" || step.step_type === "dump_waste") && (
             <div>
-              <Label>垃圾场名称 {step.step_type === "dump_site" ? '*' : '(可选)'}</Label>
-              <Input value={dumpSite} onChange={(e) => setDumpSite(e.target.value)} className="h-12 mt-1 text-base" placeholder="例如 GFL Brock West" />
+              <Label>{t.dumpSiteName} {step.step_type === "dump_site" ? '*' : '(optional)'}</Label>
+              <Input value={dumpSite} onChange={(e) => setDumpSite(e.target.value)} className="h-12 mt-1 text-base" placeholder="e.g. GFL Brock West" />
             </div>
           )}
 
           {step.requires_weigh_ticket && (
             <div>
-              <Label className="text-base font-semibold">📋 磅单照片 *</Label>
+              <Label className="text-base font-semibold">📋 {t.scaleTicketPhoto} *</Label>
               <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                 {uploading === "weigh" ? (
                   <div className="flex flex-col items-center gap-2">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <span className="text-sm text-muted-foreground">上传中...</span>
+                    <span className="text-sm text-muted-foreground">{t.uploading}</span>
                   </div>
                 ) : weighTicketUrl ? (
                   <div className="flex flex-col items-center gap-2 w-full">
                     <div className="text-status-done font-semibold text-base flex items-center gap-2">
                       <CheckCircle2 className="h-5 w-5" />
-                      磅单已上传
+                      {t.scaleTicketPhoto} {t.uploaded}
                     </div>
-                    <span className="text-xs text-muted-foreground">点击重新拍照</span>
+                    <span className="text-xs text-muted-foreground">{t.tapRetake}</span>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-2">
                     <Camera className="h-10 w-10 text-primary" />
-                    <span className="font-medium text-base">拍照或上传磅单</span>
-                    <span className="text-xs text-muted-foreground">或选择相册图片</span>
+                    <span className="font-medium text-base">{t.takeScaleTicketPhoto}</span>
+                    <span className="text-xs text-muted-foreground">or upload from photos</span>
                   </div>
                 )}
                 <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -635,7 +640,7 @@ export function DriverStepPage() {
                 <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
                   <img 
                     src={weighTicketUrl} 
-                    alt="磅单预览" 
+                    alt="Scale ticket preview"
                     className="w-full h-auto max-h-[300px] object-contain"
                   />
                 </div>
@@ -646,7 +651,7 @@ export function DriverStepPage() {
 
           {step.requires_weight && (
             <div>
-              <Label>重量 (kg) *</Label>
+              <Label>{t.weight} *</Label>
               <Input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} className="h-12 mt-1 text-base" placeholder="0" />
             </div>
           )}
@@ -663,12 +668,12 @@ export function DriverStepPage() {
           {complete.isPending ? (
             <span className="flex items-center gap-2">
               <Loader2 className="h-5 w-5 animate-spin" />
-              提交中...
+              {t.submitting}
             </span>
           ) : (
             <span className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5" />
-              完成此步骤
+              {t.completeStep}
             </span>
           )}
         </Button>

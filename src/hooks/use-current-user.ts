@@ -12,6 +12,7 @@ export type CurrentUser = {
     name: string;
     email: string | null;
     auth_user_id: string;
+    driver_language: "zh" | "en" | null;
   } | null;
   roles: AppRole[];
   hasRole: (r: AppRole) => boolean;
@@ -53,7 +54,7 @@ export function useCurrentUser(): CurrentUser {
       const [{ data: p }, { data: r }] = await Promise.all([
         supabase
           .from("profiles")
-          .select("id,name,email,auth_user_id")
+          .select("id,name,email,auth_user_id,driver_language")
           .eq("auth_user_id", uid)
           .maybeSingle(),
         supabase.from("user_roles").select("role").eq("user_id", uid),

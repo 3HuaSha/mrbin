@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useNavigate, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { usePWA } from "@/hooks/use-pwa";
 import { formatETA, formatETATime } from "@/lib/eta-calculator";
+import { driverBinTypeNames, driverOrderTypeLabels, driverStepTypeLabels, driverText, getDriverLanguage } from "@/lib/driver-language";
 
 type SavedEtaRow = {
   step_id: string;
@@ -53,8 +54,10 @@ export function DriverHomePage() {
   const { session, loading, profile, hasRole } = useCurrentUser();
   const { canInstall, isInstalled, isIOS, promptInstall } = usePWA();
   const [dismissInstallHint, setDismissInstallHint] = useState(false);
+  const lang = getDriverLanguage(profile);
+  const t = driverText[lang];
 
-  // 未登录或不是司机 -> 登录页
+  // æœªç™»å½•æˆ–ä¸æ˜¯å¸æœº -> ç™»å½•é¡µ
   useEffect(() => {
     if (loading) return;
     if (!session) nav({ to: "/driver/login" });
@@ -80,8 +83,8 @@ export function DriverHomePage() {
 
   const doneCount = useMemo(() => steps.filter((s: any) => s.status === "done").length, [steps]);
   const total = steps.length;
-  
-  // 计算每个步骤的锁定状态：只有前一个步骤完成才能解锁
+
+  // è®¡ç®—æ¯ä¸ªæ­¥éª¤çš„é”å®šçŠ¶æ€ï¼šåªæœ‰å‰ä¸€ä¸ªæ­¥éª¤å®Œæˆæ‰èƒ½è§£é”
   const stepsWithLockStatus = useMemo(() => {
     return steps.map((step: any, index: number) => {
       let isLocked = false;
@@ -170,14 +173,14 @@ export function DriverHomePage() {
           <Truck className="h-5 w-5 text-primary" />
         </div>
         <div className="flex-1">
-          <div className="text-base font-bold tracking-tight">{profile?.name ?? "司机端"}</div>
+          <div className="text-base font-bold tracking-tight">{profile?.name ?? t.driverApp}</div>
           <div className="text-xs flex items-center gap-1.5 mt-0.5">
             <span className="relative flex h-2 w-2">
               {gpsActive && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
               <span className={cn("relative inline-flex rounded-full h-2 w-2", gpsActive ? "bg-green-500" : "bg-yellow-500")}></span>
             </span>
             <span className={cn("font-medium", gpsActive ? "text-green-600 dark:text-green-400" : "text-yellow-600 dark:text-yellow-400")}>
-              {gpsActive ? "位置更新中" : "等待位置信号"}
+              {gpsActive ? t.locationUpdating : t.waitingForLocation}
             </span>
           </div>
         </div>
@@ -186,7 +189,7 @@ export function DriverHomePage() {
             to="/"
             className="text-xs px-2.5 py-1.5 rounded-md bg-muted text-muted-foreground font-medium hover:bg-muted/80 transition-colors"
           >
-            后台
+            {t.staff}
           </Link>
         ) : null}
         <Button
@@ -206,14 +209,14 @@ export function DriverHomePage() {
               {isIOS ? <Share2 className="h-5 w-5" /> : <Download className="h-5 w-5" />}
             </div>
             <div className="flex-1 text-xs leading-relaxed">
-              <div className="font-bold text-sm mb-1 text-blue-900 dark:text-blue-100">把司机端装到主屏幕</div>
+              <div className="font-bold text-sm mb-1 text-blue-900 dark:text-blue-100">{t.installApp}</div>
               <div className="opacity-90">
                 {isIOS ? (
-                  <span>Safari 底部分享按钮 → 添加到主屏幕，图标跟 App 一样。</span>
+                  <span>{t.installIOS}</span>
                 ) : canInstall ? (
-                  <span>装上后从桌面图标直接打开，全屏无浏览器栏。</span>
+                  <span>{t.installAndroid}</span>
                 ) : (
-                  <span>Chrome 右上角菜单 → 安装应用（或"添加到主屏幕"）。</span>
+                  <span>{t.installChrome}</span>
                 )}
               </div>
             </div>
@@ -225,12 +228,12 @@ export function DriverHomePage() {
                   await promptInstall();
                 }}
               >
-                安装
+                {t.install}
               </Button>
             )}
             <button
               className="absolute top-2 right-2 p-1.5 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300"
-              aria-label="关闭"
+              aria-label={t.close}
               onClick={() => setDismissInstallHint(true)}
             >
               <X className="h-4 w-4" />
@@ -242,7 +245,7 @@ export function DriverHomePage() {
           <div className="p-4 flex items-center justify-between bg-muted/20">
             <div>
               <h2 className="font-bold text-foreground flex items-center gap-2">
-                <span>📅</span> 工作日程
+                <span>ðŸ“…</span> {t.schedule}
               </h2>
             </div>
             <div className="flex items-center gap-2">
@@ -258,7 +261,7 @@ export function DriverHomePage() {
 
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
-            <h3 className="font-bold text-lg tracking-tight">执行路线</h3>
+            <h3 className="font-bold text-lg tracking-tight">{t.route}</h3>
           </div>
 
           {total === 0 && (
@@ -266,7 +269,7 @@ export function DriverHomePage() {
               <div className="bg-muted p-3 rounded-full">
                 <CheckCircle2 className="h-8 w-8 opacity-50" />
               </div>
-              <span className="font-medium">今天没有分配的步骤</span>
+              <span className="font-medium">{t.noStops}</span>
             </div>
           )}
 
@@ -282,35 +285,26 @@ export function DriverHomePage() {
                 const isDone = s.status === "done";
                 const isLocked = s.isLocked;
                 const isPending = s.status !== "done";
-                
+
                 const isCurrent = index === activeIndex;
                 const isNext = index === activeIndex + 1;
-                
-                // 步骤类型标签
-                const stepTypeLabels: Record<string, string> = {
-                  'pickup_bin': '取桶', 'drop_bin': '放桶', 'dump_waste': '倒垃圾',
-                  'load_material': '装料', 'unload_material': '卸料', 'depot_pickup': '仓库取桶',
-                  'customer_delivery': '送到客户', 'customer_pickup': '去客户取桶', 'dump_site': '去垃圾场',
-                  'pickup': '取货', 'delivery': '送货', 'swap': '换桶',
-                };
-                const orderTypeLabels: Record<string, string> = {
-                  'delivery': '送桶', 'pickup': '收桶', 'swap': '换桶', 'material': '物料',
-                };
+
+                // æ­¥éª¤ç±»åž‹æ ‡ç­¾
+                const stepTypeLabels = driverStepTypeLabels[lang];
+                const orderTypeLabels = driverOrderTypeLabels[lang];
                 const stepLabel = isOrderNode
-                  ? (s.orders!.type === 'material' 
+                  ? (s.orders!.type === 'material'
                       ? (stepTypeLabels[s.step_type] || s.step_type)
                       : (orderTypeLabels[s.orders!.type] || stepTypeLabels[s.step_type] || s.step_type))
                   : (stepTypeLabels[s.step_type] || s.step_type);
-                
-                const binTypeNames: Record<string, string> = {
-                  'garbage': '垃圾桶', 'brick': '砖桶', 'soil': '土桶', 'cement': '水泥桶', 'asphalt': '沥青桶',
-                };
+
+                const binTypeNames = driverBinTypeNames[lang];
                 const binTypeName = isOrderNode && s.orders?.bin_type ? binTypeNames[s.orders.bin_type] || s.orders.bin_type : '';
                 const stepEta = etaByStepId.get(s.id);
-                
+
                 return (
                   <div key={s.id} className="w-full flex flex-col items-center">
-                    {/* 连接线 */}
+                    {/* è¿žæŽ¥çº¿ */}
                     {index > 0 && (
                       <div className="h-4 w-[2px] bg-border/50 my-1 rounded-full" />
                     )}
@@ -329,9 +323,9 @@ export function DriverHomePage() {
                         isDone ? "bg-muted text-muted-foreground" :
                         "bg-muted/50 text-muted-foreground"
                       )}>
-                        {isCurrent && <><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-primary-foreground"></span></span> 当前任务</>}
-                        {isDone && !isCurrent && "✓ 已完成任务"}
-                        {!isDone && !isCurrent && "⏳ 待执行任务"}
+                        {isCurrent && <><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-foreground opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-primary-foreground"></span></span> {t.currentTask}</>}
+                        {isDone && !isCurrent && `✓ ${t.completed}`}
+                        {!isDone && !isCurrent && `⏳ ${t.upcoming}`}
                       </div>
 
                       <div className={cn("p-4 flex items-start gap-3", isDone && !isCurrent && "grayscale-[0.5]")}>
@@ -362,25 +356,25 @@ export function DriverHomePage() {
                               </div>
                               {s.orders!.customer_notes && isPending && !isLocked && (
                                 <div className="mt-3 text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md px-3 py-2 border border-amber-500/20 flex gap-2">
-                                  <span className="shrink-0">📝</span> 
+                                  <span className="shrink-0">ðŸ“</span>
                                   <span className="leading-relaxed">{s.orders!.customer_notes}</span>
                                 </div>
                               )}
-                              
-                              {/* ETA 显示 */}
+
+                              {/* ETA æ˜¾ç¤º */}
                               {isPending && stepEta?.eta_at && (
                                 <div className={cn(
                                   "flex items-center gap-1.5 mt-3 w-fit font-semibold",
-                                  isCurrent 
-                                    ? "text-sm text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1.5 rounded-md border border-blue-100 dark:border-blue-900/50" 
+                                  isCurrent
+                                    ? "text-sm text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1.5 rounded-md border border-blue-100 dark:border-blue-900/50"
                                     : "text-xs text-blue-600/80 dark:text-blue-400/80"
                                 )}>
                                   <Clock className={cn("shrink-0", isCurrent ? "h-4 w-4" : "h-3.5 w-3.5")} />
                                   <span>
-                                    ETA: {formatETATime(stepEta.eta_at)}
-                                    <span className="opacity-80 font-medium"> / 完 {formatStepFinishTime(stepEta.eta_at, s)}</span>
+                                    {t.eta}: {formatETATime(stepEta.eta_at)}
+                                    <span className="opacity-80 font-medium"> / {t.finish} {formatStepFinishTime(stepEta.eta_at, s)}</span>
                                     {stepEta.eta_min_at && stepEta.eta_max_at && (
-                                      <span className="opacity-80 font-medium"> · {formatETATime(stepEta.eta_min_at)}-{formatETATime(stepEta.eta_max_at)}</span>
+                                      <span className="opacity-80 font-medium"> Â· {formatETATime(stepEta.eta_min_at)}-{formatETATime(stepEta.eta_max_at)}</span>
                                     )}
                                     {isCurrent && <span className="opacity-80 font-medium"> ({formatETA(stepEta.eta_at)})</span>}
                                   </span>
@@ -390,10 +384,10 @@ export function DriverHomePage() {
                           ) : (
                             <>
                               <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                                <Badge variant="outline" className="text-[10px] shadow-sm">手动步骤</Badge>
+                                <Badge variant="outline" className="text-[10px] shadow-sm">{t.manualStep}</Badge>
                               </div>
                               <div className="text-base font-bold tracking-tight text-foreground/90">
-                                {STEP_TYPE_EMOJI[s.step_type] || '📍'} {stepLabel}
+                                {STEP_TYPE_EMOJI[s.step_type] || 'ðŸ“'} {stepLabel}
                               </div>
                               <div className="text-sm text-muted-foreground mt-1 line-clamp-2 leading-relaxed flex items-start gap-1">
                                 <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
@@ -401,25 +395,25 @@ export function DriverHomePage() {
                               </div>
                               {s.notes && isPending && !isLocked && (
                                 <div className="mt-3 text-xs bg-muted rounded-md px-3 py-2 border flex gap-2">
-                                  <span className="shrink-0">📝</span>
+                                  <span className="shrink-0">ðŸ“</span>
                                   <span className="leading-relaxed">{s.notes}</span>
                                 </div>
                               )}
-                              
-                              {/* ETA 显示 */}
+
+                              {/* ETA æ˜¾ç¤º */}
                               {isPending && stepEta?.eta_at && (
                                 <div className={cn(
                                   "flex items-center gap-1.5 mt-3 w-fit font-semibold",
-                                  isCurrent 
-                                    ? "text-sm text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1.5 rounded-md border border-blue-100 dark:border-blue-900/50" 
+                                  isCurrent
+                                    ? "text-sm text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1.5 rounded-md border border-blue-100 dark:border-blue-900/50"
                                     : "text-xs text-blue-600/80 dark:text-blue-400/80"
                                 )}>
                                   <Clock className={cn("shrink-0", isCurrent ? "h-4 w-4" : "h-3.5 w-3.5")} />
                                   <span>
-                                    ETA: {formatETATime(stepEta.eta_at)}
-                                    <span className="opacity-80 font-medium"> / 完 {formatStepFinishTime(stepEta.eta_at, s)}</span>
+                                    {t.eta}: {formatETATime(stepEta.eta_at)}
+                                    <span className="opacity-80 font-medium"> / {t.finish} {formatStepFinishTime(stepEta.eta_at, s)}</span>
                                     {stepEta.eta_min_at && stepEta.eta_max_at && (
-                                      <span className="opacity-80 font-medium"> · {formatETATime(stepEta.eta_min_at)}-{formatETATime(stepEta.eta_max_at)}</span>
+                                      <span className="opacity-80 font-medium"> Â· {formatETATime(stepEta.eta_min_at)}-{formatETATime(stepEta.eta_max_at)}</span>
                                     )}
                                     {isCurrent && <span className="opacity-80 font-medium"> ({formatETA(stepEta.eta_at)})</span>}
                                   </span>
@@ -436,7 +430,7 @@ export function DriverHomePage() {
                             params={{ stepId: s.id }}
                             className="flex items-center justify-center w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-all py-3.5 rounded-xl font-bold text-[15px] active:scale-[0.98]"
                           >
-                            开始执行任务 <ArrowRight className="inline h-5 w-5 ml-1.5" />
+                            {t.startTask} <ArrowRight className="inline h-5 w-5 ml-1.5" />
                           </Link>
                         </div>
                       )}
@@ -452,7 +446,7 @@ export function DriverHomePage() {
           className="text-xs text-muted-foreground w-full text-center pt-2 font-medium hover:text-foreground transition-colors"
           onClick={() => refetch()}
         >
-          ↻ 下拉或点击此处刷新
+          ↻ {t.refresh}
         </button>
       </div>
     </div>
