@@ -188,14 +188,14 @@ function extractWeightKg(ticketType, text) {
   if (ticketType === "MRBIN") {
     return parseKg(matchOne(text, [
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
-    ]));
+    ])) ?? extractKgNearLabel(text, ["NET"]);
   }
 
   if (ticketType === "YORK1") {
     return parseKg(matchOne(text, [
       /\bNET\s+WEIGHT\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
-    ]));
+    ])) ?? extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]);
   }
 
   if (ticketType === "MAPLEWASTE") {
@@ -203,7 +203,7 @@ function extractWeightKg(ticketType, text) {
       /\bNET\s+WEIGHT\s*(?:\(\s*kg\s*\))?\s*:?\s*([0-9][0-9,.\s]*)\s*(?:kg)?\b/i,
       /\bNET\s+WT\.?\s*(?:\(\s*kg\s*\))?\s*:?\s*([0-9][0-9,.\s]*)\s*(?:kg)?\b/i,
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
-    ]));
+    ])) ?? extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]);
   }
 
   if (ticketType === "DRAGLAM") {
@@ -215,6 +215,25 @@ function extractWeightKg(ticketType, text) {
   }
 
   return null;
+}
+
+function extractKgNearLabel(text, labels) {
+  const normalized = String(text || "").replace(/\r/g, "\n");
+  for (const label of labels) {
+    const escaped = label.split(/\s+/).map(escapeRegex).join("\\s+");
+    const pattern = new RegExp(`\\b${escaped}\\b[\\s\\S]{0,80}?([0-9][0-9,\\.\\s]{1,12})\\s*(?:kg)?\\b`, "i");
+    const value = parseKg(normalized.match(pattern)?.[1]);
+    if (value != null && value >= 50 && value <= 60000) return value;
+
+    const kgFirstPattern = new RegExp(`\\b${escaped}\\b[\\s\\S]{0,80}?kg[\\s\\S]{0,20}?([0-9][0-9,\\.\\s]{1,12})\\b`, "i");
+    const kgFirstValue = parseKg(normalized.match(kgFirstPattern)?.[1]);
+    if (kgFirstValue != null && kgFirstValue >= 50 && kgFirstValue <= 60000) return kgFirstValue;
+  }
+  return null;
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseKg(value) {

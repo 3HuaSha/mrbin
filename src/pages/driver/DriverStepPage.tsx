@@ -99,11 +99,19 @@ export function DriverStepPage() {
 
   const handleUpload = async (file: File, kind: "photo" | "pickup_photo" | "weigh") => {
     setUploading(kind);
+    let compressed = file;
+    try {
+      compressed = await compressImage(file);
+    } catch {
+      toast.warning("图片压缩失败，已改用原图上传");
+    }
     const shouldOcrTicket = kind === "weigh" || (kind === "photo" && isMaterialTicketStep);
-    const imageBase64 = shouldOcrTicket ? await fileToBase64(file) : null;
-    const ext = file.name.split(".").pop() || "jpg";
-    const path = `${stepId}/${kind}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from("driver-uploads").upload(path, file, { upsert: true });
+    const imageBase64 = shouldOcrTicket ? await fileToBase64(compressed) : null;
+    const path = `${stepId}/${kind}-${Date.now()}.jpg`;
+    const { error } = await supabase.storage.from("driver-uploads").upload(path, compressed, {
+      upsert: true,
+      contentType: "image/jpeg",
+    });
     setUploading(null);
     if (error) { toast.error(error.message); return; }
     const { data } = supabase.storage.from("driver-uploads").getPublicUrl(path);
@@ -116,7 +124,7 @@ export function DriverStepPage() {
       setWeighTicketUrl(data.publicUrl);
       void runTicketOcr({ imageBase64: imageBase64 || undefined, imageUrl: data.publicUrl });
     }
-    toast.success("上传成功");
+    toast.success(`上传成功 (${Math.round(compressed.size / 1024)} KB)`);
   };
 
   const runTicketOcr = async (payload: { imageUrl?: string; imageBase64?: string }) => {
@@ -183,6 +191,60 @@ export function DriverStepPage() {
   const isTicketSchemaMissing = (error: unknown) => {
     const message = error instanceof Error ? error.message : String((error as any)?.message || error || "");
     return message.includes("ticket_number") && message.includes("schema cache");
+  };
+
+  const compressImage = async (file: File) => {
+    const maxSide = 1600;
+    const targetBytes = 320 * 1024;
+    const image = await loadImage(file);
+    const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("无法处理图片");
+    ctx.drawImage(image, 0, 0, width, height);
+
+    let quality = 0.72;
+    let blob = await canvasToBlob(canvas, quality);
+    while (blob.size > targetBytes && quality > 0.45) {
+      quality = Math.max(0.45, quality - 0.08);
+      blob = await canvasToBlob(canvas, quality);
+    }
+
+    if (blob.size >= file.size && file.type === "image/jpeg") return file;
+    return new File([blob], replaceImageExtension(file.name), { type: "image/jpeg" });
+  };
+
+  const loadImage = (file: File) =>
+    new Promise<HTMLImageElement>((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const image = new Image();
+      image.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(image);
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("无法读取图片"));
+      };
+      image.src = url;
+    });
+
+  const canvasToBlob = (canvas: HTMLCanvasElement, quality: number) =>
+    new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error("图片压缩失败")),
+        "image/jpeg",
+        quality
+      );
+    });
+
+  const replaceImageExtension = (name: string) => {
+    const base = name.replace(/\.[^.]+$/, "") || "upload";
+    return `${base}.jpg`;
   };
 
   const renderGalleryUpload = (kind: "photo" | "pickup_photo" | "weigh", label = "从相册/文件上传") => (
