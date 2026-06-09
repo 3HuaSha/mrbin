@@ -208,8 +208,16 @@ export function DriverStepPage() {
       {ticketType && (
         <div className="mt-1 text-xs text-muted-foreground">类型: {ticketType}</div>
       )}
-      {weight && (
-        <div className="mt-1 text-xs text-muted-foreground">重量: {weight} kg</div>
+      <div className="mt-3 flex items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
+        <span className="text-xs font-semibold text-blue-800">识别重量</span>
+        <span className="font-mono text-sm font-bold text-blue-800">
+          {weight ? `${weight} kg` : "未识别"}
+        </span>
+      </div>
+      {!weight && ticketNumber && (
+        <div className="mt-1 text-xs text-muted-foreground">
+          这张单只识别到了票号，重量可以后面人工填写。
+        </div>
       )}
       {(ocrStatus === "missing" || ocrStatus === "error") && (
         <div className="mt-2 text-xs text-amber-700">可以先完成任务，后面由管理端人工确认。</div>

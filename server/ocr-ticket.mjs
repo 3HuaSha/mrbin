@@ -200,7 +200,8 @@ function extractWeightKg(ticketType, text) {
 
   if (ticketType === "MAPLEWASTE") {
     return parseKg(matchOne(text, [
-      /\bNET\s+WEIGHT\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
+      /\bNET\s+WEIGHT\s*(?:\(\s*kg\s*\))?\s*:?\s*([0-9][0-9,.\s]*)\s*(?:kg)?\b/i,
+      /\bNET\s+WT\.?\s*(?:\(\s*kg\s*\))?\s*:?\s*([0-9][0-9,.\s]*)\s*(?:kg)?\b/i,
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
     ]));
   }
