@@ -166,6 +166,18 @@ export function DriverStepPage() {
       reader.readAsDataURL(file);
     });
 
+  const renderGalleryUpload = (kind: "photo" | "pickup_photo" | "weigh", label = "从相册/文件上传") => (
+    <label className="mt-2 inline-flex h-10 w-full items-center justify-center rounded-lg border bg-background text-sm font-medium text-foreground shadow-sm cursor-pointer hover:bg-muted">
+      {label}
+      <input
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], kind)}
+      />
+    </label>
+  );
+
   const canComplete = () => {
     if (!step) return false;
     if (step.requires_photo && !photoUrl) return false;
@@ -304,9 +316,10 @@ export function DriverStepPage() {
                       <span className="text-xs text-muted-foreground">倒垃圾现场照片</span>
                     </div>
                   )}
-                  <input type="file" accept="image/*" className="hidden"
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
                 </label>
+                {renderGalleryUpload("photo")}
                 {photoUrl && (
                   <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
                     <img src={photoUrl} alt="垃圾预览" className="w-full h-auto max-h-[300px] object-contain" />
@@ -337,9 +350,10 @@ export function DriverStepPage() {
                       <span className="text-xs text-muted-foreground">垃圾场收据（可选）</span>
                     </div>
                   )}
-                  <input type="file" accept="image/*" className="hidden"
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "weigh")} />
                 </label>
+                {renderGalleryUpload("weigh")}
                 {weighTicketUrl && (
                   <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
                     <img src={weighTicketUrl} alt="垃圾单预览" className="w-full h-auto max-h-[300px] object-contain" />
@@ -388,9 +402,10 @@ export function DriverStepPage() {
                       <span className="text-xs text-muted-foreground">送到客户的桶</span>
                     </div>
                   )}
-                  <input type="file" accept="image/*" className="hidden"
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
                 </label>
+                {renderGalleryUpload("photo")}
                 {photoUrl && (
                   <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
                     <img src={photoUrl} alt="新桶预览" className="w-full h-auto max-h-[300px] object-contain" />
@@ -421,9 +436,10 @@ export function DriverStepPage() {
                       <span className="text-xs text-muted-foreground">从客户收走的桶</span>
                     </div>
                   )}
-                  <input type="file" accept="image/*" className="hidden"
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "pickup_photo")} />
                 </label>
+                {renderGalleryUpload("pickup_photo")}
                 {pickupPhotoUrl && (
                   <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
                     <img src={pickupPhotoUrl} alt="旧桶预览" className="w-full h-auto max-h-[300px] object-contain" />
@@ -455,9 +471,10 @@ export function DriverStepPage() {
                     <span className="text-xs text-muted-foreground">或选择相册图片</span>
                   </div>
                 )}
-                <input type="file" accept="image/*" className="hidden"
+                <input type="file" accept="image/*" capture="environment" className="hidden"
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "photo")} />
               </label>
+              {renderGalleryUpload("photo")}
               {photoUrl && (
                 <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
                   <img
@@ -514,9 +531,10 @@ export function DriverStepPage() {
                     <span className="text-xs text-muted-foreground">或选择相册图片</span>
                   </div>
                 )}
-                <input type="file" accept="image/*" className="hidden"
+                <input type="file" accept="image/*" capture="environment" className="hidden"
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], "weigh")} />
               </label>
+              {renderGalleryUpload("weigh")}
               {weighTicketUrl && (
                 <div className="mt-3 rounded-lg overflow-hidden border bg-muted">
                   <img 
