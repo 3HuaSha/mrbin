@@ -95,21 +95,26 @@ export function DriverStepPage() {
   const isManualStep = step?.node_type === 'step' || !order;
   const isSwapDelivery = order?.type === "swap" && (step?.step_type === "customer_delivery" || step?.step_type === "swap");
   const isDumpWaste = step?.step_type === "dump_waste";
+  const isMaterialTicketStep = order?.type === "material" || step?.step_type === "load_material" || step?.step_type === "unload_material";
 
   const handleUpload = async (file: File, kind: "photo" | "pickup_photo" | "weigh") => {
     setUploading(kind);
-    const imageBase64 = kind === "weigh" && isDumpWaste ? await fileToBase64(file) : null;
+    const shouldOcrTicket = kind === "weigh" || (kind === "photo" && isMaterialTicketStep);
+    const imageBase64 = shouldOcrTicket ? await fileToBase64(file) : null;
     const ext = file.name.split(".").pop() || "jpg";
     const path = `${stepId}/${kind}-${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from("driver-uploads").upload(path, file, { upsert: true });
     setUploading(null);
     if (error) { toast.error(error.message); return; }
     const { data } = supabase.storage.from("driver-uploads").getPublicUrl(path);
-    if (kind === "photo") setPhotoUrl(data.publicUrl);
+    if (kind === "photo") {
+      setPhotoUrl(data.publicUrl);
+      if (isMaterialTicketStep) void runTicketOcr({ imageBase64: imageBase64 || undefined, imageUrl: data.publicUrl });
+    }
     else if (kind === "pickup_photo") setPickupPhotoUrl(data.publicUrl);
     else {
       setWeighTicketUrl(data.publicUrl);
-      if (isDumpWaste) void runTicketOcr({ imageBase64: imageBase64 || undefined, imageUrl: data.publicUrl });
+      void runTicketOcr({ imageBase64: imageBase64 || undefined, imageUrl: data.publicUrl });
     }
     toast.success("上传成功");
   };
@@ -127,10 +132,12 @@ export function DriverStepPage() {
 
       const nextTicketNumber = typeof data.ticketNumber === "string" ? data.ticketNumber : "";
       const nextTicketType = typeof data.ticketType === "string" ? data.ticketType : "UNKNOWN";
+      const nextWeightKg = typeof data.weightKg === "number" && Number.isFinite(data.weightKg) ? data.weightKg : null;
 
       if (nextTicketNumber) {
         setTicketNumber(nextTicketNumber);
         setTicketType(nextTicketType);
+        if (nextWeightKg != null) setWeight(String(nextWeightKg));
         setOcrStatus("found");
         toast.success(`已识别票号 ${nextTicketNumber}`);
       } else {
@@ -143,12 +150,19 @@ export function DriverStepPage() {
         .update({
           ticket_number: nextTicketNumber || null,
           ticket_type: nextTicketType,
+          ...(nextWeightKg != null ? { weight_kg: nextWeightKg } : {}),
           ocr_confidence: typeof data.confidence === "number" ? data.confidence : null,
           ocr_raw_text: typeof data.rawText === "string" ? data.rawText : null,
           ocr_checked: false,
         } as any)
         .eq("id", stepId);
-      if (error) throw error;
+      if (error) {
+        if (isTicketSchemaMissing(error)) {
+          toast.warning("OCR 已识别，但数据库还没加 ticket_number 字段，暂时只在页面显示");
+          return;
+        }
+        throw error;
+      }
 
       qc.invalidateQueries({ queryKey: ["job-step", stepId] });
       qc.invalidateQueries({ queryKey: ["driver-steps"] });
@@ -166,6 +180,11 @@ export function DriverStepPage() {
       reader.readAsDataURL(file);
     });
 
+  const isTicketSchemaMissing = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String((error as any)?.message || error || "");
+    return message.includes("ticket_number") && message.includes("schema cache");
+  };
+
   const renderGalleryUpload = (kind: "photo" | "pickup_photo" | "weigh", label = "从相册/文件上传") => (
     <label className="mt-2 inline-flex h-10 w-full items-center justify-center rounded-lg border bg-background text-sm font-medium text-foreground shadow-sm cursor-pointer hover:bg-muted">
       {label}
@@ -176,6 +195,26 @@ export function DriverStepPage() {
         onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0], kind)}
       />
     </label>
+  );
+
+  const renderTicketOcrStatus = () => (
+    <div className="mt-3 rounded-lg border bg-muted/50 p-3 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-semibold">Ticket number</span>
+        <span className="font-mono font-bold">
+          {ocrStatus === "reading" ? "识别中..." : ticketNumber || "未识别"}
+        </span>
+      </div>
+      {ticketType && (
+        <div className="mt-1 text-xs text-muted-foreground">类型: {ticketType}</div>
+      )}
+      {weight && (
+        <div className="mt-1 text-xs text-muted-foreground">重量: {weight} kg</div>
+      )}
+      {(ocrStatus === "missing" || ocrStatus === "error") && (
+        <div className="mt-2 text-xs text-amber-700">可以先完成任务，后面由管理端人工确认。</div>
+      )}
+    </div>
   );
 
   const canComplete = () => {
@@ -197,8 +236,8 @@ export function DriverStepPage() {
       if (binNumber) update.bin_number_reported = binNumber.trim();
       if (oldBinNumber) update.old_bin_number_reported = oldBinNumber.trim();
       if (weighTicketUrl) update.weigh_ticket_url = weighTicketUrl;
-      if (ticketNumber) update.ticket_number = ticketNumber;
-      if (ticketType) update.ticket_type = ticketType;
+      if (ticketNumber && step?.ticket_number !== undefined) update.ticket_number = ticketNumber;
+      if (ticketType && step?.ticket_type !== undefined) update.ticket_type = ticketType;
       if (weight) update.weight_kg = parseFloat(weight);
       if (dumpSite) update.dump_site = dumpSite.trim();
       const { error } = await supabase.from("job_steps").update(update as any).eq("id", stepId);
@@ -359,22 +398,7 @@ export function DriverStepPage() {
                     <img src={weighTicketUrl} alt="垃圾单预览" className="w-full h-auto max-h-[300px] object-contain" />
                   </div>
                 )}
-                {weighTicketUrl && (
-                  <div className="mt-3 rounded-lg border bg-muted/50 p-3 text-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-semibold">Ticket number</span>
-                      <span className="font-mono font-bold">
-                        {ocrStatus === "reading" ? "识别中..." : ticketNumber || "未识别"}
-                      </span>
-                    </div>
-                    {ticketType && (
-                      <div className="mt-1 text-xs text-muted-foreground">类型: {ticketType}</div>
-                    )}
-                    {(ocrStatus === "missing" || ocrStatus === "error") && (
-                      <div className="mt-2 text-xs text-amber-700">可以先完成任务，后面由管理端人工确认。</div>
-                    )}
-                  </div>
-                )}
+                {weighTicketUrl && renderTicketOcrStatus()}
               </div>
             </>
           ) : isSwapDelivery ? (
@@ -484,6 +508,7 @@ export function DriverStepPage() {
                   />
                 </div>
               )}
+              {photoUrl && isMaterialTicketStep && renderTicketOcrStatus()}
             </div>
           )}
 
@@ -544,6 +569,7 @@ export function DriverStepPage() {
                   />
                 </div>
               )}
+              {weighTicketUrl && !isDumpWaste && renderTicketOcrStatus()}
             </div>
           )}
 

@@ -94,20 +94,29 @@ export function parseDumpTicket(rawText) {
     /\bLR\s*[:#]?\s*#?\s*(\d{4,8})\b/i,
     /\bLR\s*#\s*(\d{4,8})\b/i,
   ]);
-  if (lr) return buildResult("LR", `LR${lr}`);
+  if (lr) return buildResult("LR", `LR${lr}`, null);
+
+  const mapleWaste = matchOne(text, [
+    /\bTICKET\s*(?:NO\.?|#)?\s*:?\s*(\d{5,8})\b/i,
+    /\b(?:TICKET|RECEIPT)\b[\s\S]{0,40}\b(\d{5,8})\b/i,
+    /\b(\d{6})\b/,
+  ]);
+  if ((upper.includes("MAPLE WASTE") || upper.includes("MAPLEWASTE") || upper.includes("MAPLE")) && mapleWaste) {
+    return buildResult("MAPLEWASTE", compact(mapleWaste), extractWeightKg("MAPLEWASTE", text));
+  }
 
   const mrbin = matchOne(text, [
     /\bTICKET\s*#?\s*:?\s*(00\s*\d{3,})\b/i,
     /\b(00\s*\d{3,})\b/,
   ]);
-  if (upper.includes("MRBIN") && mrbin) return buildResult("MRBIN", compact(mrbin));
+  if (upper.includes("MRBIN") && mrbin) return buildResult("MRBIN", compact(mrbin), extractWeightKg("MRBIN", text));
 
   const york1 = matchOne(text, [
-    /\bTICKET\s*#?\s*:?\s*(NU\s*\d{4,})\b/i,
-    /\b(NU\s*\d{4,})\b/i,
+    /\bTICKET\s*#?\s*:?\s*((?:NU|ME)\s*\d{4,})\b/i,
+    /\b((?:NU|ME)\s*\d{4,})\b/i,
   ]);
   if ((upper.includes("YORK1") || upper.includes("YORK")) && york1) {
-    return buildResult("YORK1", compact(york1));
+    return buildResult("YORK1", compact(york1), extractWeightKg("YORK1", text));
   }
 
   const draglam = matchOne(text, [
@@ -115,17 +124,18 @@ export function parseDumpTicket(rawText) {
     /\b(TDW\s*\d{5,})\b/i,
   ]);
   if ((upper.includes("DRAGLAM") || upper.includes("WASTE&RECYCLING")) && draglam) {
-    return buildResult("DRAGLAM", compact(draglam));
+    return buildResult("DRAGLAM", compact(draglam), extractWeightKg("DRAGLAM", text));
   }
 
   const fallback = matchOne(text, [
-    /\b(TDW\s*\d{5,}|NU\s*\d{4,}|00\s*\d{3,})\b/i,
+    /\b(TDW\s*\d{5,}|(?:NU|ME)\s*\d{4,}|00\s*\d{3,})\b/i,
     /\bLR\s*[:#]?\s*#?\s*(\d{4,8})\b/i,
   ]);
 
   if (fallback) {
     const ticket = compact(fallback);
-    return buildResult(typeFromTicket(ticket, upper), ticket.startsWith("LR") ? ticket : ticket);
+    const type = typeFromTicket(ticket, upper);
+    return buildResult(type, ticket.startsWith("LR") ? ticket : ticket, extractWeightKg(type, text));
   }
 
   return {
@@ -155,10 +165,11 @@ function compact(value) {
   return String(value || "").replace(/\s+/g, "").toUpperCase();
 }
 
-function buildResult(ticketType, ticketNumber) {
+function buildResult(ticketType, ticketNumber, weightKg) {
   return {
     ticketType,
     ticketNumber,
+    weightKg,
     confidence: 0.9,
     issues: [],
   };
@@ -166,10 +177,55 @@ function buildResult(ticketType, ticketNumber) {
 
 function typeFromTicket(ticket, upperText) {
   if (ticket.startsWith("TDW") || upperText.includes("DRAGLAM")) return "DRAGLAM";
-  if (ticket.startsWith("NU") || upperText.includes("YORK")) return "YORK1";
+  if (ticket.startsWith("NU") || ticket.startsWith("ME") || upperText.includes("YORK")) return "YORK1";
+  if (upperText.includes("MAPLE WASTE") || upperText.includes("MAPLEWASTE") || upperText.includes("MAPLE")) return "MAPLEWASTE";
   if (ticket.startsWith("00") || upperText.includes("MRBIN")) return "MRBIN";
   if (ticket.startsWith("LR") || upperText.includes("LANDSCAPING")) return "LR";
   return "UNKNOWN";
+}
+
+function extractWeightKg(ticketType, text) {
+  if (ticketType === "MRBIN") {
+    return parseKg(matchOne(text, [
+      /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
+    ]));
+  }
+
+  if (ticketType === "YORK1") {
+    return parseKg(matchOne(text, [
+      /\bNET\s+WEIGHT\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
+      /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
+    ]));
+  }
+
+  if (ticketType === "MAPLEWASTE") {
+    return parseKg(matchOne(text, [
+      /\bNET\s+WEIGHT\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
+      /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
+    ]));
+  }
+
+  if (ticketType === "DRAGLAM") {
+    const ton = parseNumber(matchOne(text, [
+      /\bQUANTITY\s*:?\s*([0-9][0-9,.\s]*)\b/i,
+      /\bQTY\.?\s*:?\s*([0-9][0-9,.\s]*)\b/i,
+    ]));
+    return ton == null ? null : Math.round(ton * 1000);
+  }
+
+  return null;
+}
+
+function parseKg(value) {
+  const parsed = parseNumber(value);
+  return parsed == null ? null : Math.round(parsed);
+}
+
+function parseNumber(value) {
+  if (!value) return null;
+  const cleaned = String(value).replace(/\s+/g, "").replace(/,/g, "");
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function sendJson(res, status, payload) {

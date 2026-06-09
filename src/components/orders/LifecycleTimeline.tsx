@@ -105,9 +105,10 @@ export function LifecycleTimeline({
               label="装料"
               time={loadStep?.completed_at}
               fmtTime={fmtTime}
-              detail={(loadStep?._assignment?.profiles?.name || loadStep?.photo_url) ? (
+              detail={(loadStep?._assignment?.profiles?.name || loadStep?.photo_url || loadStep?.ticket_number) ? (
                 <div className="space-y-0.5">
                   {loadStep?._assignment?.profiles?.name && <div>司机: {loadStep._assignment.profiles.name}</div>}
+                  {loadStep?.ticket_number && <div>Ticket: {loadStep.ticket_number}</div>}
                   {loadStep?.photo_url && (
                     <a href={loadStep.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">照片</a>
                   )}
@@ -120,9 +121,10 @@ export function LifecycleTimeline({
               label="送料"
               time={unloadStep?.completed_at}
               fmtTime={fmtTime}
-              detail={(unloadStep?._assignment?.profiles?.name || unloadStep?.photo_url) ? (
+              detail={(unloadStep?._assignment?.profiles?.name || unloadStep?.photo_url || unloadStep?.ticket_number) ? (
                 <div className="space-y-0.5">
                   {unloadStep?._assignment?.profiles?.name && <div>司机: {unloadStep._assignment.profiles.name}</div>}
+                  {unloadStep?.ticket_number && <div>Ticket: {unloadStep.ticket_number}</div>}
                   {unloadStep?.photo_url && (
                     <a href={unloadStep.photo_url} target="_blank" rel="noreferrer" className="text-primary underline">照片</a>
                   )}
@@ -241,6 +243,7 @@ export function LifecycleTimeline({
             detail={dumpStep ? (
               <div className="space-y-0.5">
                 {dumpStep.weight_kg != null && <div>{dumpStep.weight_kg} kg</div>}
+                {dumpStep.ticket_number && <div>Ticket: {dumpStep.ticket_number}</div>}
                 {dumpStep.dump_site && <div className="truncate max-w-[80px] mx-auto">{dumpStep.dump_site}</div>}
                 {(dumpStep.photo_url || dumpStep.weigh_ticket_url) && (
                   <div className="flex flex-col items-center gap-0.5">
