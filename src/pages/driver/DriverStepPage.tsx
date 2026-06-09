@@ -129,6 +129,7 @@ export function DriverStepPage() {
 
   const runTicketOcr = async (payload: { imageUrl?: string; imageBase64?: string }) => {
     setOcrStatus("reading");
+    setWeight("");
     try {
       const response = await fetch("/api/ocr-ticket", {
         method: "POST",
@@ -145,7 +146,7 @@ export function DriverStepPage() {
       if (nextTicketNumber) {
         setTicketNumber(nextTicketNumber);
         setTicketType(nextTicketType);
-        if (nextWeightKg != null) setWeight(String(nextWeightKg));
+        setWeight(nextWeightKg != null ? String(nextWeightKg) : "");
         setOcrStatus("found");
         toast.success(`已识别票号 ${nextTicketNumber}`);
       } else {

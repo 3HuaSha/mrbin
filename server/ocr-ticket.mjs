@@ -186,24 +186,24 @@ function typeFromTicket(ticket, upperText) {
 
 function extractWeightKg(ticketType, text) {
   if (ticketType === "MRBIN") {
-    return parseKg(matchOne(text, [
+    return extractKgNearLabel(text, ["NET"]) ?? parseKg(matchOne(text, [
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
-    ])) ?? extractKgNearLabel(text, ["NET"]);
+    ]));
   }
 
   if (ticketType === "YORK1") {
-    return parseKg(matchOne(text, [
+    return extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]) ?? parseKg(matchOne(text, [
       /\bNET\s+WEIGHT\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
-    ])) ?? extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]);
+    ]));
   }
 
   if (ticketType === "MAPLEWASTE") {
-    return parseKg(matchOne(text, [
+    return extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]) ?? parseKg(matchOne(text, [
       /\bNET\s+WEIGHT\s*(?:\(\s*kg\s*\))?\s*:?\s*([0-9][0-9,.\s]*)\s*(?:kg)?\b/i,
       /\bNET\s+WT\.?\s*(?:\(\s*kg\s*\))?\s*:?\s*([0-9][0-9,.\s]*)\s*(?:kg)?\b/i,
       /\bNET\s*:?\s*([0-9][0-9,.\s]*)\s*kg\b/i,
-    ])) ?? extractKgNearLabel(text, ["NET WEIGHT", "NET WT", "NET"]);
+    ]));
   }
 
   if (ticketType === "DRAGLAM") {
@@ -219,17 +219,56 @@ function extractWeightKg(ticketType, text) {
 
 function extractKgNearLabel(text, labels) {
   const normalized = String(text || "").replace(/\r/g, "\n");
+  const tableValue = extractKgFromScaleTable(normalized, labels);
+  if (tableValue != null) return tableValue;
+
+  const lines = normalized.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   for (const label of labels) {
     const escaped = label.split(/\s+/).map(escapeRegex).join("\\s+");
-    const pattern = new RegExp(`\\b${escaped}\\b[\\s\\S]{0,80}?([0-9][0-9,\\.\\s]{1,12})\\s*(?:kg)?\\b`, "i");
-    const value = parseKg(normalized.match(pattern)?.[1]);
-    if (value != null && value >= 50 && value <= 60000) return value;
+    const linePattern = new RegExp(`\\b${escaped}\\b`, "i");
+    for (let i = 0; i < lines.length; i += 1) {
+      if (!linePattern.test(lines[i])) continue;
+      const sameLine = parseReasonableKg(lines[i].replace(linePattern, ""));
+      if (sameLine != null) return sameLine;
 
-    const kgFirstPattern = new RegExp(`\\b${escaped}\\b[\\s\\S]{0,80}?kg[\\s\\S]{0,20}?([0-9][0-9,\\.\\s]{1,12})\\b`, "i");
-    const kgFirstValue = parseKg(normalized.match(kgFirstPattern)?.[1]);
-    if (kgFirstValue != null && kgFirstValue >= 50 && kgFirstValue <= 60000) return kgFirstValue;
+      for (let offset = 1; offset <= 3 && i + offset < lines.length; offset += 1) {
+        const nextLine = lines[i + offset];
+        if (/\b(?:GROSS|TARE|TICKET|DATE|TIME|PHONE)\b/i.test(nextLine)) continue;
+        const value = parseReasonableKg(nextLine);
+        if (value != null) return value;
+      }
+    }
   }
   return null;
+}
+
+function extractKgFromScaleTable(text, labels) {
+  if (!labels.some((label) => /^NET(?:\s+WEIGHT|\s+WT)?$/i.test(label))) return null;
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const weightLabelIndexes = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const matches = [...lines[i].matchAll(/\b(GROSS(?:\s+WEIGHT)?|TARE(?:\s+WEIGHT)?|NET(?:\s+WEIGHT|\s+WT)?)\b/gi)];
+    for (const match of matches) {
+      const label = match[1].toUpperCase();
+      weightLabelIndexes.push({
+        kind: label.startsWith("GROSS") ? "gross" : label.startsWith("TARE") ? "tare" : "net",
+        index: i,
+      });
+    }
+  }
+
+  const netOrdinal = weightLabelIndexes.findIndex((item) => item.kind === "net");
+  if (netOrdinal < 0 || weightLabelIndexes.length < 2) return null;
+
+  const lastLabelIndex = Math.max(...weightLabelIndexes.map((item) => item.index));
+  const values = [];
+  for (let i = lastLabelIndex + 1; i < Math.min(lines.length, lastLabelIndex + 10); i += 1) {
+    if (/\b(?:TICKET|DATE|TIME|PHONE|ADDRESS)\b/i.test(lines[i])) break;
+    const value = parseReasonableKg(lines[i]);
+    if (value != null) values.push(value);
+  }
+
+  return values[netOrdinal] ?? null;
 }
 
 function escapeRegex(value) {
@@ -239,6 +278,15 @@ function escapeRegex(value) {
 function parseKg(value) {
   const parsed = parseNumber(value);
   return parsed == null ? null : Math.round(parsed);
+}
+
+function parseReasonableKg(value) {
+  const matches = String(value || "").match(/[0-9][0-9,.\s]{1,12}/g) || [];
+  for (const match of matches) {
+    const parsed = parseKg(match);
+    if (parsed != null && parsed >= 50 && parsed <= 60000) return parsed;
+  }
+  return null;
 }
 
 function parseNumber(value) {
