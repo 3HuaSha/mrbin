@@ -5,15 +5,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Camera, Navigation, Phone, Loader2, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Camera, Navigation, Phone, Loader2, CheckCircle2, Clock, Coffee, Car, Utensils, TimerReset } from "lucide-react";
 import { STEP_TYPE_EMOJI } from "@/lib/business";
 import { toast } from "sonner";
 import { useAudit } from "@/hooks/use-audit";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { driverBinTypeNames, driverOrderActionLabels, driverStepTypeLabels, driverText, getDriverLanguage } from "@/lib/driver-language";
+import { driverBinTypeNames, driverOrderActionLabels, driverStepTypeLabels, driverText, getDriverLanguage, type DriverLanguage } from "@/lib/driver-language";
 
 type Step = {
   id: string;
+  driver_id: string;
+  scheduled_date: string;
   step_number: number;
   step_type: string;
   location: string;
@@ -62,6 +64,8 @@ export function DriverStepPage() {
   const [weight, setWeight] = useState("");
   const [dumpSite, setDumpSite] = useState("");
   const [uploading, setUploading] = useState<null | "photo" | "pickup_photo" | "weigh">(null);
+  const [showActivityMenu, setShowActivityMenu] = useState(false);
+  const activityOptions = getDriverActivityOptions(lang);
 
   const { data: step, isLoading } = useQuery({
     queryKey: ["job-step", stepId],
@@ -343,6 +347,27 @@ export function DriverStepPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const logActivity = useMutation({
+    mutationFn: async (activityType: string) => {
+      const driverId = profile?.id || step?.driver_id;
+      if (!driverId || !step) throw new Error(lang === "en" ? "Driver not loaded" : "司机信息未加载");
+      const { error } = await (supabase.from as any)("driver_activity_logs").insert({
+        driver_id: driverId,
+        scheduled_date: step.scheduled_date,
+        activity_type: activityType,
+        step_id: step.id,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_result, activityType) => {
+      const label = activityOptions.find((option) => option.value === activityType)?.label ?? activityType;
+      toast.success(`${lang === "en" ? "Recorded" : "已记录"}: ${label}`);
+      setShowActivityMenu(false);
+      qc.invalidateQueries({ queryKey: ["driver-activity-logs"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
   if (isLoading || !step) return <div className="p-6 text-center text-muted-foreground">{t.loading}</div>;
 
   const isCustomerStep = !isManualStep && (
@@ -360,6 +385,43 @@ export function DriverStepPage() {
         <div className="flex-1 text-center text-sm font-semibold">{t.step} {step.step_number}</div>
         <div className="w-9" />
       </header>
+
+      <div className="fixed bottom-24 left-3 z-30 flex items-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          className="h-11 w-11 rounded-full p-0 shadow-lg"
+          aria-label={lang === "en" ? "Quick status" : "快速状态"}
+          onClick={() => setShowActivityMenu((open) => !open)}
+        >
+          <Clock className="h-5 w-5" />
+        </Button>
+        {showActivityMenu ? (
+          <div className="w-44 rounded-2xl border bg-card p-2 shadow-xl">
+            <div className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">
+              {lang === "en" ? "Quick status" : "快速状态"}
+            </div>
+            <div className="space-y-1">
+              {activityOptions.map((option) => {
+                const Icon = option.icon;
+                return (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    variant="ghost"
+                    className="h-10 w-full justify-start gap-2 rounded-xl text-sm"
+                    disabled={logActivity.isPending}
+                    onClick={() => logActivity.mutate(option.value)}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
 
       <div className="p-4 space-y-4">
         <div>
@@ -681,4 +743,14 @@ export function DriverStepPage() {
       </div>
     </div>
   );
+}
+
+function getDriverActivityOptions(lang: DriverLanguage) {
+  const zh = lang === "zh";
+  return [
+    { value: "waiting_customer", label: zh ? "等客户" : "Waiting customer", icon: Coffee },
+    { value: "waiting_car_move", label: zh ? "等挪车" : "Waiting car move", icon: Car },
+    { value: "lunch", label: zh ? "吃饭" : "Lunch", icon: Utensils },
+    { value: "traffic", label: zh ? "堵车" : "Traffic", icon: TimerReset },
+  ];
 }
