@@ -81,6 +81,16 @@ type SlowSegmentNote = {
   note: string | null;
 };
 
+type DriverActivityLog = {
+  id: string;
+  driver_id: string;
+  scheduled_date: string;
+  activity_type: string;
+  note: string | null;
+  location: string | null;
+  created_at: string;
+};
+
 type SlowLocation = {
   key: string;
   label: string;
@@ -184,6 +194,40 @@ export function ReportsPage() {
       return (data ?? []) as SlowSegmentNote[];
     },
   });
+
+  const { data: activityLogs = [] } = useQuery({
+    queryKey: ["driver-activity-logs", startISO, todayStr],
+    queryFn: async () => {
+      const { data, error } = await (supabase.from as any)("driver_activity_logs")
+        .select("id,driver_id,scheduled_date,activity_type,note,location,created_at")
+        .gte("scheduled_date", startISO)
+        .lte("scheduled_date", todayStr)
+        .order("created_at", { ascending: true });
+      if (error?.code === "42P01") return [];
+      if (error) throw error;
+      return (data ?? []) as DriverActivityLog[];
+    },
+  });
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`reports-driver-timeline-${startISO}-${todayStr}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "driver_activity_logs" },
+        () => qc.invalidateQueries({ queryKey: ["driver-activity-logs", startISO, todayStr] }),
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "job_steps" },
+        () => qc.invalidateQueries({ queryKey: ["slow-point-report-steps", startISO, todayStr, businessType] }),
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [businessType, qc, startISO, todayStr]);
 
   const slowNoteBySegmentId = useMemo(() => {
     return new Map(slowNotes.map((note) => [note.segment_id, note]));
@@ -437,6 +481,65 @@ export function ReportsPage() {
         />
       </div>
 
+      <Card className="p-4 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold flex items-center gap-2">
+              <Clock3 className="h-4 w-4" /> 司机动作时间线
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              合并司机打卡完成记录和一键状态，按当前时间范围显示。
+            </div>
+          </div>
+          <Badge variant="outline" className="text-[10px]">
+            {startISO === todayStr ? "今天" : `${startISO} 至 ${todayStr}`}
+          </Badge>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {drivers.map((driver) => {
+            const items = buildDriverTimeline(driver, activityLogs, reportSteps);
+            return (
+              <div key={driver.id} className="rounded-lg border bg-background p-3">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div className="font-medium">{driver.name}</div>
+                  <Badge variant="outline" className="text-[10px]">
+                    {items.length} 条
+                  </Badge>
+                </div>
+                {items.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-muted-foreground">暂无动作记录</div>
+                ) : (
+                  <div className="space-y-2">
+                    {items.slice(-12).map((item) => (
+                      <div key={item.id} className="flex gap-2 text-xs">
+                        <div className="w-16 shrink-0 font-mono text-muted-foreground">
+                          {formatTimelineTime(item.time)}
+                        </div>
+                        <div
+                          className={cn(
+                            "mt-1 h-2 w-2 shrink-0 rounded-full",
+                            item.kind === "activity" ? "bg-amber-500" : "bg-green-600",
+                          )}
+                        />
+                        <div className="min-w-0">
+                          <div className="font-medium leading-tight">{item.label}</div>
+                          {item.detail ? (
+                            <div className="truncate text-muted-foreground" title={item.detail}>
+                              {item.detail}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <Card className="p-4 xl:col-span-2">
           <div className="text-sm font-semibold flex items-center gap-2 mb-3">
@@ -615,6 +718,51 @@ function StatCard({
 
 function EmptyState({ text }: { text: string }) {
   return <div className="text-xs text-muted-foreground py-8 text-center">{text}</div>;
+}
+
+function buildDriverTimeline(driver: Driver, logs: DriverActivityLog[], steps: ReportStep[]) {
+  const logItems = logs
+    .filter((log) => log.driver_id === driver.id)
+    .map((log) => ({
+      id: `activity-${log.id}`,
+      kind: "activity" as const,
+      time: log.created_at,
+      label: activityLabel(log.activity_type),
+      detail: log.note || log.location || log.scheduled_date,
+    }));
+
+  const stepItems = steps
+    .filter((step) => step.driver_id === driver.id && step.completed_at)
+    .map((step) => ({
+      id: `step-${step.id}`,
+      kind: "step" as const,
+      time: step.completed_at!,
+      label: `完成 ${stepLabel(step)}`,
+      detail: stepAddress(step),
+    }));
+
+  return [...logItems, ...stepItems].sort(
+    (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
+  );
+}
+
+function activityLabel(type: string) {
+  const labels: Record<string, string> = {
+    lunch: "吃饭",
+    waiting_customer: "等客户",
+    waiting_car_move: "等挪车",
+    traffic: "堵车",
+    dump_queue: "倒场排队",
+    fuel: "加油",
+    vehicle_issue: "车辆问题",
+    other: "其他",
+  };
+  return labels[type] ?? type;
+}
+
+function formatTimelineTime(value: string) {
+  const date = new Date(value);
+  return date.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function SlowReasonEditor({

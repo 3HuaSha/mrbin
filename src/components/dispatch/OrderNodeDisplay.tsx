@@ -28,6 +28,7 @@ export function OrderNodeDisplay({
   const tm = typeMeta(order.type);
   const conflict = vehicle ? !vehicleCanCarry(vehicle.type as any, order.bin_size) : false;
   const isDone = jobStep?.status === "done";
+  const isBrickOrder = order.business_type === "brick" || Number(order.pallet_count || 0) > 0 || order.bin_type === "brick";
   
   // 桶类型中文映射
   const binTypeNames: Record<string, string> = {
@@ -73,7 +74,7 @@ export function OrderNodeDisplay({
             {order.priority && order.bin_type === "brick" && (
               <span className="rounded bg-blue-100 px-1 text-blue-800">{order.priority}</span>
             )}
-            {order.can_split === false && (
+            {isBrickOrder && order.can_split === false && (
               <span className="rounded bg-red-100 px-1 text-red-700">No split</span>
             )}
           </div>

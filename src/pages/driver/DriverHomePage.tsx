@@ -1,16 +1,17 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { useNavigate, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Lock, CheckCircle2, ArrowRight, LogOut, Truck, MapPin, Download, Share2, X, Clock } from "lucide-react";
+import { Lock, CheckCircle2, ArrowRight, LogOut, Truck, MapPin, Download, Share2, X, Clock, Coffee, Fuel, Car, AlertTriangle, Utensils, TimerReset } from "lucide-react";
 import { STEP_TYPE_EMOJI, todayISO, typeMeta } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { usePWA } from "@/hooks/use-pwa";
 import { formatETA, formatETATime } from "@/lib/eta-calculator";
 import { driverBinTypeNames, driverOrderTypeLabels, driverStepTypeLabels, driverText, getDriverLanguage, getStoredDriverLanguage, setStoredDriverLanguage, type DriverLanguage } from "@/lib/driver-language";
+import { toast } from "sonner";
 
 type SavedEtaRow = {
   step_id: string;
@@ -49,6 +50,7 @@ type StepRow = {
 
 export function DriverHomePage() {
   const nav = useNavigate();
+  const qc = useQueryClient();
   const [date, setDate] = useState(todayISO());
   const [gpsActive, setGpsActive] = useState(false);
   const { session, loading, profile, hasRole } = useCurrentUser();
@@ -65,6 +67,7 @@ export function DriverHomePage() {
   }, [loading, session, nav]);
 
   const driverId = profile?.id ?? "";
+  const activityOptions = getDriverActivityOptions(lang);
 
   const { data: steps = [], refetch } = useQuery({
     queryKey: ["driver-steps", driverId, date],
@@ -164,6 +167,24 @@ export function DriverHomePage() {
     await supabase.auth.signOut();
     nav({ to: "/driver/login" });
   };
+
+  const logActivity = useMutation({
+    mutationFn: async (activityType: string) => {
+      if (!driverId) throw new Error("Driver not loaded");
+      const { error } = await (supabase.from as any)("driver_activity_logs").insert({
+        driver_id: driverId,
+        scheduled_date: date,
+        activity_type: activityType,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_result, activityType) => {
+      const label = activityOptions.find((option) => option.value === activityType)?.label ?? activityType;
+      toast.success(`${lang === "en" ? "Recorded" : "已记录"}: ${label}`);
+      qc.invalidateQueries({ queryKey: ["driver-activity-logs"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
 
   if (loading || !session) return null;
 
@@ -269,6 +290,33 @@ export function DriverHomePage() {
                 onChange={(e) => setDate(e.target.value)}
                 className="h-8 px-2.5 rounded-md border bg-background text-sm font-medium focus:ring-2 focus:ring-primary/20 outline-none"
               />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card rounded-2xl border shadow-sm overflow-hidden">
+          <div className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-bold text-foreground">{lang === "en" ? "Quick status" : "快速状态"}</div>
+              <div className="text-xs text-muted-foreground">{lang === "en" ? "Tap once to record" : "点一下记录"}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {activityOptions.map((option) => {
+                const Icon = option.icon;
+                return (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    variant="outline"
+                    className="h-11 justify-start gap-2 rounded-xl text-sm"
+                    disabled={logActivity.isPending || !driverId}
+                    onClick={() => logActivity.mutate(option.value)}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {option.label}
+                  </Button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -473,4 +521,18 @@ function serviceSecondsForStep(step: StepRow) {
 
 function formatStepFinishTime(etaIso: string, step: StepRow) {
   return formatETATime(new Date(new Date(etaIso).getTime() + serviceSecondsForStep(step) * 1000).toISOString());
+}
+
+function getDriverActivityOptions(lang: DriverLanguage) {
+  const zh = lang === "zh";
+  return [
+    { value: "lunch", label: zh ? "吃饭" : "Lunch", icon: Utensils },
+    { value: "waiting_customer", label: zh ? "等客户" : "Waiting customer", icon: Coffee },
+    { value: "waiting_car_move", label: zh ? "等挪车" : "Waiting car move", icon: Car },
+    { value: "traffic", label: zh ? "堵车" : "Traffic", icon: TimerReset },
+    { value: "dump_queue", label: zh ? "倒场排队" : "Dump queue", icon: Clock },
+    { value: "fuel", label: zh ? "加油" : "Fuel", icon: Fuel },
+    { value: "vehicle_issue", label: zh ? "车辆问题" : "Vehicle issue", icon: AlertTriangle },
+    { value: "other", label: zh ? "其他" : "Other", icon: MapPin },
+  ];
 }

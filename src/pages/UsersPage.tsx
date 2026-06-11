@@ -67,7 +67,6 @@ export function UsersPage() {
   const [pwDialog, setPwDialog] = useState<ProfileRow | null>(null);
   const [pwValue, setPwValue] = useState("");
   const [bindDialog, setBindDialog] = useState<ProfileRow | null>(null);
-
   const { data: profiles = [] } = useQuery({
     queryKey: ["users-profiles"],
     queryFn: async () => {

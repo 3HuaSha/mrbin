@@ -250,6 +250,64 @@ export type Database = {
           },
         ]
       }
+      driver_activity_logs: {
+        Row: {
+          activity_type: string
+          created_at: string
+          driver_id: string
+          id: string
+          location: string | null
+          note: string | null
+          order_id: string | null
+          scheduled_date: string
+          step_id: string | null
+        }
+        Insert: {
+          activity_type: string
+          created_at?: string
+          driver_id: string
+          id?: string
+          location?: string | null
+          note?: string | null
+          order_id?: string | null
+          scheduled_date?: string
+          step_id?: string | null
+        }
+        Update: {
+          activity_type?: string
+          created_at?: string
+          driver_id?: string
+          id?: string
+          location?: string | null
+          note?: string | null
+          order_id?: string | null
+          scheduled_date?: string
+          step_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "driver_activity_logs_driver_id_fkey"
+            columns: ["driver_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "driver_activity_logs_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "driver_activity_logs_step_id_fkey"
+            columns: ["step_id"]
+            isOneToOne: false
+            referencedRelation: "job_steps"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_steps: {
         Row: {
           assignment_id: string | null
