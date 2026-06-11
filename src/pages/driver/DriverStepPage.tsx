@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, Camera, Navigation, Phone, Loader2, CheckCircle2 } from "lucide-react";
-import { STEP_TYPE_EMOJI, STEP_TYPE_LABEL } from "@/lib/business";
+import { STEP_TYPE_EMOJI } from "@/lib/business";
 import { toast } from "sonner";
 import { useAudit } from "@/hooks/use-audit";
 import { useCurrentUser } from "@/hooks/use-current-user";
-import { driverBinTypeNames, driverText, getDriverLanguage } from "@/lib/driver-language";
+import { driverBinTypeNames, driverOrderActionLabels, driverStepTypeLabels, driverText, getDriverLanguage } from "@/lib/driver-language";
 
 type Step = {
   id: string;
@@ -101,6 +101,7 @@ export function DriverStepPage() {
   const isSwapDelivery = order?.type === "swap" && (step?.step_type === "customer_delivery" || step?.step_type === "swap");
   const isDumpWaste = step?.step_type === "dump_waste";
   const isMaterialTicketStep = order?.type === "material" || step?.step_type === "load_material" || step?.step_type === "unload_material";
+  const stepTypeLabels = driverStepTypeLabels[lang];
 
   const handleUpload = async (file: File, kind: "photo" | "pickup_photo" | "weigh") => {
     setUploading(kind);
@@ -364,10 +365,10 @@ export function DriverStepPage() {
         <div>
           <div className="text-2xl font-bold mt-1">
             {STEP_TYPE_EMOJI[step.step_type]} {isManualStep
-              ? (STEP_TYPE_LABEL[step.step_type] || step.step_type)
+              ? (stepTypeLabels[step.step_type] || step.step_type)
               : order
-                ? `${order.type === 'delivery' ? (lang === "en" ? 'Deliver ' : '送 ') : order.type === 'pickup' ? (lang === "en" ? 'Pick up ' : '收 ') : order.type === 'swap' ? (lang === "en" ? 'Swap ' : '换 ') : ''}${order.bin_size ? order.bin_size + 'yd ' : ""}${order.bin_type ? driverBinTypeNames[lang][order.bin_type] || order.bin_type : (lang === "en" ? 'bin' : '桶')}`
-                : (STEP_TYPE_LABEL[step.step_type] || step.step_type)
+                ? `${driverOrderActionLabels[lang][order.type] ? `${driverOrderActionLabels[lang][order.type]} ` : ""}${order.bin_size ? order.bin_size + 'yd ' : ""}${order.bin_type ? driverBinTypeNames[lang][order.bin_type] || order.bin_type : (lang === "en" ? 'bin' : '桶')}`
+                : (stepTypeLabels[step.step_type] || step.step_type)
             }
           </div>
           <div className="text-base mt-2">{step.location}</div>
@@ -389,7 +390,7 @@ export function DriverStepPage() {
             </a>
             {order.customer_notes && (
               <div className="bg-status-progress/15 text-status-progress text-sm rounded p-2">
-                📝 {order.customer_notes}
+                {order.customer_notes}
               </div>
             )}
           </div>
@@ -398,7 +399,7 @@ export function DriverStepPage() {
         {isManualStep && step.notes && (
           <div className="bg-card border rounded-xl p-4">
             <div className="text-xs text-muted-foreground mb-1">{t.notes}</div>
-            <div className="text-sm whitespace-pre-wrap">📝 {step.notes}</div>
+            <div className="text-sm whitespace-pre-wrap">{step.notes}</div>
           </div>
         )}
 
@@ -409,7 +410,7 @@ export function DriverStepPage() {
           {isDumpWaste ? (
             <>
               <div>
-                <Label className="text-base font-semibold">📷 {t.wastePhoto} *</Label>
+                <Label className="text-base font-semibold">{t.wastePhoto} *</Label>
                 <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                   {uploading === "photo" ? (
                     <div className="flex flex-col items-center gap-2">
@@ -428,7 +429,7 @@ export function DriverStepPage() {
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
                       <span className="font-medium text-base">{t.takeWastePhoto}</span>
-                      <span className="text-xs text-muted-foreground">Photo at the dump site</span>
+                      <span className="text-xs text-muted-foreground">{t.photoAtDumpSite}</span>
                     </div>
                   )}
                   <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -443,7 +444,7 @@ export function DriverStepPage() {
               </div>
 
               <div>
-                <Label className="text-base font-semibold">📋 {t.dumpTicketPhoto}</Label>
+                <Label className="text-base font-semibold">{t.dumpTicketPhoto} ({t.optional})</Label>
                 <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                   {uploading === "weigh" ? (
                     <div className="flex flex-col items-center gap-2">
@@ -480,7 +481,7 @@ export function DriverStepPage() {
           ) : isSwapDelivery ? (
             <>
               <div>
-                <Label className="text-base font-semibold">📷 {t.newBinPhoto} {step.requires_photo && '*'}</Label>
+                <Label className="text-base font-semibold">{t.newBinPhoto} {step.requires_photo && '*'}</Label>
                 <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                   {uploading === "photo" ? (
                     <div className="flex flex-col items-center gap-2">
@@ -499,7 +500,7 @@ export function DriverStepPage() {
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
                       <span className="font-medium text-base">{t.takeNewBinPhoto}</span>
-                      <span className="text-xs text-muted-foreground">Bin delivered to customer</span>
+                      <span className="text-xs text-muted-foreground">{t.binDelivered}</span>
                     </div>
                   )}
                   <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -514,7 +515,7 @@ export function DriverStepPage() {
               </div>
 
               <div>
-                <Label className="text-base font-semibold">📷 {t.oldBinPhoto}</Label>
+                <Label className="text-base font-semibold">{t.oldBinPhoto} ({t.optional})</Label>
                 <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                   {uploading === "pickup_photo" ? (
                     <div className="flex flex-col items-center gap-2">
@@ -533,7 +534,7 @@ export function DriverStepPage() {
                     <div className="flex flex-col items-center gap-2">
                       <Camera className="h-10 w-10 text-primary" />
                       <span className="font-medium text-base">{t.takeOldBinPhoto}</span>
-                      <span className="text-xs text-muted-foreground">Bin removed from customer</span>
+                      <span className="text-xs text-muted-foreground">{t.binRemoved}</span>
                     </div>
                   )}
                   <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -549,7 +550,7 @@ export function DriverStepPage() {
             </>
           ) : (
             <div>
-              <Label className="text-base font-semibold">📷 {t.photoUpload} {step.requires_photo && '*'}</Label>
+              <Label className="text-base font-semibold">{t.photoUpload} {step.requires_photo && '*'}</Label>
               <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                 {uploading === "photo" ? (
                   <div className="flex flex-col items-center gap-2">
@@ -568,7 +569,7 @@ export function DriverStepPage() {
                   <div className="flex flex-col items-center gap-2">
                     <Camera className="h-10 w-10 text-primary" />
                     <span className="font-medium text-base">{t.takePhoto}</span>
-                    <span className="text-xs text-muted-foreground">or upload from photos</span>
+                    <span className="text-xs text-muted-foreground">{t.orUploadFromPhotos}</span>
                   </div>
                 )}
                 <input type="file" accept="image/*" capture="environment" className="hidden"
@@ -603,14 +604,14 @@ export function DriverStepPage() {
 
           {(step.step_type === "dump_site" || step.step_type === "dump_waste") && (
             <div>
-              <Label>{t.dumpSiteName} {step.step_type === "dump_site" ? '*' : '(optional)'}</Label>
+              <Label>{t.dumpSiteName} {step.step_type === "dump_site" ? "*" : `(${t.optional})`}</Label>
               <Input value={dumpSite} onChange={(e) => setDumpSite(e.target.value)} className="h-12 mt-1 text-base" placeholder="e.g. GFL Brock West" />
             </div>
           )}
 
           {step.requires_weigh_ticket && (
             <div>
-              <Label className="text-base font-semibold">📋 {t.scaleTicketPhoto} *</Label>
+              <Label className="text-base font-semibold">{t.scaleTicketPhoto} *</Label>
               <label className="mt-2 flex flex-col items-center justify-center gap-3 min-h-[120px] rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors p-4">
                 {uploading === "weigh" ? (
                   <div className="flex flex-col items-center gap-2">
@@ -629,7 +630,7 @@ export function DriverStepPage() {
                   <div className="flex flex-col items-center gap-2">
                     <Camera className="h-10 w-10 text-primary" />
                     <span className="font-medium text-base">{t.takeScaleTicketPhoto}</span>
-                    <span className="text-xs text-muted-foreground">or upload from photos</span>
+                    <span className="text-xs text-muted-foreground">{t.orUploadFromPhotos}</span>
                   </div>
                 )}
                 <input type="file" accept="image/*" capture="environment" className="hidden"

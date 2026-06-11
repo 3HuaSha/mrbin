@@ -66,7 +66,12 @@ type DriverTextKey =
   | "ticketMissing"
   | "ticketDbMissing"
   | "compressionFailed"
-  | "uploaded";
+  | "uploaded"
+  | "photoAtDumpSite"
+  | "binDelivered"
+  | "binRemoved"
+  | "orUploadFromPhotos"
+  | "optional";
 
 export const driverText: Record<DriverLanguage, Record<DriverTextKey, string>> = {
   zh: {
@@ -104,7 +109,7 @@ export const driverText: Record<DriverLanguage, Record<DriverTextKey, string>> =
     tapRetake: "点击重新拍摄",
     wastePhoto: "垃圾照片",
     takeWastePhoto: "拍垃圾照片",
-    dumpTicketPhoto: "倒垃圾单照片（可选）",
+    dumpTicketPhoto: "倒垃圾单照片",
     takeDumpTicketPhoto: "拍倒垃圾单",
     scaleTicketPhoto: "称重单照片",
     takeScaleTicketPhoto: "拍称重单",
@@ -117,11 +122,11 @@ export const driverText: Record<DriverLanguage, Record<DriverTextKey, string>> =
     ocrReviewLater: "现在可以完成任务，后台之后可以复核。",
     newBinPhoto: "新桶照片",
     takeNewBinPhoto: "拍新桶照片",
-    oldBinPhoto: "旧桶照片（可选）",
+    oldBinPhoto: "旧桶照片",
     takeOldBinPhoto: "拍旧桶照片",
-    binNumber: "桶号（可选）",
-    newBinNumber: "新桶号（可选）",
-    oldBinNumber: "收走的旧桶号（可选）",
+    binNumber: "桶号",
+    newBinNumber: "新桶号",
+    oldBinNumber: "收走的旧桶号",
     dumpSiteName: "倒垃圾场名称",
     weight: "重量 (kg)",
     submitting: "提交中...",
@@ -132,6 +137,11 @@ export const driverText: Record<DriverLanguage, Record<DriverTextKey, string>> =
     ticketDbMissing: "OCR 已识别，但数据库还没有 ticket_number 字段。",
     compressionFailed: "图片压缩失败，正在上传原图。",
     uploaded: "已上传",
+    photoAtDumpSite: "倒垃圾现场照片",
+    binDelivered: "已送到客户处",
+    binRemoved: "已从客户处收走",
+    orUploadFromPhotos: "或从相册上传",
+    optional: "可选",
   },
   en: {
     driverApp: "Driver App",
@@ -168,7 +178,7 @@ export const driverText: Record<DriverLanguage, Record<DriverTextKey, string>> =
     tapRetake: "Tap to retake",
     wastePhoto: "Waste photo",
     takeWastePhoto: "Take waste photo",
-    dumpTicketPhoto: "Dump ticket photo (optional)",
+    dumpTicketPhoto: "Dump ticket photo",
     takeDumpTicketPhoto: "Take dump ticket photo",
     scaleTicketPhoto: "Scale ticket photo",
     takeScaleTicketPhoto: "Take scale ticket photo",
@@ -181,11 +191,11 @@ export const driverText: Record<DriverLanguage, Record<DriverTextKey, string>> =
     ocrReviewLater: "You can finish the task now. Staff can review it later.",
     newBinPhoto: "New bin photo",
     takeNewBinPhoto: "Take new bin photo",
-    oldBinPhoto: "Old bin photo (optional)",
+    oldBinPhoto: "Old bin photo",
     takeOldBinPhoto: "Take old bin photo",
-    binNumber: "Bin number (optional)",
-    newBinNumber: "New bin number (optional)",
-    oldBinNumber: "Old bin number removed (optional)",
+    binNumber: "Bin number",
+    newBinNumber: "New bin number",
+    oldBinNumber: "Old bin number removed",
     dumpSiteName: "Dump site name",
     weight: "Weight (kg)",
     submitting: "Submitting...",
@@ -196,6 +206,11 @@ export const driverText: Record<DriverLanguage, Record<DriverTextKey, string>> =
     ticketDbMissing: "OCR recognized the ticket, but ticket_number is not in the database yet.",
     compressionFailed: "Image compression failed. Uploading original image.",
     uploaded: "Uploaded",
+    photoAtDumpSite: "Photo at the dump site",
+    binDelivered: "Bin delivered to customer",
+    binRemoved: "Bin removed from customer",
+    orUploadFromPhotos: "or upload from photos",
+    optional: "optional",
   },
 };
 
@@ -233,6 +248,11 @@ export const driverStepTypeLabels: Record<DriverLanguage, Record<string, string>
 export const driverOrderTypeLabels: Record<DriverLanguage, Record<string, string>> = {
   zh: { delivery: "送桶", pickup: "收桶", swap: "换桶", material: "送料" },
   en: { delivery: "Deliver bin", pickup: "Pick up bin", swap: "Swap bin", material: "Material" },
+};
+
+export const driverOrderActionLabels: Record<DriverLanguage, Record<string, string>> = {
+  zh: { delivery: "送", pickup: "收", swap: "换" },
+  en: { delivery: "Deliver", pickup: "Pick up", swap: "Swap" },
 };
 
 export const driverBinTypeNames: Record<DriverLanguage, Record<string, string>> = {

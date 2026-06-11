@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Lock, CheckCircle2, ArrowRight, LogOut, Truck, MapPin, Download, Share2, X, Clock } from "lucide-react";
-import { STEP_TYPE_EMOJI, STEP_TYPE_LABEL, todayISO, typeMeta } from "@/lib/business";
+import { STEP_TYPE_EMOJI, todayISO, typeMeta } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { usePWA } from "@/hooks/use-pwa";
@@ -245,7 +245,7 @@ export function DriverHomePage() {
           <div className="p-4 flex items-center justify-between bg-muted/20">
             <div>
               <h2 className="font-bold text-foreground flex items-center gap-2">
-                <span>ðŸ“…</span> {t.schedule}
+                {t.schedule}
               </h2>
             </div>
             <div className="flex items-center gap-2">
@@ -356,7 +356,6 @@ export function DriverHomePage() {
                               </div>
                               {s.orders!.customer_notes && isPending && !isLocked && (
                                 <div className="mt-3 text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-md px-3 py-2 border border-amber-500/20 flex gap-2">
-                                  <span className="shrink-0">ðŸ“</span>
                                   <span className="leading-relaxed">{s.orders!.customer_notes}</span>
                                 </div>
                               )}
@@ -387,7 +386,7 @@ export function DriverHomePage() {
                                 <Badge variant="outline" className="text-[10px] shadow-sm">{t.manualStep}</Badge>
                               </div>
                               <div className="text-base font-bold tracking-tight text-foreground/90">
-                                {STEP_TYPE_EMOJI[s.step_type] || 'ðŸ“'} {stepLabel}
+                                {STEP_TYPE_EMOJI[s.step_type] || ""} {stepLabel}
                               </div>
                               <div className="text-sm text-muted-foreground mt-1 line-clamp-2 leading-relaxed flex items-start gap-1">
                                 <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
@@ -395,7 +394,6 @@ export function DriverHomePage() {
                               </div>
                               {s.notes && isPending && !isLocked && (
                                 <div className="mt-3 text-xs bg-muted rounded-md px-3 py-2 border flex gap-2">
-                                  <span className="shrink-0">ðŸ“</span>
                                   <span className="leading-relaxed">{s.notes}</span>
                                 </div>
                               )}
