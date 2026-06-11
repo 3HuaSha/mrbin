@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import {
   AlertTriangle,
+  ArrowRight,
   Clock3,
   MapPin,
   Route,
@@ -91,6 +92,14 @@ type DriverActivityLog = {
   created_at: string;
 };
 
+type DriverTimelineItem = {
+  id: string;
+  kind: "activity" | "step";
+  time: string;
+  label: string;
+  detail: string;
+};
+
 type SlowLocation = {
   key: string;
   label: string;
@@ -126,6 +135,7 @@ export function ReportsPage() {
   const qc = useQueryClient();
   const [period, setPeriod] = useState<"day" | "week" | "month">("week");
   const [businessType, setBusinessType] = useBusinessType();
+  const [timelineDriverId, setTimelineDriverId] = useState("");
   const start = rangeStart(period);
   const startISO = start.toISOString().slice(0, 10);
   const todayStr = todayISO();
@@ -142,6 +152,13 @@ export function ReportsPage() {
       return data as Driver[];
     },
   });
+
+  useEffect(() => {
+    if (!timelineDriverId && drivers[0]?.id) setTimelineDriverId(drivers[0].id);
+    if (timelineDriverId && drivers.length > 0 && !drivers.some((driver) => driver.id === timelineDriverId)) {
+      setTimelineDriverId(drivers[0].id);
+    }
+  }, [drivers, timelineDriverId]);
 
   const { data: reportSteps = [] } = useQuery({
     queryKey: ["slow-point-report-steps", startISO, todayStr, businessType],
@@ -425,6 +442,10 @@ export function ReportsPage() {
   }, [drivers, driverById, etaRows, reportSteps, todayStr]);
 
   const worstLocation = slowReport.slowLocations[0];
+  const selectedTimelineDriver = drivers.find((driver) => driver.id === timelineDriverId);
+  const selectedTimelineItems = selectedTimelineDriver
+    ? buildDriverTimeline(selectedTimelineDriver, activityLogs, reportSteps)
+    : [];
 
   return (
     <div className="p-6 space-y-5">
@@ -491,53 +512,33 @@ export function ReportsPage() {
               合并司机打卡完成记录和一键状态，按当前时间范围显示。
             </div>
           </div>
-          <Badge variant="outline" className="text-[10px]">
-            {startISO === todayStr ? "今天" : `${startISO} 至 ${todayStr}`}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Select value={timelineDriverId || "none"} onValueChange={(value) => setTimelineDriverId(value === "none" ? "" : value)}>
+              <SelectTrigger className="h-9 w-[160px]">
+                <SelectValue placeholder="选择司机" />
+              </SelectTrigger>
+              <SelectContent>
+                {drivers.length === 0 ? (
+                  <SelectItem value="none">暂无司机</SelectItem>
+                ) : (
+                  drivers.map((driver) => (
+                    <SelectItem key={driver.id} value={driver.id}>
+                      {driver.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            <Badge variant="outline" className="text-[10px]">
+              {startISO === todayStr ? "今天" : `${startISO} 至 ${todayStr}`}
+            </Badge>
+          </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {drivers.map((driver) => {
-            const items = buildDriverTimeline(driver, activityLogs, reportSteps);
-            return (
-              <div key={driver.id} className="rounded-lg border bg-background p-3">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <div className="font-medium">{driver.name}</div>
-                  <Badge variant="outline" className="text-[10px]">
-                    {items.length} 条
-                  </Badge>
-                </div>
-                {items.length === 0 ? (
-                  <div className="py-6 text-center text-xs text-muted-foreground">暂无动作记录</div>
-                ) : (
-                  <div className="space-y-2">
-                    {items.slice(-12).map((item) => (
-                      <div key={item.id} className="flex gap-2 text-xs">
-                        <div className="w-16 shrink-0 font-mono text-muted-foreground">
-                          {formatTimelineTime(item.time)}
-                        </div>
-                        <div
-                          className={cn(
-                            "mt-1 h-2 w-2 shrink-0 rounded-full",
-                            item.kind === "activity" ? "bg-amber-500" : "bg-green-600",
-                          )}
-                        />
-                        <div className="min-w-0">
-                          <div className="font-medium leading-tight">{item.label}</div>
-                          {item.detail ? (
-                            <div className="truncate text-muted-foreground" title={item.detail}>
-                              {item.detail}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <DriverTimelineStrip
+          driver={selectedTimelineDriver}
+          items={selectedTimelineItems}
+        />
       </Card>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -718,6 +719,69 @@ function StatCard({
 
 function EmptyState({ text }: { text: string }) {
   return <div className="text-xs text-muted-foreground py-8 text-center">{text}</div>;
+}
+
+function DriverTimelineStrip({
+  driver,
+  items,
+}: {
+  driver?: Driver;
+  items: DriverTimelineItem[];
+}) {
+  if (!driver) {
+    return <EmptyState text="请选择一个司机查看动作时间线" />;
+  }
+
+  if (items.length === 0) {
+    return <EmptyState text={`${driver.name} 当前时间范围暂无动作记录`} />;
+  }
+
+  return (
+    <div className="overflow-x-auto pb-1">
+      <div className="flex min-w-max items-stretch gap-2">
+        {items.map((item, index) => (
+          <div key={item.id} className="flex items-center gap-2">
+            <div
+              className={cn(
+                "w-[210px] rounded-lg border p-3 shadow-sm",
+                item.kind === "activity"
+                  ? "border-amber-200 bg-amber-50/70"
+                  : "border-emerald-200 bg-emerald-50/70",
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-mono text-xs text-muted-foreground">{formatTimelineTime(item.time)}</div>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "h-5 px-1.5 text-[10px]",
+                    item.kind === "activity"
+                      ? "border-amber-300 text-amber-700"
+                      : "border-emerald-300 text-emerald-700",
+                  )}
+                >
+                  {item.kind === "activity" ? "状态" : "完成"}
+                </Badge>
+              </div>
+              <div className="mt-2 truncate text-sm font-semibold" title={item.label}>
+                {item.label}
+              </div>
+              {item.detail ? (
+                <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={item.detail}>
+                  {item.detail}
+                </div>
+              ) : null}
+            </div>
+            {index < items.length - 1 ? (
+              <div className="flex h-full items-center text-muted-foreground">
+                <ArrowRight className="h-5 w-5" />
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function buildDriverTimeline(driver: Driver, logs: DriverActivityLog[], steps: ReportStep[]) {
