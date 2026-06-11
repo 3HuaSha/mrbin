@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { usePWA } from "@/hooks/use-pwa";
 import { formatETA, formatETATime } from "@/lib/eta-calculator";
-import { driverBinTypeNames, driverOrderTypeLabels, driverStepTypeLabels, driverText, getDriverLanguage } from "@/lib/driver-language";
+import { driverBinTypeNames, driverOrderTypeLabels, driverStepTypeLabels, driverText, getDriverLanguage, getStoredDriverLanguage, setStoredDriverLanguage, type DriverLanguage } from "@/lib/driver-language";
 
 type SavedEtaRow = {
   step_id: string;
@@ -54,7 +54,8 @@ export function DriverHomePage() {
   const { session, loading, profile, hasRole } = useCurrentUser();
   const { canInstall, isInstalled, isIOS, promptInstall } = usePWA();
   const [dismissInstallHint, setDismissInstallHint] = useState(false);
-  const lang = getDriverLanguage(profile);
+  const [languageOverride, setLanguageOverride] = useState<DriverLanguage | null>(() => getStoredDriverLanguage());
+  const lang = languageOverride ?? getDriverLanguage(profile);
   const t = driverText[lang];
 
   // æœªç™»å½•æˆ–ä¸æ˜¯å¸æœº -> ç™»å½•é¡µ
@@ -192,6 +193,19 @@ export function DriverHomePage() {
             {t.staff}
           </Link>
         ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 px-2 text-xs"
+          onClick={() => {
+            const next: DriverLanguage = lang === "en" ? "zh" : "en";
+            setStoredDriverLanguage(next);
+            setLanguageOverride(next);
+          }}
+        >
+          {lang === "en" ? "中文" : "English"}
+        </Button>
         <Button
           size="icon"
           variant="ghost"

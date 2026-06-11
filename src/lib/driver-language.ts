@@ -1,7 +1,24 @@
 export type DriverLanguage = "zh" | "en";
 
+const DRIVER_LANGUAGE_STORAGE_KEY = "driver_app_language";
+const LEGACY_DRIVER_LANGUAGE_STORAGE_KEY = "driver_login_language";
+
 export function getDriverLanguage(profile?: { driver_language?: string | null } | null): DriverLanguage {
+  const stored = getStoredDriverLanguage();
+  if (stored) return stored;
   return profile?.driver_language === "en" ? "en" : "zh";
+}
+
+export function getStoredDriverLanguage(): DriverLanguage | null {
+  if (typeof window === "undefined") return null;
+  const stored = window.localStorage.getItem(DRIVER_LANGUAGE_STORAGE_KEY)
+    || window.localStorage.getItem(LEGACY_DRIVER_LANGUAGE_STORAGE_KEY);
+  return stored === "en" || stored === "zh" ? stored : null;
+}
+
+export function setStoredDriverLanguage(language: DriverLanguage) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(DRIVER_LANGUAGE_STORAGE_KEY, language);
 }
 
 type DriverTextKey =

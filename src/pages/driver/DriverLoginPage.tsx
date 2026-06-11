@@ -6,15 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Truck } from "lucide-react";
+import { getStoredDriverLanguage, setStoredDriverLanguage, type DriverLanguage } from "@/lib/driver-language";
 
 export function DriverLoginPage() {
   const nav = useNavigate();
   const [email, setEmail] = useState("driver1@kennedy.test");
   const [password, setPassword] = useState("driver123");
   const [loading, setLoading] = useState(false);
-  const [lang, setLang] = useState<"zh" | "en">(() =>
-    typeof window !== "undefined" && window.localStorage.getItem("driver_login_language") === "en" ? "en" : "zh",
-  );
+  const [lang, setLang] = useState<DriverLanguage>(() => getStoredDriverLanguage() ?? "zh");
   const t = loginText[lang];
 
   useEffect(() => {
@@ -33,9 +32,9 @@ export function DriverLoginPage() {
   };
 
   const switchLang = () => {
-    const next = lang === "en" ? "zh" : "en";
+    const next: DriverLanguage = lang === "en" ? "zh" : "en";
     setLang(next);
-    if (typeof window !== "undefined") window.localStorage.setItem("driver_login_language", next);
+    setStoredDriverLanguage(next);
   };
 
   return (
@@ -75,7 +74,7 @@ export function DriverLoginPage() {
   );
 }
 
-const loginText = {
+const loginText: Record<DriverLanguage, Record<"title" | "email" | "password" | "signingIn" | "signIn" | "testAccounts", string>> = {
   zh: {
     title: "司机登录",
     email: "邮箱",
