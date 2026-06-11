@@ -42,6 +42,7 @@ type ReportOrder = {
   order_number: string;
   type: string;
   bin_size: string | null;
+  bin_type: string | null;
   address: string;
   status: string;
   business_type?: string | null;
@@ -136,6 +137,7 @@ export function ReportsPage() {
   const [period, setPeriod] = useState<"day" | "week" | "month">("week");
   const [businessType, setBusinessType] = useBusinessType();
   const [timelineDriverId, setTimelineDriverId] = useState("");
+  const [timelineDate, setTimelineDate] = useState(todayISO());
   const start = rangeStart(period);
   const startISO = start.toISOString().slice(0, 10);
   const todayStr = todayISO();
@@ -166,11 +168,31 @@ export function ReportsPage() {
       const { data, error } = await supabase
         .from("job_steps")
         .select(
-          "id,driver_id,scheduled_date,step_number,step_type,node_type,location,status,completed_at,order_id,orders(id,order_number,type,bin_size,address,status,business_type,pallet_count)",
+          "id,driver_id,scheduled_date,step_number,step_type,node_type,location,status,completed_at,order_id,orders(id,order_number,type,bin_size,bin_type,address,status,business_type,pallet_count)",
         )
         .gte("scheduled_date", startISO)
         .lte("scheduled_date", todayStr)
         .order("scheduled_date", { ascending: false })
+        .order("driver_id")
+        .order("step_number");
+      if (error) throw error;
+
+      return ((data ?? []) as unknown as ReportStep[]).filter((step) => {
+        const stepBusinessType = step.orders?.business_type;
+        return !stepBusinessType || stepBusinessType === businessType;
+      });
+    },
+  });
+
+  const { data: timelineSteps = [] } = useQuery({
+    queryKey: ["driver-timeline-steps", timelineDate, businessType],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("job_steps")
+        .select(
+          "id,driver_id,scheduled_date,step_number,step_type,node_type,location,status,completed_at,order_id,orders(id,order_number,type,bin_size,bin_type,address,status,business_type,pallet_count)",
+        )
+        .eq("scheduled_date", timelineDate)
         .order("driver_id")
         .order("step_number");
       if (error) throw error;
@@ -213,12 +235,11 @@ export function ReportsPage() {
   });
 
   const { data: activityLogs = [] } = useQuery({
-    queryKey: ["driver-activity-logs", startISO, todayStr],
+    queryKey: ["driver-activity-logs", timelineDate],
     queryFn: async () => {
       const { data, error } = await (supabase.from as any)("driver_activity_logs")
         .select("id,driver_id,scheduled_date,activity_type,note,location,created_at")
-        .gte("scheduled_date", startISO)
-        .lte("scheduled_date", todayStr)
+        .eq("scheduled_date", timelineDate)
         .order("created_at", { ascending: true });
       if (error?.code === "42P01") return [];
       if (error) throw error;
@@ -228,23 +249,26 @@ export function ReportsPage() {
 
   useEffect(() => {
     const channel = supabase
-      .channel(`reports-driver-timeline-${startISO}-${todayStr}`)
+      .channel(`reports-driver-timeline-${timelineDate}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "driver_activity_logs" },
-        () => qc.invalidateQueries({ queryKey: ["driver-activity-logs", startISO, todayStr] }),
+        { event: "*", schema: "public", table: "driver_activity_logs", filter: `scheduled_date=eq.${timelineDate}` },
+        () => qc.invalidateQueries({ queryKey: ["driver-activity-logs", timelineDate] }),
       )
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "job_steps" },
-        () => qc.invalidateQueries({ queryKey: ["slow-point-report-steps", startISO, todayStr, businessType] }),
+        { event: "UPDATE", schema: "public", table: "job_steps", filter: `scheduled_date=eq.${timelineDate}` },
+        () => {
+          qc.invalidateQueries({ queryKey: ["slow-point-report-steps", startISO, todayStr, businessType] });
+          qc.invalidateQueries({ queryKey: ["driver-timeline-steps", timelineDate, businessType] });
+        },
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [businessType, qc, startISO, todayStr]);
+  }, [businessType, qc, startISO, todayStr, timelineDate]);
 
   const slowNoteBySegmentId = useMemo(() => {
     return new Map(slowNotes.map((note) => [note.segment_id, note]));
@@ -444,7 +468,7 @@ export function ReportsPage() {
   const worstLocation = slowReport.slowLocations[0];
   const selectedTimelineDriver = drivers.find((driver) => driver.id === timelineDriverId);
   const selectedTimelineItems = selectedTimelineDriver
-    ? buildDriverTimeline(selectedTimelineDriver, activityLogs, reportSteps)
+    ? buildDriverTimeline(selectedTimelineDriver, activityLogs, timelineSteps)
     : [];
 
   return (
@@ -509,10 +533,10 @@ export function ReportsPage() {
               <Clock3 className="h-4 w-4" /> 司机动作时间线
             </div>
             <div className="text-xs text-muted-foreground mt-1">
-              合并司机打卡完成记录和一键状态，按当前时间范围显示。
+              合并司机打卡完成记录和一键状态，按单日显示。
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={timelineDriverId || "none"} onValueChange={(value) => setTimelineDriverId(value === "none" ? "" : value)}>
               <SelectTrigger className="h-9 w-[160px]">
                 <SelectValue placeholder="选择司机" />
@@ -529,9 +553,13 @@ export function ReportsPage() {
                 )}
               </SelectContent>
             </Select>
-            <Badge variant="outline" className="text-[10px]">
-              {startISO === todayStr ? "今天" : `${startISO} 至 ${todayStr}`}
-            </Badge>
+            <input
+              type="date"
+              value={timelineDate}
+              onChange={(event) => setTimelineDate(event.target.value)}
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+            />
+            <span className="text-xs text-muted-foreground">任务多时左右滑动</span>
           </div>
         </div>
 
@@ -743,7 +771,7 @@ function DriverTimelineStrip({
           <div key={item.id} className="flex items-center gap-2">
             <div
               className={cn(
-                "w-[210px] rounded-lg border p-3 shadow-sm",
+                "w-[180px] rounded-lg border p-3 shadow-sm",
                 item.kind === "activity"
                   ? "border-amber-200 bg-amber-50/70"
                   : "border-emerald-200 bg-emerald-50/70",
@@ -801,7 +829,7 @@ function buildDriverTimeline(driver: Driver, logs: DriverActivityLog[], steps: R
       id: `step-${step.id}`,
       kind: "step" as const,
       time: step.completed_at!,
-      label: `完成 ${stepLabel(step)}`,
+      label: `完成 ${timelineStepActionLabel(step)}`,
       detail: stepAddress(step),
     }));
 
@@ -824,9 +852,26 @@ function activityLabel(type: string) {
   return labels[type] ?? type;
 }
 
+function timelineStepActionLabel(step: ReportStep) {
+  const binText = step.orders?.bin_size ? `${step.orders.bin_size}YD 垃圾桶` : step.orders?.bin_type || "垃圾桶";
+  const orderType = step.orders?.type || "";
+  const stepType = step.step_type || "";
+
+  if (stepType.includes("dump")) return "倒垃圾";
+  if (stepType === "depot_pickup") return `取 ${binText}`;
+  if (stepType === "customer_pickup" || stepType === "pickup_bin" || stepType === "pickup" || orderType === "pickup") {
+    return `收 ${binText}`;
+  }
+  if (stepType.includes("swap") || orderType === "swap") return `换 ${binText}`;
+  if (stepType.includes("delivery") || stepType.includes("drop") || orderType === "delivery") return `送 ${binText}`;
+  if (stepType.includes("load")) return "装料";
+  if (stepType.includes("unload")) return "送料";
+  return STEP_TYPE_LABELS[stepType] || stepType || "任务";
+}
+
 function formatTimelineTime(value: string) {
   const date = new Date(value);
-  return date.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function SlowReasonEditor({
