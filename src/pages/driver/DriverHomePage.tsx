@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Lock, CheckCircle2, ArrowRight, LogOut, Truck, MapPin, Download, Share2, X, Clock, Coffee, Fuel, Car, AlertTriangle, Utensils, TimerReset } from "lucide-react";
+import { Lock, CheckCircle2, ArrowRight, LogOut, Truck, MapPin, Download, Share2, X, Clock, Coffee, Car, Utensils, TimerReset } from "lucide-react";
 import { STEP_TYPE_EMOJI, todayISO, typeMeta } from "@/lib/business";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -57,6 +57,7 @@ export function DriverHomePage() {
   const { canInstall, isInstalled, isIOS, promptInstall } = usePWA();
   const [dismissInstallHint, setDismissInstallHint] = useState(false);
   const [languageOverride, setLanguageOverride] = useState<DriverLanguage | null>(() => getStoredDriverLanguage());
+  const [showActivityMenu, setShowActivityMenu] = useState(false);
   const lang = languageOverride ?? getDriverLanguage(profile);
   const t = driverText[lang];
 
@@ -181,6 +182,7 @@ export function DriverHomePage() {
     onSuccess: (_result, activityType) => {
       const label = activityOptions.find((option) => option.value === activityType)?.label ?? activityType;
       toast.success(`${lang === "en" ? "Recorded" : "已记录"}: ${label}`);
+      setShowActivityMenu(false);
       qc.invalidateQueries({ queryKey: ["driver-activity-logs"] });
     },
     onError: (error: Error) => toast.error(error.message),
@@ -237,6 +239,43 @@ export function DriverHomePage() {
         </Button>
       </header>
 
+      <div className="fixed bottom-24 left-3 z-30 flex items-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          className="h-11 w-11 rounded-full p-0 shadow-lg"
+          aria-label={lang === "en" ? "Quick status" : "快速状态"}
+          onClick={() => setShowActivityMenu((open) => !open)}
+        >
+          <Clock className="h-5 w-5" />
+        </Button>
+        {showActivityMenu ? (
+          <div className="w-44 rounded-2xl border bg-card p-2 shadow-xl">
+            <div className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">
+              {lang === "en" ? "Quick status" : "快速状态"}
+            </div>
+            <div className="space-y-1">
+              {activityOptions.map((option) => {
+                const Icon = option.icon;
+                return (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    variant="ghost"
+                    className="h-10 w-full justify-start gap-2 rounded-xl text-sm"
+                    disabled={logActivity.isPending || !driverId}
+                    onClick={() => logActivity.mutate(option.value)}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       <div className="px-4 pt-5 space-y-5">
         {!isInstalled && !dismissInstallHint && (
           <div className="bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 flex items-start gap-3 shadow-sm relative overflow-hidden">
@@ -290,33 +329,6 @@ export function DriverHomePage() {
                 onChange={(e) => setDate(e.target.value)}
                 className="h-8 px-2.5 rounded-md border bg-background text-sm font-medium focus:ring-2 focus:ring-primary/20 outline-none"
               />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-card rounded-2xl border shadow-sm overflow-hidden">
-          <div className="p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="font-bold text-foreground">{lang === "en" ? "Quick status" : "快速状态"}</div>
-              <div className="text-xs text-muted-foreground">{lang === "en" ? "Tap once to record" : "点一下记录"}</div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {activityOptions.map((option) => {
-                const Icon = option.icon;
-                return (
-                  <Button
-                    key={option.value}
-                    type="button"
-                    variant="outline"
-                    className="h-11 justify-start gap-2 rounded-xl text-sm"
-                    disabled={logActivity.isPending || !driverId}
-                    onClick={() => logActivity.mutate(option.value)}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {option.label}
-                  </Button>
-                );
-              })}
             </div>
           </div>
         </div>
@@ -526,13 +538,9 @@ function formatStepFinishTime(etaIso: string, step: StepRow) {
 function getDriverActivityOptions(lang: DriverLanguage) {
   const zh = lang === "zh";
   return [
-    { value: "lunch", label: zh ? "吃饭" : "Lunch", icon: Utensils },
     { value: "waiting_customer", label: zh ? "等客户" : "Waiting customer", icon: Coffee },
     { value: "waiting_car_move", label: zh ? "等挪车" : "Waiting car move", icon: Car },
+    { value: "lunch", label: zh ? "吃饭" : "Lunch", icon: Utensils },
     { value: "traffic", label: zh ? "堵车" : "Traffic", icon: TimerReset },
-    { value: "dump_queue", label: zh ? "倒场排队" : "Dump queue", icon: Clock },
-    { value: "fuel", label: zh ? "加油" : "Fuel", icon: Fuel },
-    { value: "vehicle_issue", label: zh ? "车辆问题" : "Vehicle issue", icon: AlertTriangle },
-    { value: "other", label: zh ? "其他" : "Other", icon: MapPin },
   ];
 }
