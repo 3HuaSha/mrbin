@@ -70,6 +70,13 @@ type SavedEtaRow = {
   payload: Record<string, unknown> | null;
 };
 
+type DriverActivityLog = {
+  id: string;
+  driver_id: string;
+  activity_type: string;
+  created_at: string;
+};
+
 export function FleetMapPage() {
   const initialDate = todayISO();
   const qc = useQueryClient();
@@ -124,6 +131,33 @@ export function FleetMapPage() {
   });
 
   // 转换 assignments 格式以匹配原有逻辑
+  const { data: recentDriverActivities = [] } = useQuery({
+    queryKey: ["recent-driver-activity-logs", date],
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000).toISOString();
+      const { data, error } = await (supabase.from as any)("driver_activity_logs")
+        .select("id,driver_id,activity_type,created_at")
+        .eq("scheduled_date", date)
+        .gte("created_at", fiveMinutesAgo)
+        .order("created_at", { ascending: false });
+      if (error?.code === "42P01" || error?.code === "42501") return [];
+      if (error) throw error;
+      return (data ?? []) as DriverActivityLog[];
+    },
+  });
+
+  const recentActivityByDriverId = useMemo(() => {
+    const result = new Map<string, DriverActivityLog>();
+    const fiveMinutesAgo = Date.now() - 5 * 60_000;
+    for (const activity of recentDriverActivities) {
+      if (new Date(activity.created_at).getTime() < fiveMinutesAgo) continue;
+      if (!result.has(activity.driver_id)) result.set(activity.driver_id, activity);
+    }
+    return result;
+  }, [recentDriverActivities]);
+
   const serverAssignments = useMemo(() => {
     return serverAssignmentsData.map(a => ({
       id: a.id,
@@ -1317,6 +1351,7 @@ export function FleetMapPage() {
               const etaRange = execution?.etaRange ?? null;
               const hasEta = !!execution?.driverETA;
               const isLateRisk = nextEta?.status === "OK" && etaRange?.risk;
+              const recentActivity = recentActivityByDriverId.get(d.id);
               
               return (
                 <div
@@ -1361,6 +1396,11 @@ export function FleetMapPage() {
                       <div className="font-semibold text-sm flex items-center gap-2 min-w-0">
                         {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0"/> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0"/>}
                         <span className="truncate">{d.name}</span>
+                        {recentActivity && (
+                          <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                            {driverActivityLabel(recentActivity.activity_type)}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                       <Badge variant={isLateRisk ? "destructive" : hasEta ? "default" : "secondary"} className="text-[10px]">
@@ -2145,6 +2185,16 @@ function formatShortTime(date: Date) {
     minute: "2-digit",
     hour12: false,
   });
+}
+
+function driverActivityLabel(type: string) {
+  const labels: Record<string, string> = {
+    waiting_customer: "等客户",
+    waiting_car_move: "等挪车",
+    lunch: "吃饭",
+    traffic: "堵车",
+  };
+  return labels[type] ?? type;
 }
 
 function DropIndicator({

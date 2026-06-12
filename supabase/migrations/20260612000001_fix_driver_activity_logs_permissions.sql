@@ -21,5 +21,3 @@ FOR ALL USING (true) WITH CHECK (true);
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.driver_activity_logs TO authenticated;
-
-COMMENT ON TABLE public.driver_activity_logs IS 'One-tap driver status/activity events such as lunch, waiting customer, traffic, fuel, or vehicle issue.';
