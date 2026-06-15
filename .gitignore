@@ -35,4 +35,12 @@ dist-ssr
 .env
 .env.local
 .env.*
+!.env.example
+
+# Local imports / scratch output
+*.csv
+temp*.txt
+temp*.tsx
+__pycache__/
+*.pyc
 

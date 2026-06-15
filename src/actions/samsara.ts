@@ -5,7 +5,10 @@ import { createServerFn } from "@tanstack/react-start";
  */
 export const fetchSamsaraData = createServerFn({ method: "GET" })
   .handler(async () => {
-    const SAMSARA_TOKEN = (process.env.VITE_SAMSARA_TOKEN || 'samsara_api_xuwBoWcChtpqYPlGqEhhpmXncEhIke') as string;
+    const SAMSARA_TOKEN = process.env.VITE_SAMSARA_TOKEN;
+    if (!SAMSARA_TOKEN) {
+      throw new Error("Missing VITE_SAMSARA_TOKEN");
+    }
     const headers = { 'Authorization': `Bearer ${SAMSARA_TOKEN}`, 'Accept': 'application/json' };
 
     try {
