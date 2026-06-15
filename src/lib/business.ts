@@ -79,7 +79,7 @@ export function formatPhone(raw: string): string {
 }
 
 export function todayISO(): string {
-  const demoDate = import.meta.env.VITE_DEMO_DATE;
+  const demoDate = import.meta.env.VITE_DEMO_DATE || "2026-06-02";
   if (/^\d{4}-\d{2}-\d{2}$/.test(demoDate || "")) return demoDate;
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
