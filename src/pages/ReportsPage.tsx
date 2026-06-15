@@ -28,7 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
 function rangeStart(period: "day" | "week" | "month") {
-  const d = new Date();
+  const d = new Date(`${todayISO()}T00:00:00`);
   d.setHours(0, 0, 0, 0);
   if (period === "week") d.setDate(d.getDate() - 6);
   if (period === "month") d.setDate(d.getDate() - 29);

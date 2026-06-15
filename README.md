@@ -79,6 +79,8 @@ Copy `.env.example` and fill in the required keys.
 cp .env.example .env
 ```
 
+For a stable demo, `VITE_DEMO_DATE` can be set to a fixed operating day. The example file uses `2026-06-02`.
+
 ```bash
 npm install
 npm run dev

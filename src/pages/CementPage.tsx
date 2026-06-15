@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { todayISO } from "@/lib/business";
 
 type CementStatus = "pending" | "scheduled" | "in_progress" | "delivered" | "completed" | "cancelled";
 type MaterialStatus = "pending" | "ordered" | "scheduled" | "delivered" | "completed" | "cancelled";
@@ -79,8 +80,6 @@ type CementVehicle = {
   name: string;
   plate: string | null;
 };
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
 
 const CEMENT_MATERIAL_DEFAULTS = {
   "Concrete Sand": {

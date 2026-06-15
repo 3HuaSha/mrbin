@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchSamsaraVehicles } from "@/lib/samsara-api";
 import { supabase } from "@/integrations/supabase/client";
 import { MANUAL_STEP_LOCATIONS, LOCATION_TYPE_NAMES } from "@/lib/manual-step-locations";
+import { todayISO } from "@/lib/business";
 
 const KENNEDY_DEPOT = { lat: 43.821044, lng: -79.304742, label: "Kennedy Depot" };
 
@@ -85,7 +86,7 @@ export function DispatchMapWidget({
   // 使用 localStorage 持久化, 当天内切换页面/刷新都不会重新调用
   const geocodeCacheRef = useRef<Record<string, { lat: number; lng: number }>>((() => {
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       const raw = localStorage.getItem('geocode-cache');
       if (raw) {
         const parsed = JSON.parse(raw);
@@ -102,7 +103,7 @@ export function DispatchMapWidget({
   // 写入 localStorage 的辅助函数
   const saveGeocodeCache = (cache: Record<string, { lat: number; lng: number }>) => {
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       localStorage.setItem('geocode-cache', JSON.stringify({ _date: today, ...cache }));
     } catch {}
   };

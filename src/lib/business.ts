@@ -79,12 +79,14 @@ export function formatPhone(raw: string): string {
 }
 
 export function todayISO(): string {
+  const demoDate = import.meta.env.VITE_DEMO_DATE;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(demoDate || "")) return demoDate;
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export function tomorrowISO(): string {
-  const d = new Date();
+  const d = new Date(`${todayISO()}T00:00:00`);
   d.setDate(d.getDate() + 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

@@ -573,7 +573,7 @@ export function FleetMapPage() {
     // 获取 geocode 缓存
     let geocodeCache: Record<string, { lat: number; lng: number }> = {};
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       const raw = localStorage.getItem('geocode-cache');
       if (raw) {
         const parsed = JSON.parse(raw);
@@ -652,7 +652,7 @@ export function FleetMapPage() {
 
     let geocodeCache: Record<string, { lat: number; lng: number }> = {};
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       const raw = localStorage.getItem('geocode-cache');
       if (raw) {
         const parsed = JSON.parse(raw);
